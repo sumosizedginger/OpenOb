@@ -201,7 +201,7 @@ Updated with veteran lore.`;
       const postDoc = postDocs.find((d) => d.path === preDoc.path);
       expect(postDoc).toBeDefined();
       expect(postDoc!.title).toBe(preDoc.title);
-      expect(postDoc!.versionHash).toBe(preDoc.versionHash);
+      expect(postDoc!.sourceHash).toBe(preDoc.sourceHash);
       expect(postDoc!.tags.sort()).toEqual(preDoc.tags.sort());
       expect(postDoc!.headings.length).toBe(preDoc.headings.length);
       expect(postDoc!.links.length).toBe(preDoc.links.length);
