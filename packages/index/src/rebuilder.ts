@@ -38,6 +38,8 @@ export async function rebuildVaultIndex(
     try {
       const snapshot = await storage.read(entry.path);
       const parsed = await parser.parse(entry.path, snapshot.content, snapshot.version.hash);
+      (parsed as any).modifiedAt = snapshot.version.modifiedAt;
+      (parsed as any).size = snapshot.version.size;
       parsedDocs.push(parsed);
     } catch (err) {
       console.warn(`Failed to parse file during rebuild: "${entry.path}"`, err);

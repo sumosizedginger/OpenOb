@@ -94,6 +94,13 @@ CREATE INDEX IF NOT EXISTS idx_aliases_doc ON aliases(doc_id);
 CREATE INDEX IF NOT EXISTS idx_docs_path ON documents(path);
 `;
 
+export interface SourceDocumentManifest {
+  readonly path: string;
+  readonly hash: string;
+  readonly modifiedAt: number;
+  readonly size: number;
+}
+
 /**
  * SQLite-backed implementation of DocumentIndex & SearchEngine.
  * 100% disposable and rebuildable from canonical markdown files (D-002, D-013).
@@ -123,6 +130,36 @@ export class SqliteDocumentIndex implements DocumentIndex {
     this.db.close();
   }
 
+  /**
+   * Returns metadata manifest for all indexed documents for startup reconciliation.
+   */
+  async getSourceManifest(): Promise<SourceDocumentManifest[]> {
+    const stmt = this.db.prepare('SELECT path, hash, modified_at, size FROM documents');
+    const results: SourceDocumentManifest[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as any;
+      results.push({
+        path: row.path,
+        hash: row.hash,
+        modifiedAt: Number(row.modified_at),
+        size: Number(row.size),
+      });
+    }
+    stmt.free();
+    return results;
+  }
+
+  /**
+   * Updates filesystem stat metadata without requiring full re-parse.
+   */
+  async setSourceMetadata(path: string, modifiedAt: number, size: number): Promise<void> {
+    this.safeRun('UPDATE documents SET modified_at = ?, size = ? WHERE path = ?', [
+      modifiedAt,
+      size,
+      path,
+    ]);
+  }
+
   private safeBind(stmt: any, params: any[]): void {
     const safeParams = params.map((p) => (p === undefined ? null : p));
     stmt.bind(safeParams);
@@ -150,10 +187,16 @@ export class SqliteDocumentIndex implements DocumentIndex {
     updateStmt.free();
   }
 
-  async upsert(doc: ParsedDocument): Promise<void> {
+  async upsert(
+    doc: ParsedDocument,
+    metadata?: { modifiedAt?: number; size?: number }
+  ): Promise<void> {
     const hash = doc.sourceHash || (doc as any).hash || '';
-    const modifiedAt = (doc as any).modifiedAt ?? 0;
-    const size = (doc as any).size ?? doc.textContent.length;
+    const modifiedAt = metadata?.modifiedAt ?? (doc as any).modifiedAt ?? 0;
+    const size =
+      metadata?.size ??
+      (doc as any).size ??
+      (typeof doc.textContent === 'string' ? new TextEncoder().encode(doc.textContent).length : 0);
     const lineCount = doc.lineCount ?? doc.textContent.split(/\r?\n/).length;
 
     this.db.run('BEGIN TRANSACTION');

@@ -27,10 +27,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify Package Boundaries
+      - name: Verify Package Boundaries & Security Invariants
         run: |
           echo "Checking for illegal cross-package internal imports..."
           ! grep -rn --include="*.ts" --include="*.tsx" "@okw/[a-z-]*/src" packages/ apps/
+          echo "Checking for forbidden dangerouslySetInnerHTML usages..."
+          ! grep -rn --include="*.ts" --include="*.tsx" "dangerouslySetInnerHTML" apps/ packages/
 
       - name: Typecheck
         run: npm run typecheck

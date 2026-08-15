@@ -236,9 +236,9 @@ Scenario: User opens a note originating from Windows tooling containing a leadin
 
 Mitigation: Decode with `{ ignoreBOM: true }`, preserve the leading BOM in the editor buffer and text representation, and record `hasBom` flag in snapshot metadata.
 
-### F-035 Sanitizer Entity Encoding and Nested Tag Bypasses
+### F-035 False Security Boundary via Regex Sanitizer
 
-Scenario: HTML sanitizer regexes fail to account for HTML entity-encoded attribute names (e.g. `on&#101;rror=`), nested script tag constructions (`<scr<script>ipt>`), or CSS `url(javascript:...)`, resulting in latent XSS vulnerabilities if raw HTML rendering is introduced.
+Scenario: Relying on regex-based HTML sanitizers creates a false sense of security while leaving entity-encoded attributes, nested tag constructions, or CSS URLs unescaped.
 
-Mitigation: Never render untrusted raw HTML in the application; enforce React JSX element generation with text escaping, and maintain strict attack-corpus unit tests.
+Mitigation: Delete the regex sanitizer. Render raw HTML in Markdown strictly as plain escaped text via React JSX element rendering. Prohibit `dangerouslySetInnerHTML` in CI. If raw HTML interpretation is ever introduced in the future, require an established parser-based sanitizer with an explicit allowlist.
 

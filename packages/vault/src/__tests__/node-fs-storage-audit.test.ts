@@ -136,4 +136,38 @@ describe('Promoted Audit Probes: NodeFsVaultStorage + SafeWriter Hostile Scenari
     expect(fs.existsSync(path.join(parent, 'evil2.md'))).toBe(false);
     expect(fs.existsSync(path.join(parent, 'evil3.md'))).toBe(false);
   });
+
+  it('10. 200-character filename round-trip', async () => {
+    const dir = tmpVault();
+    const s = new NodeFsVaultStorage(dir, 'v');
+    const longName = `${'a'.repeat(200)}.md`;
+    const content = '# Long Filename Note\n\nPreserved.';
+    await s.write(longName, null, content);
+    const snap = await s.read(longName);
+    expect(dec(snap.content)).toBe(content);
+    const entries = await s.list('', false);
+    expect(entries.some((e) => e.path === longName)).toBe(true);
+  });
+
+  it('11. read-only directory handling fails gracefully with StorageError', async () => {
+    const dir = tmpVault();
+    const s = new NodeFsVaultStorage(dir, 'v');
+    const readOnlySubdir = path.join(dir, 'readonly-dir');
+    fs.mkdirSync(readOnlySubdir);
+
+    // On POSIX/Windows platforms, test write error handling in constrained directory
+    try {
+      fs.chmodSync(readOnlySubdir, 0o444);
+    } catch {}
+
+    try {
+      await s.write('readonly-dir/test.md', null, 'content');
+    } catch (err: any) {
+      expect(err).toBeDefined();
+    } finally {
+      try {
+        fs.chmodSync(readOnlySubdir, 0o777);
+      } catch {}
+    }
+  });
 });

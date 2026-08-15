@@ -60,8 +60,8 @@ export class DesktopVaultRuntime {
       try {
         const existingBytes = fs.readFileSync(databasePath);
         index = await SqliteDocumentIndex.create(existingBytes);
-        const docs = await index.getAll();
-        if (docs.length > 0) {
+        const manifest = await index.getSourceManifest();
+        if (manifest.length > 0) {
           loadedFromDb = true;
         }
       } catch (err) {
@@ -103,14 +103,107 @@ export class DesktopVaultRuntime {
       if (this.databasePath) {
         await this.checkpoint();
       }
+    } else {
+      // 2. Reconcile persistent SQLite against canonical Markdown files before starting watcher
+      await this.reconcile();
     }
 
-    // 2. Attach filesystem watcher to sync external disk changes to SQLite index
+    // 3. Attach filesystem watcher to sync external disk changes to SQLite index
     this.unsubscribeWatcher = this.watcher.addListener(async (event: WatcherEvent) => {
       await this.handleWatcherEvent(event);
     });
 
+    // 4. Start filesystem watcher only AFTER startup reconciliation completes
     await this.watcher.start();
+  }
+
+  /**
+   * Reconciles SQLite derived index against canonical Markdown files on startup.
+   * Canonical Markdown is authoritative; SQLite never overwrites Markdown.
+   */
+  async reconcile(): Promise<void> {
+    const entries = await this.storage.list('', true);
+    const diskFiles = entries.filter(
+      (e) => !e.isDirectory && (e.path.endsWith('.md') || e.path.endsWith('.markdown'))
+    );
+    const diskMap = new Map(diskFiles.map((e) => [e.path, e]));
+
+    const dbManifest = await this.index.getSourceManifest();
+    const dbMap = new Map(dbManifest.map((m) => [m.path, m]));
+
+    let changed = false;
+
+    // 1. disk paths − DB paths => new files added offline: read, parse, index
+    for (const [diskPath] of diskMap) {
+      if (!dbMap.has(diskPath)) {
+        try {
+          const snapshot = await this.storage.read(diskPath);
+          const parsed = await this.parser.parse(
+            diskPath,
+            snapshot.content,
+            snapshot.version.hash
+          );
+          await this.index.upsert(parsed, {
+            modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
+            size: snapshot.size ?? snapshot.version.size ?? 0,
+          });
+          changed = true;
+        } catch (err) {
+          console.warn(`[DesktopVaultRuntime] Failed to index offline added file "${diskPath}":`, err);
+        }
+      }
+    }
+
+    // 2. DB paths − disk paths => files deleted offline: remove from index
+    for (const [dbPath] of dbMap) {
+      if (!diskMap.has(dbPath)) {
+        try {
+          await this.index.remove(dbPath);
+          changed = true;
+        } catch (err) {
+          console.warn(`[DesktopVaultRuntime] Failed to remove offline deleted file "${dbPath}":`, err);
+        }
+      }
+    }
+
+    // 3. paths existing in both => compare persisted size/mtime
+    for (const [pathKey, manifest] of dbMap) {
+      const diskEntry = diskMap.get(pathKey);
+      if (diskEntry) {
+        const statChanged =
+          diskEntry.size !== manifest.size || diskEntry.modifiedAt !== manifest.modifiedAt;
+        if (statChanged) {
+          try {
+            const snapshot = await this.storage.read(pathKey);
+            const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
+            const sz = snapshot.size ?? snapshot.version.size ?? 0;
+            if (snapshot.version.hash !== manifest.hash) {
+              // Content changed: reparse and upsert
+              const parsed = await this.parser.parse(
+                pathKey,
+                snapshot.content,
+                snapshot.version.hash
+              );
+              await this.index.upsert(parsed, {
+                modifiedAt: mtime,
+                size: sz,
+              });
+              changed = true;
+            } else {
+              // Content hash unchanged: update stat metadata only
+              await this.index.setSourceMetadata(pathKey, mtime, sz);
+              changed = true;
+            }
+          } catch (err) {
+            console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
+          }
+        }
+      }
+    }
+
+    if (changed && this.databasePath) {
+      await this.checkpoint();
+    }
   }
 
   private async handleWatcherEvent(event: WatcherEvent): Promise<void> {
@@ -145,7 +238,10 @@ export class DesktopVaultRuntime {
             snapshot.content,
             snapshot.version.hash
           );
-          await this.index.upsert(parsed);
+          await this.index.upsert(parsed, {
+            modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
+            size: snapshot.size ?? snapshot.version.size ?? 0,
+          });
           this.scheduleCheckpoint();
         }
       }
@@ -165,18 +261,23 @@ export class DesktopVaultRuntime {
   }
 
   /**
-   * Checkpoints SQLite in-memory database to persistent disk file using atomic swap (P1-SQLITE-001).
+   * Checkpoints SQLite in-memory database to persistent disk file using asynchronous atomic swap (P1-SQLITE-001).
    */
   async checkpoint(): Promise<void> {
     if (!this.databasePath) return;
+    const tmpPath = `${this.databasePath}.okw.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
     try {
       const parentDir = path.dirname(this.databasePath);
-      fs.mkdirSync(parentDir, { recursive: true });
+      await fs.promises.mkdir(parentDir, { recursive: true });
       const bytes = this.index.export();
-      const tmpPath = `${this.databasePath}.okw.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-      fs.writeFileSync(tmpPath, bytes);
-      fs.renameSync(tmpPath, this.databasePath);
+      await fs.promises.writeFile(tmpPath, bytes);
+      await fs.promises.rename(tmpPath, this.databasePath);
     } catch (err) {
+      try {
+        if (fs.existsSync(tmpPath)) {
+          await fs.promises.unlink(tmpPath);
+        }
+      } catch {}
       // Checkpoint failures must never crash or block canonical file operations
       console.error('[DesktopVaultRuntime] Checkpoint failure:', err);
     }

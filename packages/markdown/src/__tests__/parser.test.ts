@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseFrontmatter } from '../frontmatter.js';
 import { DefaultDocumentParser } from '../parser.js';
-import { sanitizeHtml } from '../sanitizer.js';
 import { extractWikilinks } from '../wikilinks.js';
 
 describe('Markdown Parser & Wikilinks', () => {
@@ -86,17 +85,5 @@ Check [[Algorithms#Shor's Algorithm]] for details.
     expect(doc.tags).toContain('computing');
     expect(doc.tags).toContain('quantum/entangled');
     expect(doc.wordCount).toBeGreaterThan(30);
-  });
-
-  it('sanitizes dangerous HTML in previews (SECURITY SEC-01)', () => {
-    const dangerous = `<p>Safe text</p><script>alert('pwned')</script><img src="x" onerror="alert(1)" /><a href="javascript:steal()">Click</a><a href=javascript:alert(1)>Unquoted</a><a href="&#106;avascript:alert(2)">Entity Encoded</a><a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Data URI</a>`;
-    const clean = sanitizeHtml(dangerous);
-    expect(clean).not.toContain('<script>');
-    expect(clean).not.toContain('onerror');
-    expect(clean).not.toContain('javascript:');
-    expect(clean).not.toContain('&#106;avascript:');
-    expect(clean).not.toContain('data:text/html');
-    expect(clean).toContain('<p>Safe text</p>');
-    expect(clean).toContain('href="#"');
   });
 });

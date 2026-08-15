@@ -51,9 +51,13 @@ Local endpoints such as Ollama/LM Studio may be contacted directly when the user
 
 Do not automatically scan arbitrary localhost ports.
 
-## Markdown Rendering
+## Markdown Rendering & HTML Policy
 
-Rendered Markdown must be safe from XSS. The application renders Markdown structured elements as native React JSX components with text escaping rather than executing raw HTML or `dangerouslySetInnerHTML`.
+Current policy: raw HTML in Markdown is not interpreted by the preview renderer. It is rendered strictly as plain escaped text.
+
+OpenOb does not use a regex HTML sanitizer. All Markdown preview rendering maps directly to native React JSX elements with standard text escaping. The use of `dangerouslySetInnerHTML` is prohibited across the codebase by static analysis and tests in CI.
+
+If raw HTML support is introduced later, use a mature parser-based sanitizer with an explicit allowlist. Do not resurrect regex sanitization.
 
 Treat:
 

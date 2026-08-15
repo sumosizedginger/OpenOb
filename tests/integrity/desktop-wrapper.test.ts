@@ -224,4 +224,94 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     expect(docs4[0].path).toBe('Note1.md');
     await runtime4.close();
   });
+
+  it('DesktopVaultRuntime: startup reconciliation synchronizes offline file additions, deletions, and edits', async () => {
+    const dbPath = path.join(testVaultDir, '.okw', 'index.db');
+
+    // 1. Initial state: FileA and FileB
+    fs.writeFileSync(path.join(testVaultDir, 'FileA.md'), '# File A\n\nInitial version A.', 'utf8');
+    fs.writeFileSync(path.join(testVaultDir, 'FileB.md'), '# File B\n\nUniqueKeywordForFileB.', 'utf8');
+
+    const runtime1 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const manifest1 = await runtime1.index.getSourceManifest();
+    expect(manifest1.length).toBe(2);
+    await runtime1.close();
+
+    // 2. Perform offline modifications while app is closed:
+    // (a) Modify FileA externally (content and size change)
+    fs.writeFileSync(path.join(testVaultDir, 'FileA.md'), '# File A Modified\n\nExternal offline edit with new content.', 'utf8');
+
+    // (b) Add FileC externally (new file)
+    fs.writeFileSync(path.join(testVaultDir, 'FileC.md'), '# File C\n\nBrand new file created offline.', 'utf8');
+
+    // (c) Delete FileB externally (deleted file)
+    fs.unlinkSync(path.join(testVaultDir, 'FileB.md'));
+
+    // 3. Restart runtime: startup reconciliation must run BEFORE watcher starts
+    const runtime2 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    // Verify index immediately reflects all offline changes without full rebuild:
+    const docs = await runtime2.index.getAll();
+    const docPaths = docs.map((d: any) => d.path).sort();
+    expect(docPaths).toEqual(['FileA.md', 'FileC.md']);
+
+    // Check search reflects modified content in FileA
+    const searchResA = await runtime2.index.query({ query: 'Modified' });
+    expect(searchResA.length).toBe(1);
+    expect(searchResA[0].path).toBe('FileA.md');
+
+    // Check search reflects new content in FileC
+    const searchResC = await runtime2.index.query({ query: 'Brand' });
+    expect(searchResC.length).toBe(1);
+    expect(searchResC[0].path).toBe('FileC.md');
+
+    // Check FileB is completely gone from index and search
+    const searchResB = await runtime2.index.query({ query: 'UniqueKeywordForFileB' });
+    expect(searchResB.length).toBe(0);
+
+    // 4. Test offline edit where length stays the same but content changes
+    await runtime2.close();
+
+    // Change FileC with exact same byte length
+    fs.writeFileSync(path.join(testVaultDir, 'FileC.md'), '# File C\n\nBrand new file REPLACED offline.', 'utf8');
+
+    const runtime3 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const searchResReplaced = await runtime3.index.query({ query: 'REPLACED' });
+    expect(searchResReplaced.length).toBe(1);
+    expect(searchResReplaced[0].path).toBe('FileC.md');
+
+    // 5. Test mtime touch with same content hash (updates stat metadata only)
+    const snapBefore = (await runtime3.index.getSourceManifest()).find((m: any) => m.path === 'FileC.md')!;
+    await runtime3.close();
+    
+    // Update mtime on disk without changing content
+    const now = new Date(Date.now() + 5000);
+    fs.utimesSync(path.join(testVaultDir, 'FileC.md'), now, now);
+
+    const runtime4 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const snapAfter = (await runtime4.index.getSourceManifest()).find((m: any) => m.path === 'FileC.md')!;
+    expect(snapAfter.hash).toBe(snapBefore.hash);
+    expect(snapAfter.modifiedAt).toBeGreaterThanOrEqual(snapBefore.modifiedAt);
+
+    await runtime4.close();
+  });
 });
