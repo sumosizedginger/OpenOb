@@ -307,6 +307,19 @@ export class MemoryVaultStorage implements VaultStorage {
       const fromPrefix = `${from}/`;
       const toPrefix = `${to}/`;
 
+      // Move all descendant subdirectories in this.directories
+      const subDirsToMove: string[] = [];
+      for (const d of this.directories) {
+        if (d.startsWith(fromPrefix)) {
+          subDirsToMove.push(d);
+        }
+      }
+      for (const d of subDirsToMove) {
+        this.directories.delete(d);
+        const newDir = toPrefix + d.slice(fromPrefix.length);
+        this.directories.add(newDir);
+      }
+
       const movedFiles: Array<[VaultPath, MemoryFileEntry]> = [];
       for (const [path, file] of this.files.entries()) {
         if (path.startsWith(fromPrefix)) {

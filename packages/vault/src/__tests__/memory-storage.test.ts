@@ -53,6 +53,25 @@ describe('MemoryVaultStorage', () => {
     expect(await vault.readText('new/path.md')).toBe('Content');
   });
 
+  it('moves nested directories without leaving ghost folders', async () => {
+    const vault = new MemoryVaultStorage();
+    await vault.createFolder('projects/archive/2026');
+    await vault.write('projects/archive/2026/report.md', null, '# Report 2026');
+
+    // Move 'projects/archive' to 'legacy/archive'
+    await vault.move('projects/archive', 'legacy/archive');
+
+    const listOld = await vault.list('projects');
+    expect(listOld.map((e) => e.name)).not.toContain('archive');
+
+    const listNew = await vault.list('legacy', true);
+    expect(listNew.map((e) => e.path)).toEqual([
+      'legacy/archive',
+      'legacy/archive/2026',
+      'legacy/archive/2026/report.md',
+    ]);
+  });
+
   it('throws NotFoundError for non-existent reads', async () => {
     const vault = new MemoryVaultStorage();
     await expect(vault.read('nonexistent.md')).rejects.toThrow(NotFoundError);
