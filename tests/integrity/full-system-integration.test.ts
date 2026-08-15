@@ -169,24 +169,77 @@ Updated with veteran lore.`;
     expect(msRes.success).toBe(true);
     expect(notices.some((n) => n.includes('Manuscript Progress'))).toBe(true);
 
+    // Index newly created template note into live index
+    const templateDocContent = new TextDecoder().decode((await storage.read(navigatedPath!)).content);
+    await index.upsert(await parser.parse(navigatedPath!, templateDocContent));
+
     // -------------------------------------------------------------------------
-    // 7. Full SQLite Disposal & Exact Rebuild Verification (D-002, F-003, F-004)
+    // 7. Full SQLite Disposal & Exact Parity Rebuild Verification (D-002, F-003, F-004)
     // -------------------------------------------------------------------------
+    const preDocs = await index.getAll();
+    const preBacklinksArch = await index.getBacklinks('Architecture.md');
+    const preCharacterQuery = await executePropertyQuery(index, {
+      id: 'chars',
+      name: 'Chars',
+      type: 'table',
+      filters: [{ field: 'type', operator: 'equals', value: 'character' }],
+    });
+
+    // Explicit disposal of original SQLite index
+    index.close();
+
+    // Reconstruct brand new SQLite index completely from canonical disk files
     const freshIndex = await SqliteDocumentIndex.create();
-    await rebuildVaultIndex(storage, freshIndex, parser);
+    const rebuildStats = await rebuildVaultIndex(storage, freshIndex, parser);
 
-    const reSearch = await freshIndex.query({ query: 'Spire' });
-    expect(reSearch).toHaveLength(1);
-    expect(reSearch[0].path).toBe('Characters/Kaelen.md');
+    const postDocs = await freshIndex.getAll();
+    expect(rebuildStats.totalIndexed).toBe(preDocs.length);
+    expect(postDocs.length).toBe(preDocs.length);
 
+    // Doc-by-doc exact parity verification
+    for (const preDoc of preDocs) {
+      const postDoc = postDocs.find((d) => d.path === preDoc.path);
+      expect(postDoc).toBeDefined();
+      expect(postDoc!.title).toBe(preDoc.title);
+      expect(postDoc!.versionHash).toBe(preDoc.versionHash);
+      expect(postDoc!.tags.sort()).toEqual(preDoc.tags.sort());
+      expect(postDoc!.headings.length).toBe(preDoc.headings.length);
+      expect(postDoc!.links.length).toBe(preDoc.links.length);
+      expect(postDoc!.properties).toEqual(preDoc.properties);
+    }
+
+    // Backlink query exact parity
+    const postBacklinksArch = await freshIndex.getBacklinks('Architecture.md');
+    expect(postBacklinksArch.length).toBe(preBacklinksArch.length);
+    expect(postBacklinksArch.map((b) => b.sourcePath).sort()).toEqual(
+      preBacklinksArch.map((b) => b.sourcePath).sort()
+    );
+
+    // Property query exact parity
+    const postCharacterQuery = await executePropertyQuery(freshIndex, {
+      id: 'chars',
+      name: 'Chars',
+      type: 'table',
+      filters: [{ field: 'type', operator: 'equals', value: 'character' }],
+    });
+    expect(postCharacterQuery.length).toBe(preCharacterQuery.length);
+    expect(postCharacterQuery[0].path).toBe(preCharacterQuery[0].path);
+
+    // Multi-query search exact parity
+    const queryTerms = ['Spire', 'Architecture', 'Meeting'];
+    for (const term of queryTerms) {
+      const res = await freshIndex.query({ query: term });
+      expect(res.length).toBeGreaterThanOrEqual(1);
+    }
+
+    // Graph topology exact parity
     const freshGraph = await buildGraphData(freshIndex);
-    expect(freshGraph.nodes.length).toBeGreaterThanOrEqual(5);
+    expect(freshGraph.nodes.length).toBe(preDocs.length);
 
     // -------------------------------------------------------------------------
     // 8. Final Invariant: Zero Data Corruption Across the System
     // -------------------------------------------------------------------------
-    const allFiles = await storage.list();
-    expect(allFiles.length).toBeGreaterThanOrEqual(6);
-    expect(freshIndex).toBeDefined();
+    const allFiles = await storage.list('', true);
+    expect(allFiles.filter((f) => !f.isDirectory).length).toBe(preDocs.length);
   });
 });

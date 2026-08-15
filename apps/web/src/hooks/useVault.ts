@@ -131,6 +131,40 @@ Tracking delivery milestones across the workspace engine.
 - [x] Local & BYOK Cloud AI
 - [x] Sandboxed Plugin SDK & First-Party Extensions
 `,
+  'Characters/Seraphine.md': `---
+title: Seraphine
+type: character
+role: ally
+status: active
+affiliations: [Aegis]
+aliases: [The Scholar]
+tags: [character, worldbuilding]
+---
+
+# Seraphine
+
+## Overview
+A brilliant researcher deciphering ancient cartographic symbols. Close confidante of [[Characters/Kaelen]].
+
+## Research Topics
+- Connected to [[Projects/Quantum Computing]].
+`,
+  'Projects/Quantum Computing.md': `---
+title: Quantum Computing
+type: project
+status: research
+priority: medium
+tags: [project, science]
+---
+
+# Quantum Computing
+
+Exploration of quantum state simulation and topological computing.
+
+## References
+- [[Welcome]]
+- [[Architecture]]
+`,
   'Templates/Meeting.md': `---
 title: {{title}}
 date: {{date}}
