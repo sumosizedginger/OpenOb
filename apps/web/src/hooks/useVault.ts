@@ -430,12 +430,39 @@ export function useVault() {
     return () => clearTimeout(autosaveTimer);
   }, [activeTab?.content, activeTab?.isDirty]);
 
-  // Update a note's frontmatter property (Phase 6 Notion views)
+  // Update a note's frontmatter property (Phase 6 Notion views, P6-3 / P6-4)
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
-    const openTab = openTabs.find((t) => t.path === path);
-    if (openTab) {
-      const snap = openTab.initialSnapshot || (await storage.read(path));
-      const parsed = await parser.parse(path, openTab.content);
+    try {
+      const openTab = openTabs.find((t) => t.path === path);
+      if (openTab) {
+        const snap = openTab.initialSnapshot || (await storage.read(path));
+        const parsed = await parser.parse(path, openTab.content);
+        const currentProps = parsed.properties || {};
+        const newProps = { ...currentProps };
+        if (value === null || value === undefined) {
+          delete newProps[key];
+        } else {
+          newProps[key] = value;
+        }
+        const updated = updateDocumentFrontmatter(openTab.content, newProps);
+
+        // Perform version-checked save first before mutating buffer
+        const saveRes = await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
+
+        // Reconcile tab state (P6-3 & P6-4)
+        openTab.content = updated;
+        openTab.isDirty = false;
+        openTab.initialSnapshot = saveRes.snapshot;
+        setOpenTabs([...openTabs]);
+
+        const newParsed = await parser.parse(path, updated);
+        await index.upsert(newParsed);
+        return;
+      }
+
+      const snap = await storage.read(path);
+      const text = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+      const parsed = await parser.parse(path, text);
       const currentProps = parsed.properties || {};
       const newProps = { ...currentProps };
       if (value === null || value === undefined) {
@@ -443,28 +470,22 @@ export function useVault() {
       } else {
         newProps[key] = value;
       }
-      const updated = updateDocumentFrontmatter(openTab.content, newProps);
-      updateContent(path, updated);
+      const updated = updateDocumentFrontmatter(text, newProps);
       await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
       const newParsed = await parser.parse(path, updated);
       await index.upsert(newParsed);
-      return;
+    } catch (err: any) {
+      if (err?.name === 'ConflictError' || err?.message?.includes('Conflict')) {
+        const freshSnap = await storage.read(path);
+        const diskContent = typeof freshSnap.content === 'string' ? freshSnap.content : new TextDecoder().decode(freshSnap.content);
+        setConflictData({
+          path,
+          diskContent,
+        });
+      } else {
+        console.error('Failed to update note property:', err);
+      }
     }
-
-    const snap = await storage.read(path);
-    const text = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
-    const parsed = await parser.parse(path, text);
-    const currentProps = parsed.properties || {};
-    const newProps = { ...currentProps };
-    if (value === null || value === undefined) {
-      delete newProps[key];
-    } else {
-      newProps[key] = value;
-    }
-    const updated = updateDocumentFrontmatter(text, newProps);
-    await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
-    const newParsed = await parser.parse(path, updated);
-    await index.upsert(newParsed);
   };
 
   // Create a note with predefined frontmatter properties

@@ -223,6 +223,45 @@ const code = 123;
     expect(results[0].properties?.priority).toBe(1);
   });
 
+  it('accurately evaluates date greater_than, less_than, and date sorting (P6-2)', async () => {
+    const index = new MemoryDocumentIndex();
+    const parser = new DefaultDocumentParser();
+
+    const notes = [
+      { path: 'event1.md', text: '---\ntitle: Event 1\ndate: 2026-01-15\n---\nBody 1' },
+      { path: 'event2.md', text: '---\ntitle: Event 2\ndate: 2026-06-01\n---\nBody 2' },
+      { path: 'event3.md', text: '---\ntitle: Event 3\ndate: 2026-12-31\n---\nBody 3' },
+    ];
+
+    for (const n of notes) {
+      await index.upsert(await parser.parse(n.path, n.text));
+    }
+
+    // Filter: date greater_than '2026-05-01'
+    const resAfterMay = await executePropertyQuery(index, {
+      id: 'upcoming',
+      name: 'Upcoming Events',
+      type: 'table',
+      filters: [{ field: 'date', operator: 'greater_than', value: '2026-05-01' }],
+      sorts: [{ field: 'date', direction: 'asc' }],
+    });
+
+    expect(resAfterMay).toHaveLength(2);
+    expect(resAfterMay[0].title).toBe('Event 2');
+    expect(resAfterMay[1].title).toBe('Event 3');
+
+    // Filter: date less_than '2026-06-01'
+    const resBeforeJune = await executePropertyQuery(index, {
+      id: 'past',
+      name: 'Past Events',
+      type: 'table',
+      filters: [{ field: 'date', operator: 'less_than', value: '2026-06-01' }],
+    });
+
+    expect(resBeforeJune).toHaveLength(1);
+    expect(resBeforeJune[0].title).toBe('Event 1');
+  });
+
   it('scales efficiently over 1,000 notes under 30ms performance budget', async () => {
     const index = new MemoryDocumentIndex();
     const parser = new DefaultDocumentParser();

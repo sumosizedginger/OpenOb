@@ -64,8 +64,17 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
   onCreateNoteWithProperties,
 }) => {
   // Current view configuration
-  const [currentView, setCurrentView] = useState<ViewConfig>(DEFAULT_SAVED_VIEWS[0]);
-  const [savedViews, setSavedViews] = useState<SavedView[]>(DEFAULT_SAVED_VIEWS);
+  const [savedViews, setSavedViews] = useState<SavedView[]>(() => {
+    try {
+      const stored = localStorage.getItem('okw_saved_views');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_SAVED_VIEWS;
+  });
+  const [currentView, setCurrentView] = useState<ViewConfig>(() => savedViews[0] || DEFAULT_SAVED_VIEWS[0]);
   const [documents, setDocuments] = useState<ParsedDocument[]>([]);
   const [availableProps, setAvailableProps] = useState<string[]>([]);
 
@@ -173,7 +182,11 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
       updatedAt: Date.now(),
     };
 
-    setSavedViews((prev) => [...prev, newSaved]);
+    const updatedViews = [...savedViews, newSaved];
+    setSavedViews(updatedViews);
+    try {
+      localStorage.setItem('okw_saved_views', JSON.stringify(updatedViews));
+    } catch {}
     setCurrentView(newSaved);
   };
 

@@ -46,17 +46,33 @@ export function matchPropertyFilter(doc: ParsedDocument, filter: PropertyFilter)
       }
       return !String(val ?? '').toLowerCase().includes(String(target ?? '').toLowerCase());
 
-    case 'greater_than':
+    case 'greater_than': {
       if (typeof val === 'number' && typeof target === 'number') {
         return val > target;
       }
+      if (typeof val === 'string' && typeof target === 'string') {
+        const dateVal = Date.parse(val);
+        const dateTarget = Date.parse(target);
+        if (!isNaN(dateVal) && !isNaN(dateTarget)) {
+          return dateVal > dateTarget;
+        }
+      }
       return Number(val) > Number(target);
+    }
 
-    case 'less_than':
+    case 'less_than': {
       if (typeof val === 'number' && typeof target === 'number') {
         return val < target;
       }
+      if (typeof val === 'string' && typeof target === 'string') {
+        const dateVal = Date.parse(val);
+        const dateTarget = Date.parse(target);
+        if (!isNaN(dateVal) && !isNaN(dateTarget)) {
+          return dateVal < dateTarget;
+        }
+      }
       return Number(val) < Number(target);
+    }
 
     case 'is_empty':
       if (val === null || val === undefined || val === '') return true;
@@ -91,6 +107,17 @@ export function sortDocuments(docs: ParsedDocument[], sorts?: PropertySort[]): P
       let cmp = 0;
       if (typeof valA === 'number' && typeof valB === 'number') {
         cmp = valA - valB;
+      } else if (typeof valA === 'string' && typeof valB === 'string') {
+        const dateA = Date.parse(valA);
+        const dateB = Date.parse(valB);
+        if (!isNaN(dateA) && !isNaN(dateB) && valA.includes('-') && valB.includes('-')) {
+          cmp = dateA - dateB;
+        } else {
+          cmp = String(valA).localeCompare(String(valB), undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          });
+        }
       } else {
         cmp = String(valA).localeCompare(String(valB), undefined, {
           numeric: true,
