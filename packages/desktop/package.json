@@ -1,0 +1,24 @@
+{
+  "name": "@okw/desktop",
+  "version": "0.1.0",
+  "description": "Open Knowledge Workspace Desktop Wrapper & Native Shell Architecture",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@okw/core": "workspace:*",
+    "@okw/vault": "workspace:*",
+    "@okw/index": "workspace:*",
+    "@okw/markdown": "workspace:*",
+    "@okw/ai": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7",
+    "@types/node": "^22.13.9"
+  }
+}

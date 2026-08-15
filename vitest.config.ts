@@ -19,6 +19,7 @@ export default defineConfig({
       '@okw/index': path.resolve(__dirname, './packages/index/src'),
       '@okw/ai': path.resolve(__dirname, './packages/ai/src'),
       '@okw/plugin': path.resolve(__dirname, './packages/plugin/src'),
+      '@okw/desktop': path.resolve(__dirname, './packages/desktop/src'),
     },
   },
 });

@@ -101,3 +101,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** The entire Open Knowledge Workspace system across storage, parsing, indexing, search, graph visualization, Notion-like views, Local & Cloud AI, and sandboxed Plugin SDK is consolidated into a single unified architecture. The browser-based Public Alpha utilizes the lightweight `MemoryDocumentIndex` for instant zero-wasm startup, with the SQLite relational engine (`SqliteDocumentIndex`) delivered, integration-tested, and verified for desktop and large-vault scaling. All derived states remain 100% disposable and reconstructible from canonical Markdown files with exact parity. All write mutations enforce optimistic concurrency control, and all third-party and first-party capabilities adhere to strict permission gating and exception containment.
 
 **Reason:** Establishes complete architectural stability, verified zero-data-loss durability, and readiness for real-world dogfooding and public alpha release.
+
+## D-022 Desktop Wrapper, Native Vault Watcher & SQLite Native Scaling
+
+**Decision:** Native desktop deployments run on `@okw/desktop`, combining `NodeFsVaultStorage` for direct on-disk Markdown storage with `SqliteDocumentIndex` wired directly into the desktop backend (`DesktopVaultRuntime`), fulfilling the `D-021` obligation for 100,000+ note vaults. External filesystem changes are monitored via `NativeVaultWatcher` with debounce filtering and ignore rules for internal SafeWriter swap files (`.okw.tmp.*`). BYOK cloud AI secrets are persisted in `DesktopSecretStore` using authenticated AES-256-GCM encryption with machine-bound key derivation (Constitution Law 17, `F-005`). IPC interactions between the native shell and renderer use type-safe message channels.
+
+**Reason:** Enables high-performance native desktop execution with zero data-loss safe writing, live external file sync, and robust encryption.
