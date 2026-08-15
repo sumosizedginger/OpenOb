@@ -23,6 +23,12 @@ import {
   WordCountPlugin,
   dailyNotesManifest,
   DailyNotesPlugin,
+  templatesManifest,
+  TemplatesPlugin,
+  characterBibleManifest,
+  CharacterBiblePlugin,
+  manuscriptToolsManifest,
+  ManuscriptToolsPlugin,
 } from '@okw/plugin';
 import { PluginManagerModal } from './components/plugins/PluginManagerModal.js';
 import {
@@ -108,8 +114,15 @@ export const App: React.FC = () => {
 
     host.registerPlugin(wordCountManifest, () => new WordCountPlugin());
     host.registerPlugin(dailyNotesManifest, () => new DailyNotesPlugin());
+    host.registerPlugin(templatesManifest, () => new TemplatesPlugin());
+    host.registerPlugin(characterBibleManifest, () => new CharacterBiblePlugin());
+    host.registerPlugin(manuscriptToolsManifest, () => new ManuscriptToolsPlugin());
+
     host.enablePlugin(wordCountManifest.id);
     host.enablePlugin(dailyNotesManifest.id);
+    host.enablePlugin(templatesManifest.id);
+    host.enablePlugin(characterBibleManifest.id);
+    host.enablePlugin(manuscriptToolsManifest.id);
 
     return host;
   });

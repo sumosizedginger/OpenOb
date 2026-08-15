@@ -89,3 +89,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** Plugins execute against an isolated capability host (`PluginHost`) interacting strictly through a sandboxed, permission-gated bridge (`PluginAPI`). All plugin capabilities (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) must be explicitly declared in `manifest.permissions`; undeclared invocations fail closed with `PermissionDeniedError` (Constitution Law 20, `F-006`). Crashes during plugin load, unload, or command execution are strictly contained, isolating the failing plugin into an `'error'` state with restart capability while leaving core note storage, editor, search, graph, and views 100% operational (Constitution Law 20, `F-007`). First-party plugins (`WordCount`, `DailyNotes`) are authored strictly against public `PluginAPI` interfaces with zero private internal package imports.
 
 **Reason:** Enables rich modular ecosystem expansion while guaranteeing workspace security and crash resilience.
+
+## D-020 First-Party Plugin Pack & Public API Dogfooding
+
+**Decision:** First-party extensions (`Templates`, `CharacterBible`, `ManuscriptTools`, `DailyNotes`, `WordCount`) are built exclusively as modular plugins using the public `PluginAPI` surface (`@okw/plugin`) with zero private internal package imports. Dynamic templating performs variable interpolation (`{{title}}`, `{{date}}`, `{{time}}`), Character Bible structures world-building profiles with standard YAML properties, and Manuscript Tools aggregates multi-file statistics strictly using `api.vault` and `api.workspace` methods.
+
+**Reason:** Enforces Constitution Law 20 (no undocumented private escape hatches for first-party plugins) and guarantees third-party parity.

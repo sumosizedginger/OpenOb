@@ -4,3 +4,6 @@ export * from './bridge.js';
 export * from './host.js';
 export * from './plugins/word-count.js';
 export * from './plugins/daily-notes.js';
+export * from './plugins/templates.js';
+export * from './plugins/character-bible.js';
+export * from './plugins/manuscript-tools.js';
