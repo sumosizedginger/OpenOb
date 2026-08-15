@@ -1,14 +1,18 @@
 import React from 'react';
 import { ParsedDocument } from '@okw/core';
+import { matchCalloutHeader, matchTaskLine } from '@okw/markdown';
+import { Callout } from './Callout.js';
 
 interface PreviewPaneProps {
   document: ParsedDocument | null;
   onNavigateWikilink: (target: string) => void;
+  onToggleTask?: (lineNumber: number) => void;
 }
 
 export const PreviewPane: React.FC<PreviewPaneProps> = ({
   document,
   onNavigateWikilink,
+  onToggleTask,
 }) => {
   if (!document) {
     return (
@@ -18,7 +22,6 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
     );
   }
 
-  // Render markdown lines with interactive wikilinks and tags
   const lines = document.textContent.split(/\r?\n/);
   const elements: React.ReactNode[] = [];
 
@@ -26,8 +29,28 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   let inCodeBlock = false;
   let codeBuffer: string[] = [];
 
+  let inCallout = false;
+  let currentCallout: { type: any; title: string; lines: string[] } | null = null;
+
+  const flushCallout = (keyIndex: number) => {
+    if (currentCallout) {
+      elements.push(
+        <Callout key={`callout-${keyIndex}`} type={currentCallout.type} title={currentCallout.title}>
+          {currentCallout.lines.map((l, li) => (
+            <p key={`cl-${li}`} style={{ margin: '4px 0' }}>
+              {renderInlineFormatting(l, onNavigateWikilink)}
+            </p>
+          ))}
+        </Callout>
+      );
+      currentCallout = null;
+      inCallout = false;
+    }
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const lineNumber = i + 1;
 
     // Frontmatter toggle
     if (i === 0 && line.trim() === '---') {
@@ -43,6 +66,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
 
     // Code block toggle
     if (line.trim().startsWith('```')) {
+      flushCallout(i);
       if (inCodeBlock) {
         elements.push(
           <pre key={`code-${i}`}>
@@ -62,26 +86,103 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
       continue;
     }
 
-    // Headings
-    if (line.startsWith('# ')) {
-      elements.push(<h1 key={`h1-${i}`}>{line.slice(2)}</h1>);
-      continue;
-    }
-    if (line.startsWith('## ')) {
-      elements.push(<h2 key={`h2-${i}`}>{line.slice(3)}</h2>);
-      continue;
-    }
-    if (line.startsWith('### ')) {
-      elements.push(<h3 key={`h3-${i}`}>{line.slice(4)}</h3>);
+    // Callout handling (> [!NOTE] ...)
+    const calloutHeader = matchCalloutHeader(line);
+    if (calloutHeader) {
+      flushCallout(i);
+      inCallout = true;
+      currentCallout = {
+        type: calloutHeader.type,
+        title: calloutHeader.title,
+        lines: [],
+      };
       continue;
     }
 
-    // List items
+    if (inCallout) {
+      if (line.startsWith('>')) {
+        currentCallout?.lines.push(line.replace(/^>\s?/, ''));
+        continue;
+      } else {
+        flushCallout(i);
+      }
+    }
+
+    // Task checkbox item (- [ ] Task or - [x] Task)
+    const taskItem = matchTaskLine(line, lineNumber);
+    if (taskItem) {
+      elements.push(
+        <div
+          key={`task-${lineNumber}`}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+            margin: '6px 0',
+            marginLeft: `${taskItem.indent * 12 + 16}px`,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={taskItem.checked}
+            onChange={() => onToggleTask?.(lineNumber)}
+            style={{ marginTop: '4px', cursor: 'pointer' }}
+          />
+          <span
+            style={{
+              color: taskItem.checked ? 'var(--text-muted)' : 'var(--text-primary)',
+              textDecoration: taskItem.checked ? 'line-through' : 'none',
+            }}
+          >
+            {renderInlineFormatting(taskItem.text, onNavigateWikilink)}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    // Headings
+    if (line.startsWith('# ')) {
+      const headingText = line.slice(2);
+      elements.push(<h1 key={`h1-${i}`} id={`heading-${lineNumber}`}>{headingText}</h1>);
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      const headingText = line.slice(3);
+      elements.push(<h2 key={`h2-${i}`} id={`heading-${lineNumber}`}>{headingText}</h2>);
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      const headingText = line.slice(4);
+      elements.push(<h3 key={`h3-${i}`} id={`heading-${lineNumber}`}>{headingText}</h3>);
+      continue;
+    }
+
+    // Regular list items
     if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
       elements.push(
         <li key={`li-${i}`} style={{ marginLeft: '16px', color: 'var(--text-secondary)' }}>
           {renderInlineFormatting(line.trim().slice(2), onNavigateWikilink)}
         </li>
+      );
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith('>')) {
+      elements.push(
+        <blockquote
+          key={`quote-${i}`}
+          style={{
+            borderLeft: '3px solid var(--border-medium)',
+            paddingLeft: '12px',
+            color: 'var(--text-secondary)',
+            fontStyle: 'italic',
+            margin: '10px 0',
+          }}
+        >
+          {renderInlineFormatting(line.replace(/^>\s?/, ''), onNavigateWikilink)}
+        </blockquote>
       );
       continue;
     }
@@ -95,6 +196,8 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
       );
     }
   }
+
+  flushCallout(lines.length);
 
   return (
     <div className="preview-pane">
@@ -113,7 +216,6 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
 };
 
 function renderInlineFormatting(text: string, onNavigate: (target: string) => void): React.ReactNode {
-  // Replace [[Target|Alias]] with interactive links
   const parts: React.ReactNode[] = [];
   const regex = /(!?)\[\[([^\]\n]+)\]\]/g;
   let lastIndex = 0;

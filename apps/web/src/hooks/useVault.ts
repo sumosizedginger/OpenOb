@@ -7,7 +7,7 @@ import {
   VaultPath,
   VaultStorage,
 } from '@okw/core';
-import { DefaultDocumentParser } from '@okw/markdown';
+import { DefaultDocumentParser, toggleTaskAtLine } from '@okw/markdown';
 import { MemoryDocumentIndex, rebuildVaultIndex } from '@okw/index';
 import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage } from '@okw/vault';
 
@@ -225,6 +225,13 @@ export function useVault() {
     }
   };
 
+  // Toggle Markdown checkbox task at line
+  const toggleTask = (lineNumber: number) => {
+    if (!activeTab || !activeTabPath) return;
+    const newContent = toggleTaskAtLine(activeTab.content, lineNumber);
+    updateContent(activeTabPath, newContent);
+  };
+
   // Safe Save active note (C-02 in-flight lock)
   const saveActiveNote = async (force = false) => {
     if (!activeTab || !activeTabPath || isSavingRef.current) return;
@@ -393,6 +400,7 @@ export function useVault() {
     openNote,
     closeTab,
     updateContent,
+    toggleTask,
     saveActiveNote,
     createNote,
     createFolder,

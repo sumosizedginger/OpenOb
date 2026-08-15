@@ -621,7 +621,41 @@ body, html {
   font-family: var(--font-mono);
 }
 
+.btn-icon.active {
+  background-color: var(--accent-light);
+  color: var(--accent-primary);
+}
+
+/* Callout Alert Boxes */
+.callout {
+  border-radius: var(--radius-md);
+  margin: 14px 0;
+  padding: 12px 16px;
+  transition: all 0.15s ease;
+}
+
+.callout-note {
+  border-left: 4px solid var(--accent-primary);
+  background-color: rgba(99, 102, 241, 0.08);
+}
+
+.callout-tip {
+  border-left: 4px solid var(--status-success);
+  background-color: rgba(16, 185, 129, 0.08);
+}
+
+.callout-warning {
+  border-left: 4px solid var(--status-warning);
+  background-color: rgba(245, 158, 11, 0.08);
+}
+
+.callout-important, .callout-caution {
+  border-left: 4px solid var(--status-danger);
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
