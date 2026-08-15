@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   FileSnapshot,
   normalizeVaultPath,
@@ -103,6 +103,9 @@ export function useVault() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>('saved');
   const [conflictData, setConflictData] = useState<{ path: VaultPath; diskContent?: string } | null>(null);
 
+  const isSavingRef = useRef(false);
+  const parseDebounceTimerRef = useRef<any>(null);
+
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
   // Refresh directory list & derived index
@@ -186,8 +189,15 @@ export function useVault() {
     }
   };
 
-  // Close a tab
-  const closeTab = (path: VaultPath) => {
+  // Close a tab (with dirty-state confirmation, H-02)
+  const closeTab = (path: VaultPath, force = false) => {
+    const tabToClose = openTabs.find((t) => t.path === path);
+    if (tabToClose?.isDirty && !force) {
+      if (!confirm(`"${tabToClose.title || path}" has unsaved changes. Discard and close?`)) {
+        return;
+      }
+    }
+
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t.path !== path);
       if (activeTabPath === path) {
@@ -197,13 +207,11 @@ export function useVault() {
     });
   };
 
-  // Update active tab content
-  const updateContent = (newContent: string) => {
-    if (!activeTabPath) return;
-
+  // Update specific tab content (C-01 fix: explicit path parameter)
+  const updateContent = (targetPath: VaultPath, newContent: string) => {
     setOpenTabs((prev) =>
       prev.map((tab) => {
-        if (tab.path === activeTabPath) {
+        if (tab.path === targetPath) {
           const isDirty = tab.initialSnapshot
             ? (tab.initialSnapshot.textContent || new TextDecoder().decode(tab.initialSnapshot.content)) !== newContent
             : true;
@@ -212,13 +220,16 @@ export function useVault() {
         return tab;
       })
     );
-    setSaveStatus('modified');
+    if (targetPath === activeTabPath) {
+      setSaveStatus('modified');
+    }
   };
 
-  // Safe Save active note
+  // Safe Save active note (C-02 in-flight lock)
   const saveActiveNote = async (force = false) => {
-    if (!activeTab || !activeTabPath) return;
+    if (!activeTab || !activeTabPath || isSavingRef.current) return;
 
+    isSavingRef.current = true;
     setSaveStatus('saving');
     try {
       const expectedVersion = force ? undefined : activeTab.initialSnapshot?.version || null;
@@ -257,23 +268,38 @@ export function useVault() {
         console.error('Save failed:', err);
         setSaveStatus('modified');
       }
+    } finally {
+      isSavingRef.current = false;
     }
   };
 
-  // Create a new note
-  const createNote = async (folder: string = '') => {
-    let name = 'Untitled.md';
-    let counter = 1;
-    let targetPath = folder ? `${folder}/${name}` : name;
+  // Create a new note (L-02 fix: handles explicit note name or folder)
+  const createNote = async (nameOrFolder: string = '') => {
+    let targetPath: string;
 
-    while (await storage.exists(targetPath)) {
-      name = `Untitled ${counter}.md`;
+    if (nameOrFolder && nameOrFolder.endsWith('.md')) {
+      targetPath = normalizeVaultPath(nameOrFolder);
+    } else if (nameOrFolder && !nameOrFolder.includes('/')) {
+      targetPath = `${nameOrFolder}.md`;
+    } else {
+      const folder = nameOrFolder;
+      let name = 'Untitled.md';
+      let counter = 1;
       targetPath = folder ? `${folder}/${name}` : name;
-      counter++;
+
+      while (await storage.exists(targetPath)) {
+        name = `Untitled ${counter}.md`;
+        targetPath = folder ? `${folder}/${name}` : name;
+        counter++;
+      }
     }
 
-    const defaultContent = `# ${name.replace(/\.md$/, '')}\n\n`;
-    await storage.write(targetPath, null, defaultContent);
+    if (!(await storage.exists(targetPath))) {
+      const noteTitle = targetPath.split('/').pop()?.replace(/\.md$/, '') || 'Untitled';
+      const defaultContent = `# ${noteTitle}\n\n`;
+      await storage.write(targetPath, null, defaultContent);
+    }
+
     await refreshVault();
     await openNote(targetPath);
   };
@@ -310,26 +336,47 @@ export function useVault() {
   // Delete a note / folder
   const deletePath = async (path: VaultPath) => {
     if (confirm(`Are you sure you want to delete "${path}"?`)) {
-      closeTab(path);
+      closeTab(path, true);
       await storage.remove(path);
       await refreshVault();
     }
   };
 
-  // Update parsed doc when switching active tab
+  // Debounced parse & backlink update effect (M-04 fix)
   useEffect(() => {
+    if (parseDebounceTimerRef.current) {
+      clearTimeout(parseDebounceTimerRef.current);
+    }
+
     if (activeTab) {
-      (async () => {
+      parseDebounceTimerRef.current = setTimeout(async () => {
         const parsed = await parser.parse(activeTab.path, activeTab.content);
         setParsedDoc(parsed);
         const bl = await index.getBacklinks(activeTab.path);
         setBacklinks(bl);
-      })();
+      }, 250);
     } else {
       setParsedDoc(null);
       setBacklinks([]);
     }
+
+    return () => {
+      if (parseDebounceTimerRef.current) {
+        clearTimeout(parseDebounceTimerRef.current);
+      }
+    };
   }, [activeTabPath, activeTab?.content]);
+
+  // Debounced Autosave Hook (H-02 fix)
+  useEffect(() => {
+    if (!activeTab || !activeTab.isDirty) return;
+
+    const autosaveTimer = setTimeout(() => {
+      saveActiveNote();
+    }, 2000); // 2-second debounced autosave
+
+    return () => clearTimeout(autosaveTimer);
+  }, [activeTab?.content, activeTab?.isDirty]);
 
   return {
     vaultName: storage.name,
@@ -356,7 +403,7 @@ export function useVault() {
     dismissConflict: () => setConflictData(null),
     resolveConflictReload: async () => {
       if (activeTabPath) {
-        closeTab(activeTabPath);
+        closeTab(activeTabPath, true);
         await openNote(activeTabPath);
         setConflictData(null);
       }

@@ -9,7 +9,8 @@ export interface FrontmatterResult {
  * Extracts and parses YAML frontmatter from Markdown text.
  * Expects `---` at the beginning of the file followed by key-value pairs.
  */
-export function parseFrontmatter(markdown: string): FrontmatterResult {
+export function parseFrontmatter(rawMarkdown: string): FrontmatterResult {
+  const markdown = rawMarkdown.startsWith('\uFEFF') ? rawMarkdown.slice(1) : rawMarkdown;
   if (!markdown.startsWith('---')) {
     return { properties: {}, body: markdown, hasFrontmatter: false };
   }

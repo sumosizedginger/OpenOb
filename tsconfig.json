@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/vault" },
+    { "path": "./packages/markdown" },
+    { "path": "./packages/index" },
+    { "path": "./apps/web" }
+  ]
+}

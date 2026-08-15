@@ -22,7 +22,18 @@ export const Editor: React.FC<EditorProps> = ({
   const editorViewRef = useRef<EditorView | null>(null);
   const isInternalUpdate = useRef(false);
 
-  // Initialize CodeMirror instance
+  // Keep latest callbacks in refs to eliminate any possible stale closure
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+  const onCommandPaletteRef = useRef(onCommandPalette);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onSaveRef.current = onSave;
+    onCommandPaletteRef.current = onCommandPalette;
+  });
+
+  // Initialize CodeMirror instance for this note
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -30,14 +41,14 @@ export const Editor: React.FC<EditorProps> = ({
       {
         key: 'Mod-s',
         run: () => {
-          onSave();
-          return true;
+          onSaveRef.current();
+          return true; // Prevents further default action
         },
       },
       {
         key: 'Mod-p',
         run: () => {
-          onCommandPalette();
+          onCommandPaletteRef.current();
           return true;
         },
       },
@@ -47,7 +58,7 @@ export const Editor: React.FC<EditorProps> = ({
 
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged && !isInternalUpdate.current) {
-        onChange(update.state.doc.toString());
+        onChangeRef.current(update.state.doc.toString());
       }
     });
 
@@ -76,9 +87,9 @@ export const Editor: React.FC<EditorProps> = ({
     return () => {
       view.destroy();
     };
-  }, []);
+  }, []); // Mounted per note via key={activeTab.path}
 
-  // Update doc when active file changes externally
+  // Handle external content updates
   useEffect(() => {
     const view = editorViewRef.current;
     if (view) {

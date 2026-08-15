@@ -63,4 +63,5 @@ export interface DocumentIndex {
   getAll(): Promise<ParsedDocument[]>;
   getBacklinks(documentId: string): Promise<Backlink[]>;
   getOutgoingLinks(documentId: string): Promise<ParsedDocument[]>;
+  resolveLink(sourcePath: VaultPath, rawTarget: string): LinkResolution;
 }

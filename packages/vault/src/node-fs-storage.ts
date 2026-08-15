@@ -11,6 +11,7 @@ import {
   normalizeVaultPath,
   NotFoundError,
   StorageError,
+  SecurityError,
   VaultChangeEvent,
   VaultChangeListener,
   VaultEntry,
@@ -19,9 +20,18 @@ import {
   WriteResult,
 } from '@okw/core';
 
+function normalizeFsPath(p: string): string {
+  let norm = path.normalize(p).toLowerCase().replace(/\\/g, '/');
+  if (norm.startsWith('//?/')) {
+    norm = norm.slice(4);
+  }
+  return norm;
+}
+
 /**
  * Node.js filesystem implementation of VaultStorage.
- * Uses atomic temporary writes, fsync, and strict path boundary isolation.
+ * Uses atomic temporary writes with fsync, strict boundary checks,
+ * and version concurrency enforcement.
  */
 export class NodeFsVaultStorage implements VaultStorage {
   private listeners = new Set<VaultChangeListener>();
@@ -31,26 +41,63 @@ export class NodeFsVaultStorage implements VaultStorage {
     public readonly name: string = path.basename(rootDir) || 'local-vault'
   ) {}
 
-  private resolveToDisk(rawPath: VaultPath): string {
+  private async resolveToDiskSafe(rawPath: VaultPath): Promise<string> {
     const norm = normalizeVaultPath(rawPath);
-    const resolved = path.resolve(this.rootDir, norm);
-    // Security check: ensure resolved path is strictly inside rootDir
-    if (!resolved.startsWith(path.resolve(this.rootDir))) {
-      throw new StorageError(`Path escapes vault root: "${rawPath}"`);
+    const rootResolved = path.resolve(this.rootDir);
+    const diskPath = path.resolve(this.rootDir, norm);
+
+    const normDisk = normalizeFsPath(diskPath);
+    const normRoot = normalizeFsPath(rootResolved);
+
+    if (!normDisk.startsWith(normRoot)) {
+      throw new SecurityError(`Path escapes vault root: "${rawPath}"`);
     }
-    return resolved;
+
+    // Check if target or any existing ancestor is a symlink pointing outside vault (SEC-02)
+    try {
+      const realDisk = await fs.realpath(diskPath);
+      const realRoot = await fs.realpath(rootResolved);
+      const normRealDisk = normalizeFsPath(realDisk);
+      const normRealRoot = normalizeFsPath(realRoot);
+
+      if (!normRealDisk.startsWith(normRealRoot)) {
+        throw new SecurityError(`Symlink traversal detected outside vault root: "${rawPath}"`);
+      }
+    } catch (err: any) {
+      if (err instanceof SecurityError) {
+        throw err;
+      }
+      if (err.code !== 'ENOENT') {
+        // Ancestor check if path doesn't exist yet
+        let curr = path.dirname(diskPath);
+        while (normalizeFsPath(curr).startsWith(normRoot)) {
+          try {
+            const realCurr = await fs.realpath(curr);
+            const realRoot = await fs.realpath(rootResolved);
+            if (!normalizeFsPath(realCurr).startsWith(normalizeFsPath(realRoot))) {
+              throw new SecurityError(`Ancestor symlink traversal detected: "${rawPath}"`);
+            }
+            break;
+          } catch (ancestorErr: any) {
+            if (ancestorErr instanceof SecurityError) throw ancestorErr;
+            curr = path.dirname(curr);
+          }
+        }
+      }
+    }
+
+    return diskPath;
   }
 
   async list(rawPath: VaultPath = '', recursive = false): Promise<VaultEntry[]> {
     const dir = normalizeVaultPath(rawPath);
-    const diskPath = this.resolveToDisk(dir);
+    const diskPath = await this.resolveToDiskSafe(dir);
 
     try {
       const entries = await fs.readdir(diskPath, { withFileTypes: true });
       const results: VaultEntry[] = [];
 
       for (const entry of entries) {
-        // Skip hidden files like .git or OS metadata
         if (entry.name.startsWith('.')) continue;
 
         const relPath = dir ? `${dir}/${entry.name}` : entry.name;
@@ -83,6 +130,7 @@ export class NodeFsVaultStorage implements VaultStorage {
         return a.path.localeCompare(b.path);
       });
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       if (err.code === 'ENOENT') {
         return [];
       }
@@ -91,7 +139,7 @@ export class NodeFsVaultStorage implements VaultStorage {
   }
 
   async read(rawPath: VaultPath): Promise<FileSnapshot> {
-    const diskPath = this.resolveToDisk(rawPath);
+    const diskPath = await this.resolveToDiskSafe(rawPath);
     try {
       const [content, stats] = await Promise.all([fs.readFile(diskPath), fs.stat(diskPath)]);
       const bytes = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
@@ -111,6 +159,7 @@ export class NodeFsVaultStorage implements VaultStorage {
         size: stats.size,
       };
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       if (err.code === 'ENOENT') {
         throw new NotFoundError(rawPath);
       }
@@ -119,10 +168,11 @@ export class NodeFsVaultStorage implements VaultStorage {
   }
 
   async readText(rawPath: VaultPath): Promise<string> {
-    const diskPath = this.resolveToDisk(rawPath);
+    const diskPath = await this.resolveToDiskSafe(rawPath);
     try {
       return await fs.readFile(diskPath, 'utf8');
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       if (err.code === 'ENOENT') {
         throw new NotFoundError(rawPath);
       }
@@ -136,13 +186,13 @@ export class NodeFsVaultStorage implements VaultStorage {
     content: Uint8Array | string
   ): Promise<WriteResult> {
     const normPath = normalizeVaultPath(rawPath);
-    const diskPath = this.resolveToDisk(normPath);
+    const diskPath = await this.resolveToDiskSafe(normPath);
     const parentDir = path.dirname(diskPath);
 
     // Ensure parent directory exists
     await fs.mkdir(parentDir, { recursive: true });
 
-    // Check existing stat for version checking
+    // Check existing stat for version concurrency checking (F-001)
     let existingStat: Stats | null = null;
     let existingHash: string | null = null;
     let previousVersion: FileVersion | null = null;
@@ -205,15 +255,34 @@ export class NodeFsVaultStorage implements VaultStorage {
     const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const newHash = computeContentHash(bytes);
 
-    // Atomic Temporary Write (F-002 mitigation)
+    // Atomic Temporary Write with FSYNC (H-03 & F-002 mitigation)
     const tmpDiskPath = `${diskPath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
 
     try {
-      await fs.writeFile(tmpDiskPath, bytes);
+      const fileHandle = await fs.open(tmpDiskPath, 'w');
+      try {
+        await fileHandle.writeFile(bytes);
+        // Explicit fsync guarantees flushed buffers to physical disk before rename
+        await fileHandle.sync();
+      } finally {
+        await fileHandle.close();
+      }
+
       // Atomic rename replaces target file safely
       await fs.rename(tmpDiskPath, diskPath);
+
+      // Fsync parent directory on non-Windows platforms (POSIX durability)
+      if (process.platform !== 'win32') {
+        try {
+          const dirHandle = await fs.open(parentDir, 'r');
+          try {
+            await dirHandle.sync();
+          } finally {
+            await dirHandle.close();
+          }
+        } catch {}
+      }
     } catch (err: any) {
-      // Clean up tmp file if rename failed
       try {
         await fs.unlink(tmpDiskPath);
       } catch {}
@@ -248,7 +317,7 @@ export class NodeFsVaultStorage implements VaultStorage {
   }
 
   async stat(rawPath: VaultPath): Promise<FileStat | null> {
-    const diskPath = this.resolveToDisk(rawPath);
+    const diskPath = await this.resolveToDiskSafe(rawPath);
     try {
       const stats = await fs.stat(diskPath);
       let version: FileVersion | undefined;
@@ -270,6 +339,7 @@ export class NodeFsVaultStorage implements VaultStorage {
         version,
       };
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       if (err.code === 'ENOENT') {
         return null;
       }
@@ -278,8 +348,8 @@ export class NodeFsVaultStorage implements VaultStorage {
   }
 
   async exists(rawPath: VaultPath): Promise<boolean> {
-    const diskPath = this.resolveToDisk(rawPath);
     try {
+      const diskPath = await this.resolveToDiskSafe(rawPath);
       await fs.access(diskPath);
       return true;
     } catch {
@@ -292,8 +362,8 @@ export class NodeFsVaultStorage implements VaultStorage {
     const to = normalizeVaultPath(rawTo);
     if (from === to) return;
 
-    const diskFrom = this.resolveToDisk(from);
-    const diskTo = this.resolveToDisk(to);
+    const diskFrom = await this.resolveToDiskSafe(from);
+    const diskTo = await this.resolveToDiskSafe(to);
 
     if (!overwrite) {
       const targetExists = await this.exists(to);
@@ -315,9 +385,9 @@ export class NodeFsVaultStorage implements VaultStorage {
 
   async remove(rawPath: VaultPath): Promise<void> {
     const normPath = normalizeVaultPath(rawPath);
-    if (!normPath) return; // Cannot delete vault root
+    if (!normPath) return;
 
-    const diskPath = this.resolveToDisk(normPath);
+    const diskPath = await this.resolveToDiskSafe(normPath);
     try {
       const stats = await fs.stat(diskPath);
       if (stats.isDirectory()) {
@@ -327,6 +397,7 @@ export class NodeFsVaultStorage implements VaultStorage {
       }
       this.notify({ type: 'deleted', path: normPath, timestamp: Date.now() });
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       if (err.code !== 'ENOENT') {
         throw new StorageError(`Failed to remove "${normPath}": ${err.message}`, err);
       }
@@ -336,10 +407,11 @@ export class NodeFsVaultStorage implements VaultStorage {
   async createFolder(rawPath: VaultPath): Promise<void> {
     const normPath = normalizeVaultPath(rawPath);
     if (!normPath) return;
-    const diskPath = this.resolveToDisk(normPath);
+    const diskPath = await this.resolveToDiskSafe(normPath);
     try {
       await fs.mkdir(diskPath, { recursive: true });
     } catch (err: any) {
+      if (err instanceof SecurityError) throw err;
       throw new StorageError(`Failed to create folder "${normPath}": ${err.message}`, err);
     }
   }

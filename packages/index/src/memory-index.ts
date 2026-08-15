@@ -101,6 +101,10 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
     return outgoing;
   }
 
+  resolveLink(sourcePath: string, rawTarget: string) {
+    return this.linkResolver.resolve(sourcePath, rawTarget);
+  }
+
   async query(request: SearchRequest): Promise<SearchResult[]> {
     const q = request.query.trim().toLowerCase();
     if (!q) return [];
@@ -109,9 +113,12 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
     const tokens = q.split(/\s+/).filter(Boolean);
 
     for (const doc of this.documents.values()) {
-      // Scope filtering
+      // Scope filtering: ensure folder prefix has a trailing slash or matches exactly (L-01)
       if (request.scope?.folders && request.scope.folders.length > 0) {
-        const inScope = request.scope.folders.some((f) => doc.path.startsWith(f));
+        const inScope = request.scope.folders.some((f) => {
+          const normF = f.replace(/\/+$/, '');
+          return doc.path === normF || doc.path.startsWith(`${normF}/`);
+        });
         if (!inScope) continue;
       }
       if (request.scope?.tags && request.scope.tags.length > 0) {

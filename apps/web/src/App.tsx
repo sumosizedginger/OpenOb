@@ -51,29 +51,37 @@ export const App: React.FC = () => {
   const [showBacklinks, setShowBacklinks] = useState(true);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
-  // Global keyboard shortcuts (Ctrl+P / Cmd+P, Ctrl+S / Cmd+S)
+  // Global window keyboard shortcuts (for when editor is not focused)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Avoid double triggering if active target is inside CodeMirror
+      const isInsideEditor = (e.target as HTMLElement)?.closest?.('.cm-editor');
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        setIsCommandPaletteOpen((prev) => !prev);
+        if (!isInsideEditor) {
+          e.preventDefault();
+          setIsCommandPaletteOpen((prev) => !prev);
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        saveActiveNote();
+        if (!isInsideEditor) {
+          e.preventDefault();
+          saveActiveNote();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveActiveNote]);
 
-  // Navigate wikilink clicked inside preview
+  // Navigate wikilink clicked inside preview (L-02 & L-03 fix)
   const handleNavigateWikilink = async (target: string) => {
-    const resolution = (index as any).linkResolver?.resolve(activeTabPath || '', target);
+    const resolution = index.resolveLink(activeTabPath || '', target);
     if (resolution && resolution.resolved && resolution.targetPath) {
       await openNote(resolution.targetPath);
     } else {
-      await createNote();
+      // Create new note with the specified target title
+      await createNote(target);
     }
   };
 
@@ -209,8 +217,9 @@ export const App: React.FC = () => {
                 {(viewMode === 'editor' || viewMode === 'split') && (
                   <div className="editor-container">
                     <Editor
+                      key={activeTab.path}
                       content={activeTab.content}
-                      onChange={updateContent}
+                      onChange={(val) => updateContent(activeTab.path, val)}
                       onSave={() => saveActiveNote()}
                       onCommandPalette={() => setIsCommandPaletteOpen(true)}
                     />
