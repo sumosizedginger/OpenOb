@@ -64,6 +64,7 @@ export const App: React.FC = () => {
     refreshVault,
     updateNoteProperty,
     createNoteWithProperties,
+    applyAIProposedEdit,
     dismissConflict,
     resolveConflictReload,
   } = useVault();
@@ -197,17 +198,9 @@ export const App: React.FC = () => {
 
   // Phase 7: Apply user-accepted AI proposed edit (Constitution Law 19)
   const handleApplyProposedEdit = async (proposal: ProposedEdit) => {
-    if (activeTab && activeTab.path === proposal.path) {
-      updateContent(proposal.path, proposal.proposedContent);
-      await saveActiveNote();
-    } else {
-      const snap = await storage.read(proposal.path);
-      await storage.write(proposal.path, snap.version, proposal.proposedContent);
-      const parsed = await index.getAll();
-      const updatedDoc = parsed.find((d) => d.path === proposal.path);
-      if (updatedDoc) {
-        await index.upsert(updatedDoc);
-      }
+    const res = await applyAIProposedEdit(proposal);
+    if (!res.success && res.error) {
+      alert(`Could not apply edit: ${res.error}`);
     }
   };
 

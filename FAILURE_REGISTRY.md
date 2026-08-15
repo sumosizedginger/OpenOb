@@ -194,3 +194,15 @@ Scenario: in-place string mutation splits on `\r?\n` and rejoins with `\n`, sile
 
 Mitigation: detect and preserve dominant document EOL delimiter across all mutation utilities.
 
+### F-028 AI Proposal Stale Content Overwrite
+
+Scenario: A user receives an AI diff proposal and continues editing the active document buffer; subsequently clicking "Accept Edit" applies the stale proposed content generated against the earlier baseline, silently destroying all intervening user keystrokes.
+
+Mitigation: Strict divergence check on proposal application comparing `proposal.originalContent` against live buffer and disk snapshots. If modified, the operation aborts with a Conflict and surfaces conflict data rather than overwriting.
+
+### F-029 Model Path Injection Target Redirect
+
+Scenario: Prompt-injection content in a note induces the model to emit a proposal header with an unvetted arbitrary path (e.g. ```` ```proposal:Secrets/Passwords.md ````). The user accepts the proposal believing it applies to their active note, overwriting an unrelated sensitive file.
+
+Mitigation: Proposal parser strictly binds `proposal.path` to the verified `targetPath` of the active note, completely ignoring model-emitted destination paths.
+

@@ -90,23 +90,31 @@ export async function retrieveContext(
     }
   }
 
-  // Scope 3: Selected notes or Folder scope
-  else if (scope.type === 'folder' || scope.type === 'selected_notes') {
-    const searchScope =
-      scope.type === 'folder' && scope.folderPrefix
-        ? { folders: [scope.folderPrefix] }
-        : undefined;
+  // Scope 3: Explicitly selected notes (direct path read without search query dependency, P7-5)
+  else if (scope.type === 'selected_notes' && scope.selectedPaths) {
+    for (const p of scope.selectedPaths) {
+      try {
+        const snap = await storage.read(p);
+        const text =
+          typeof snap.content === 'string'
+            ? snap.content
+            : new TextDecoder().decode(snap.content);
+        const noteTitle = p.replace(/\.md$/, '').split('/').pop() || p;
+        const noteChunks = chunkDocumentByHeadings(p, noteTitle, text);
+        chunks.push(...noteChunks.slice(0, 2));
+      } catch {}
+    }
+  }
 
+  // Scope 4: Folder scope
+  else if (scope.type === 'folder' && scope.folderPrefix) {
     const searchResults = await index.query({
       query: query.trim() || 'note',
-      scope: searchScope,
+      scope: { folders: [scope.folderPrefix] },
       limit: maxChunks,
     });
 
     for (const res of searchResults) {
-      if (scope.type === 'selected_notes' && scope.selectedPaths && !scope.selectedPaths.includes(res.path)) {
-        continue;
-      }
       try {
         const snap = await storage.read(res.path);
         const text =
@@ -121,7 +129,7 @@ export async function retrieveContext(
     }
   }
 
-  // Scope 4: Whole Vault
+  // Scope 5: Whole Vault
   else if (scope.type === 'vault') {
     const searchResults = await index.query({
       query: query.trim() || 'note',
@@ -143,14 +151,33 @@ export async function retrieveContext(
     }
   }
 
-  // Estimate tokens (~4 characters per token)
-  const totalChars = chunks.reduce((sum, c) => sum + c.content.length, 0);
-  const totalTokensEstimate = Math.ceil(totalChars / 4);
+  // Enforce Max Tokens Budget (P7-4)
+  const maxTokens = options.maxTokens || 4096;
+  const boundedChunks: RetrievedContextChunk[] = [];
+  let currentTokens = 0;
+
+  for (const chunk of chunks.slice(0, maxChunks)) {
+    const chunkTokens = Math.ceil(chunk.content.length / 4);
+    if (currentTokens + chunkTokens <= maxTokens) {
+      boundedChunks.push(chunk);
+      currentTokens += chunkTokens;
+    } else {
+      const allowedChars = Math.max(0, (maxTokens - currentTokens) * 4);
+      if (allowedChars > 50) {
+        boundedChunks.push({
+          ...chunk,
+          content: chunk.content.slice(0, allowedChars) + '\n...[truncated to token budget]',
+        });
+        currentTokens = maxTokens;
+      }
+      break;
+    }
+  }
 
   return {
     scope,
-    chunks: chunks.slice(0, maxChunks),
-    totalTokensEstimate,
+    chunks: boundedChunks,
+    totalTokensEstimate: currentTokens,
   };
 }
 
@@ -204,8 +231,9 @@ export function extractCitations(
     }
   }
 
-  // 2. Match [Source: path.md (Lines X-Y)]
-  const sourceTagRegex = /\[(?:Source:\s*)?([^\]\s:]+\.md)(?::L?(\d+)(?:-(\d+))?)?\]/g;
+  // 2. Match [Source: path.md (Lines X-Y)] or [path.md:L1-20]
+  const sourceTagRegex =
+    /\[(?:Source:\s*)?([^\]\s:]+\.md)(?:(?::L?|\s*\(Lines?\s*)(\d+)(?:-(\d+))?\)?)?\]/gi;
   while ((match = sourceTagRegex.exec(aiResponse)) !== null) {
     const path = match[1].trim();
     const startLine = match[2] ? parseInt(match[2], 10) : undefined;
@@ -214,7 +242,13 @@ export function extractCitations(
     const foundDoc = availableDocs.find((d) => d.path.toLowerCase() === path.toLowerCase());
     const noteTitle = foundDoc ? foundDoc.title : path.replace(/\.md$/, '');
 
-    if (!seenPaths.has(path)) {
+    const existing = citations.find((c) => c.notePath.toLowerCase() === path.toLowerCase());
+    if (existing) {
+      if (startLine !== undefined && existing.lineStart === undefined) {
+        (existing as any).lineStart = startLine;
+        (existing as any).lineEnd = endLine;
+      }
+    } else {
       seenPaths.add(path);
       citations.push({
         notePath: path,

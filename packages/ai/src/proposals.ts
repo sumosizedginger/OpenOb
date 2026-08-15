@@ -19,7 +19,8 @@ export function parseProposedEditFromResponse(
     return null;
   }
 
-  const detectedPath = proposalMatch[1]?.trim() || targetPath;
+  // Always bind strictly to targetPath to prevent prompt-injection attacks targeting arbitrary vault files (F-029, P7-2)
+  const targetNotePath = targetPath;
   const proposedContent = proposalMatch[2] || proposalMatch[1];
 
   if (!proposedContent || proposedContent.trim() === originalContent.trim()) {
@@ -33,7 +34,7 @@ export function parseProposedEditFromResponse(
 
   return {
     id: `proposal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    path: detectedPath,
+    path: targetNotePath,
     originalContent,
     proposedContent,
     explanation,
@@ -56,13 +57,12 @@ export async function applyProposedEdit(
         ? currentSnap.content
         : new TextDecoder().decode(currentSnap.content);
 
-    // Concurrency check: Ensure the file hasn't diverged
+    // Concurrency check: Ensure the file hasn't diverged since proposal generation (F-028, P7-1)
     if (currentText.trim() !== proposal.originalContent.trim()) {
-      // Check if hash matches
-      await safeWriter.safeSave(proposal.path, proposal.proposedContent, {
-        expectedVersion: currentSnap.version,
-      });
-      return { success: true };
+      return {
+        success: false,
+        error: 'Conflict: Note content was modified after proposal was generated.',
+      };
     }
 
     await safeWriter.safeSave(proposal.path, proposal.proposedContent, {

@@ -502,6 +502,80 @@ export function useVault() {
     await openNote(targetPath);
   };
 
+  // Safely apply AI proposed edit with divergence detection and buffer/index reconciliation (F-028, P7-1, P7-3)
+  const applyAIProposedEdit = async (proposal: any): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const openTab = openTabs.find((t) => t.path === proposal.path);
+      if (openTab) {
+        // Divergence check: Has the user edited the active tab buffer since proposal generation?
+        if (openTab.content.trim() !== proposal.originalContent.trim()) {
+          setConflictData({
+            path: proposal.path,
+            diskContent: openTab.content,
+          });
+          return {
+            success: false,
+            error: 'Conflict: Note buffer was modified after AI proposal was generated.',
+          };
+        }
+
+        const snap = openTab.initialSnapshot || (await storage.read(proposal.path));
+        const saveRes = await safeWriter.safeSave(proposal.path, proposal.proposedContent, {
+          expectedVersion: snap.version,
+        });
+
+        // Reconcile tab state
+        openTab.content = proposal.proposedContent;
+        openTab.isDirty = false;
+        openTab.initialSnapshot = saveRes.snapshot;
+        setOpenTabs([...openTabs]);
+
+        // Re-parse and upsert to index
+        const parsed = await parser.parse(proposal.path, proposal.proposedContent);
+        await index.upsert(parsed);
+        return { success: true };
+      }
+
+      // Non-active tab case: verify disk content
+      const snap = await storage.read(proposal.path);
+      const diskText =
+        typeof snap.content === 'string'
+          ? snap.content
+          : new TextDecoder().decode(snap.content);
+
+      if (diskText.trim() !== proposal.originalContent.trim()) {
+        setConflictData({
+          path: proposal.path,
+          diskContent: diskText,
+        });
+        return {
+          success: false,
+          error: 'Conflict: Note on disk was modified after AI proposal was generated.',
+        };
+      }
+
+      await safeWriter.safeSave(proposal.path, proposal.proposedContent, {
+        expectedVersion: snap.version,
+      });
+      const parsed = await parser.parse(proposal.path, proposal.proposedContent);
+      await index.upsert(parsed);
+      return { success: true };
+    } catch (err: any) {
+      if (err?.name === 'ConflictError' || err?.message?.includes('Conflict')) {
+        const freshSnap = await storage.read(proposal.path);
+        const diskContent =
+          typeof freshSnap.content === 'string'
+            ? freshSnap.content
+            : new TextDecoder().decode(freshSnap.content);
+        setConflictData({
+          path: proposal.path,
+          diskContent,
+        });
+      }
+      return { success: false, error: err.message };
+    }
+  };
+
   return {
     vaultName: storage.name,
     storage,
@@ -527,6 +601,7 @@ export function useVault() {
     refreshVault,
     updateNoteProperty,
     createNoteWithProperties,
+    applyAIProposedEdit,
     dismissConflict: () => setConflictData(null),
     resolveConflictReload: async () => {
       if (activeTabPath) {
