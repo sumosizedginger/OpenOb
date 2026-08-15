@@ -4,3 +4,4 @@ export * from './sqlite-index.js';
 export * from './rebuilder.js';
 export * from './refactor.js';
 export * from './graph.js';
+export * from './query-engine.js';

@@ -7,7 +7,7 @@ import {
   VaultPath,
   VaultStorage,
 } from '@okw/core';
-import { DefaultDocumentParser, toggleTaskAtLine } from '@okw/markdown';
+import { DefaultDocumentParser, toggleTaskAtLine, updateDocumentFrontmatter } from '@okw/markdown';
 import { MemoryDocumentIndex, rebuildVaultIndex, renameDocument } from '@okw/index';
 import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage } from '@okw/vault';
 
@@ -430,6 +430,57 @@ export function useVault() {
     return () => clearTimeout(autosaveTimer);
   }, [activeTab?.content, activeTab?.isDirty]);
 
+  // Update a note's frontmatter property (Phase 6 Notion views)
+  const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
+    const openTab = openTabs.find((t) => t.path === path);
+    if (openTab) {
+      const snap = openTab.initialSnapshot || (await storage.read(path));
+      const parsed = await parser.parse(path, openTab.content);
+      const currentProps = parsed.properties || {};
+      const newProps = { ...currentProps };
+      if (value === null || value === undefined) {
+        delete newProps[key];
+      } else {
+        newProps[key] = value;
+      }
+      const updated = updateDocumentFrontmatter(openTab.content, newProps);
+      updateContent(path, updated);
+      await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
+      const newParsed = await parser.parse(path, updated);
+      await index.upsert(newParsed);
+      return;
+    }
+
+    const snap = await storage.read(path);
+    const text = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+    const parsed = await parser.parse(path, text);
+    const currentProps = parsed.properties || {};
+    const newProps = { ...currentProps };
+    if (value === null || value === undefined) {
+      delete newProps[key];
+    } else {
+      newProps[key] = value;
+    }
+    const updated = updateDocumentFrontmatter(text, newProps);
+    await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
+    const newParsed = await parser.parse(path, updated);
+    await index.upsert(newParsed);
+  };
+
+  // Create a note with predefined frontmatter properties
+  const createNoteWithProperties = async (name: string, initialProps: Record<string, any>) => {
+    const cleanName = name.trim();
+    const noteTitle = cleanName.replace(/\.md$/, '');
+    const targetPath = cleanName.endsWith('.md') ? cleanName : `${cleanName}.md`;
+
+    const body = `# ${noteTitle}\n\n`;
+    const fullContent = updateDocumentFrontmatter(body, initialProps);
+
+    await storage.write(targetPath, null, fullContent);
+    await refreshVault();
+    await openNote(targetPath);
+  };
+
   return {
     vaultName: storage.name,
     storage,
@@ -453,6 +504,8 @@ export function useVault() {
     deletePath,
     openDirectoryVault,
     refreshVault,
+    updateNoteProperty,
+    createNoteWithProperties,
     dismissConflict: () => setConflictData(null),
     resolveConflictReload: async () => {
       if (activeTabPath) {

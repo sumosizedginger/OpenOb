@@ -5,17 +5,47 @@ export interface FrontmatterResult {
 }
 
 /**
- * Parses scalar YAML values into their JavaScript types (number, boolean, null, string).
+ * Splits inline YAML array items while respecting commas inside quotes (e.g. `[a, "b, c", d]`).
+ */
+export function splitYamlArrayItems(str: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let inDouble = false;
+  let inSingle = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !inSingle && str[i - 1] !== '\\') {
+      inDouble = !inDouble;
+      current += char;
+    } else if (char === "'" && !inDouble && str[i - 1] !== '\\') {
+      inSingle = !inSingle;
+      current += char;
+    } else if (char === ',' && !inDouble && !inSingle) {
+      if (current.trim()) items.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+}
+
+/**
+ * Parses scalar YAML values into their JavaScript types (YAML 1.2 compliant).
+ * Strings like "yes", "no", "007", "0o17" are preserved as strings.
  */
 export function parseScalar(raw: string): any {
   const trimmed = raw.trim();
   if (trimmed === '' || trimmed.toLowerCase() === 'null' || trimmed === '~') {
     return null;
   }
-  if (trimmed.toLowerCase() === 'true' || trimmed.toLowerCase() === 'yes') {
+  // Strict YAML 1.2 booleans (true / false only)
+  if (trimmed.toLowerCase() === 'true') {
     return true;
   }
-  if (trimmed.toLowerCase() === 'false' || trimmed.toLowerCase() === 'no') {
+  if (trimmed.toLowerCase() === 'false') {
     return false;
   }
 
@@ -34,13 +64,13 @@ export function parseScalar(raw: string): any {
     return trimmed.slice(1, -1);
   }
 
-  // Preserve leading zero strings like '007' as strings
-  if (/^0\d+$/.test(trimmed)) {
+  // Preserve leading zero strings like '007', hex '0x10', octal '0o17', binary '0b10' as strings
+  if (/^0\d+$/.test(trimmed) || /^0[xXoObB]/.test(trimmed)) {
     return trimmed;
   }
 
   // Numbers
-  if (!isNaN(Number(trimmed)) && !trimmed.startsWith('0x') && !trimmed.startsWith('0b')) {
+  if (!isNaN(Number(trimmed))) {
     return Number(trimmed);
   }
 
@@ -48,7 +78,7 @@ export function parseScalar(raw: string): any {
 }
 
 /**
- * Parses YAML frontmatter from a Markdown document (M-03, P5-1).
+ * Parses YAML frontmatter from a Markdown document (M-03, P5-1, P6).
  * Supports inline lists [a, b], multiline list items (- item), and typed array items.
  */
 export function parseFrontmatter(text: string): FrontmatterResult {
@@ -105,9 +135,7 @@ export function parseFrontmatter(text: string): FrontmatterResult {
 
     // Parse value
     if (valStr.startsWith('[') && valStr.endsWith(']')) {
-      const items = valStr
-        .slice(1, -1)
-        .split(',')
+      const items = splitYamlArrayItems(valStr.slice(1, -1))
         .map((s) => parseScalar(s))
         .filter((item) => item !== undefined);
       properties[key] = items;
@@ -124,7 +152,8 @@ export function parseFrontmatter(text: string): FrontmatterResult {
 }
 
 /**
- * Safely serializes a JavaScript value to YAML.
+ * Safely serializes a JavaScript value to YAML (YAML 1.2 compliant).
+ * Preserves whitespace padding, ambiguous strings, and typed structures.
  */
 export function serializeYamlValue(val: any): string {
   if (val === null || val === undefined) {
@@ -140,9 +169,11 @@ export function serializeYamlValue(val: any): string {
     return `[${val.map((item) => serializeYamlValue(item)).join(', ')}]`;
   }
   if (typeof val === 'string') {
-    const trimmed = val;
-    // Quote strings that could be misinterpreted by YAML parsers
+    const rawStr = val;
+    const trimmed = rawStr.trim();
+    // Quote strings that could be misinterpreted by YAML parsers or contain padding
     const needsQuoting =
+      rawStr !== trimmed ||
       trimmed === '' ||
       trimmed === 'true' ||
       trimmed === 'false' ||
@@ -151,22 +182,23 @@ export function serializeYamlValue(val: any): string {
       trimmed === 'yes' ||
       trimmed === 'no' ||
       /^0\d+$/.test(trimmed) ||
+      /^0[xXoObB]/.test(trimmed) ||
       !isNaN(Number(trimmed)) ||
       /[:#{}[\]"',&*!|>?%@`]/.test(trimmed) ||
       trimmed.includes('\n') ||
       trimmed.includes('\r');
 
     if (needsQuoting) {
-      return JSON.stringify(trimmed);
+      return JSON.stringify(rawStr);
     }
-    return trimmed;
+    return rawStr;
   }
   return JSON.stringify(val);
 }
 
 /**
  * Safely updates YAML frontmatter in a Markdown document while preserving
- * comments (# ...), untouched fields, line endings (CRLF / LF), and BOM (D-012, P5-1).
+ * comments (# ...), untouched fields, line endings (CRLF / LF), and BOM (D-012, P5-1, P6).
  */
 export function updateDocumentFrontmatter(
   content: string,

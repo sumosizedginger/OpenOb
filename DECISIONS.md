@@ -1,62 +1,44 @@
-# Architectural Decisions
+# Architectural Decisions (ADR)
 
-## D-001 Modular Monolith Package Structure
+## D-001 Storage Model
+Single authoritative storage interface (`VaultStorage`) with two implementations:
+- `NodeFsVaultStorage` (Desktop / Node CLI)
+- `BrowserFSAVaultStorage` (Web / Origin Private File System / File System Access API)
+- `MemoryVaultStorage` (In-Memory for testing)
 
-**Decision:** The project is organized as a modular TypeScript monorepo with strict dependency direction: `core` -> `vault` / `markdown` -> `index` -> `app`.
+## D-002 Disposable SQLite Index
+SQLite is strictly a disposable read-cache and index for search, backlinks, and graph queries. Canonical source of truth is always the Markdown files on disk. If SQLite is wiped, it must be 100% rebuildable from disk with zero data loss.
 
-**Reason:** Keeps domain logic free of UI/storage details and enables fast test cycles against clean abstractions.
+## D-003 Concurrency & Safe Save
+Atomic write model using `SafeWriter`. Every write checks expected vs actual content hash. If modified externally, a `ConflictError` is raised.
 
-## D-002 Canonical Markdown Files as Single Source of Truth
+## D-004 Wikilink Resolution Contract
+Strict 4-level resolution priority:
+1. Exact relative path
+2. Subfolder path
+3. Unique basename (shortest path wins)
+4. Explicit aliases
 
-**Decision:** Notes on disk are the authoritative state. SQLite, in-memory caches, and graph models are strictly disposable and rebuildable derived state.
+## D-005 Plugin Sandbox & Permission Model
+Plugins execute in an isolated Web Worker or sandboxed iframe. Zero direct access to Node.js `fs`, raw DOM, or network unless explicitly granted by capability manifest.
 
-**Reason:** Prevents database lock-in and guarantees that external file modifications never result in silent data corruption.
+## D-006 AI Provider Abstraction
+AI features interact with an abstract `AIProvider` contract. No hardcoded OpenAI/Anthropic SDKs in core. Local models (Ollama, LM Studio) and cloud models implement the same interface.
 
-## D-003 Atomic Safe-Save Write Pipeline
+## D-007 Markdown AST & Frontmatter
+Markdown parsing uses unified/remark AST pipeline. Frontmatter is parsed to structured metadata.
 
-**Decision:** File writes write to a temp file first, verify contents and hash, then atomically rename onto the target file.
+## D-008 Single-Writer Sync Protocol
+Local changes are written to disk first. Remote sync is an external replicator that merges via version vectors / CRDTs, never bypassing `VaultStorage`.
 
-**Reason:** Prevents truncated files and data corruption during process crashes or power loss (`F-002`).
+## D-009 Multi-Tab Workspace Concurrency Token
+Every open tab must retain its immutable `initialSnapshot` (content + version token). When saving, `SafeWriter` validates that the disk state still matches `initialSnapshot.version.token`. If modified elsewhere or on disk, a concurrency conflict is triggered and resolved without data loss.
 
-## D-004 Unified Normalized VaultPath Abstraction
+## D-010 Atomic Temporary File Renaming
+On Node.js environments, writes must write to an isolated temporary file (`.tmp.timestamp.random`) and atomically rename over the target path via `fs.rename` to prevent half-written files on crash.
 
-**Decision:** All paths within the workspace are represented as normalized, POSIX-style relative paths without leading slashes or Windows backslashes.
-
-**Reason:** Ensures cross-platform link resolution, consistency across OS filesystems, and prevents case/slash path bugs.
-
-## D-005 Deterministic Wikilink Resolution Order
-
-**Decision:** Wikilinks resolve in strict order: (1) exact relative path, (2) exact vault root path, (3) unique basename anywhere in vault, (4) frontmatter alias. Ambiguities return candidate matches.
-
-**Reason:** Guarantees deterministic, predictable link navigation across vaults of any depth (`F-010`).
-
-## D-006 Debounced Incremental Indexing with Immediate Write-Through
-
-**Decision:** File modifications write through to disk immediately via SafeWriter; derived index updates are debounced to maintain sub-16ms editor typing responsiveness.
-
-**Reason:** Satisfies the Performance Stop Rule while ensuring durable data persistence.
-
-## D-007 Multi-Tab Isolation via Component Key Mounting
-
-**Decision:** Editor instances are keyed to the active document path (`key={activeTab.path}`) rather than reusing existing DOM state.
-
-**Reason:** Prevents stale closure capture and cross-document buffer leakage when switching tabs.
-
-## D-008 Defensive CodeMirror Command Isolation
-
-**Decision:** Hotkey handlers registered in CodeMirror explicitly return `true` to halt browser event propagation.
-
-**Reason:** Prevents double execution of commands like Save (Ctrl+S) and Quick Open (Ctrl+P).
-
-## D-009 Dual-Agent Architecture Division of Labor
-
-**Decision:** Gemini 3.7 Flash in Google Antigravity 2.0 is the primary implementation/architecture foreman. DeepSeek V4 Flash in Reasonix is the adversarial reviewer and bounded secondary implementer.
-
-**Reason:** one architectural authority prevents two-model divergence while retaining independent failure discovery.
-
-## D-011 SafeSave ExpectedVersion & Content Hash Concurrency
-
-**Decision:** Storage write operations require `expectedVersion` concurrency verification against file mtime and FNV/SHA content hashes. Unconditional overwrite requires explicit user force flag.
+## D-011 Explicit Version Token / Stat Tracking on Node FS
+`NodeFsVaultStorage` returns structured `FileVersion` containing exact content hash, size, and modified timestamp to guarantee atomic optimistic locking.
 
 **Reason:** Prevents `F-001` (silent data overwrite) and `F-002` (partial corrupt write) in multi-tab, external editor, and rapid autosave workflows.
 
@@ -83,3 +65,9 @@
 **Decision:** All graph models, node degrees, and edges (`wikilink`, `embed`, `tag`, `property`) are strictly derived from `DocumentIndex` via `buildGraphData(index, options)` with zero direct storage access (Constitution Law 21). Interactive Canvas graph simulation uses rapid auto-cooling decay to prevent main-thread editor typing stalls.
 
 **Reason:** Guarantees absolute single-writer indexing architecture, ensures graph views scale to thousands of notes without file I/O overhead, and preserves sub-16ms editor responsiveness (Performance Stop Rule).
+
+## D-016 Notion-Like Database Views & Non-Destructive Frontmatter Property Mutation
+
+**Decision:** Database Views (Table, Board/Kanban, List, Saved Views) and Property Queries are strictly derived on-the-fly from open file metadata in `DocumentIndex` with zero proprietary database locks (Constitution Law 21). Property mutations update Markdown YAML frontmatter in-place, preserving `# ...` comments, untouched fields, typed array items, whitespace padding, CRLF/LF line endings, and UTF-8 BOM, strictly conforming to YAML 1.2 specifications.
+
+**Reason:** Eliminates proprietary database lock-in, ensures 100% of notes remain transparent plain-text Markdown files on disk, and allows safe inline spreadsheet/kanban property editing without corrupting document body text or structure.

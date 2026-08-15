@@ -105,3 +105,46 @@ export interface GraphFilterOptions {
   readonly focusNodeId?: string; // Local graph center
   readonly maxDepth?: number; // Local graph radius (default: 1 or 2)
 }
+
+/**
+ * Phase 6 Notion-Like View Interfaces (Constitution Law 21: Strictly derived from open file metadata)
+ */
+
+export type FilterOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains'
+  | 'greater_than'
+  | 'less_than'
+  | 'is_empty'
+  | 'is_not_empty';
+
+export interface PropertyFilter {
+  readonly field: string; // e.g. "status", "priority", "tags", "title", "path"
+  readonly operator: FilterOperator;
+  readonly value?: any;
+}
+
+export interface PropertySort {
+  readonly field: string; // e.g. "title", "modifiedAt", "priority", "status"
+  readonly direction: 'asc' | 'desc';
+}
+
+export type ViewType = 'table' | 'board' | 'list';
+
+export interface ViewConfig {
+  readonly id: string;
+  readonly name: string;
+  readonly type: ViewType;
+  readonly filters?: PropertyFilter[];
+  readonly sorts?: PropertySort[];
+  readonly groupBy?: string; // Group field for Kanban boards (e.g. "status", "priority")
+  readonly visibleProperties?: string[]; // Display columns in table / properties on cards
+  readonly folderScope?: string; // Scope to specific folder
+}
+
+export interface SavedView extends ViewConfig {
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}

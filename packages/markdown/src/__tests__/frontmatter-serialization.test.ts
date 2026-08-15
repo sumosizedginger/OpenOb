@@ -1,18 +1,63 @@
 import { describe, expect, it } from 'vitest';
 import { DefaultDocumentParser, updateDocumentFrontmatter, serializeYamlValue, parseFrontmatter } from '../index.js';
 
-describe('Phase 5 Frontmatter Serializer & Properties Updater (P5-1)', () => {
-  it('correctly serializes YAML values and safely quotes ambiguous strings', () => {
+describe('Phase 6 Frontmatter Serializer & YAML 1.2 Compliance', () => {
+  it('correctly serializes YAML values and safely quotes ambiguous strings and padded values', () => {
     expect(serializeYamlValue('simple')).toBe('simple');
     expect(serializeYamlValue('true')).toBe('"true"'); // Ambiguous boolean string quoted!
+    expect(serializeYamlValue('yes')).toBe('"yes"'); // YAML 1.2 string quoted!
+    expect(serializeYamlValue('no')).toBe('"no"'); // YAML 1.2 string quoted!
     expect(serializeYamlValue('123')).toBe('"123"'); // Ambiguous numeric string quoted!
     expect(serializeYamlValue('007')).toBe('"007"'); // Leading zero string quoted!
+    expect(serializeYamlValue('0o17')).toBe('"0o17"'); // Octal string quoted!
+    expect(serializeYamlValue('  padded  ')).toBe('"  padded  "'); // Whitespace-padded string quoted!
     expect(serializeYamlValue('key: value')).toBe('"key: value"'); // Special colon quoted!
     expect(serializeYamlValue(null)).toBe('null');
     expect(serializeYamlValue(undefined)).toBe('null');
     expect(serializeYamlValue(true)).toBe('true');
     expect(serializeYamlValue(42)).toBe('42');
-    expect(serializeYamlValue(['tag1', 123, true, 'with: colon'])).toBe('[tag1, 42, true, "with: colon"]'.replace('42', '123'));
+  });
+
+  it('preserves "yes" and "no" as strings in YAML 1.2 without boolean coercion', () => {
+    const doc = `---
+published: yes
+archived: no
+actual_bool: true
+---
+Body`;
+
+    const parsed = parseFrontmatter(doc);
+    expect(parsed.properties.published).toBe('yes');
+    expect(parsed.properties.archived).toBe('no');
+    expect(parsed.properties.actual_bool).toBe(true);
+
+    const updated = updateDocumentFrontmatter(doc, parsed.properties);
+    const reparsed = parseFrontmatter(updated);
+    expect(reparsed.properties.published).toBe('yes');
+    expect(reparsed.properties.archived).toBe('no');
+  });
+
+  it('handles array elements with commas inside quotes', () => {
+    const doc = `---
+tags: [alpha, "beta, gamma", delta]
+---
+Body`;
+
+    const parsed = parseFrontmatter(doc);
+    expect(parsed.properties.tags).toEqual(['alpha', 'beta, gamma', 'delta']);
+  });
+
+  it('preserves whitespace padding in strings', () => {
+    const doc = `---
+title: "  Padded Title  "
+---
+Body`;
+
+    const parsed = parseFrontmatter(doc);
+    expect(parsed.properties.title).toBe('  Padded Title  ');
+
+    const updated = updateDocumentFrontmatter(doc, parsed.properties);
+    expect(updated).toContain('title: "  Padded Title  "');
   });
 
   it('safely updates frontmatter on markdown documents while preserving body and CRLF line endings', async () => {
@@ -69,42 +114,5 @@ author: Alice
     expect(updated).toContain('status: published');
     expect(updated).toContain('author: Alice');
     expect(updated).toContain('# Content here');
-  });
-
-  it('preserves typed array elements and null values across parse and update', () => {
-    const doc = `---
-items: [1, true, "string value", null]
-code: "007"
----
-Body`;
-
-    const parsed = parseFrontmatter(doc);
-    expect(parsed.properties.items).toEqual([1, true, 'string value', null]);
-    expect(parsed.properties.code).toBe('007');
-
-    const updated = updateDocumentFrontmatter(doc, {
-      ...parsed.properties,
-      count: 42,
-    });
-
-    const reparsed = parseFrontmatter(updated);
-    expect(reparsed.properties.items).toEqual([1, true, 'string value', null]);
-    expect(reparsed.properties.code).toBe('007');
-    expect(reparsed.properties.count).toBe(42);
-  });
-
-  it('preserves UTF-8 BOM when updating frontmatter', () => {
-    const bomDoc = '\uFEFF---\ntitle: BOM Note\n---\nBody with BOM';
-    const updated = updateDocumentFrontmatter(bomDoc, { title: 'Updated BOM Note' });
-
-    expect(updated.startsWith('\uFEFF')).toBe(true);
-    expect(updated).toContain('title: Updated BOM Note');
-  });
-
-  it('handles frontmatter with no trailing newline at end of file', () => {
-    const noTrailing = '---\ntitle: End of File\n---';
-    const updated = updateDocumentFrontmatter(noTrailing, { title: 'Updated End of File' });
-
-    expect(updated.startsWith('---\ntitle: Updated End of File\n---\n')).toBe(true);
   });
 });

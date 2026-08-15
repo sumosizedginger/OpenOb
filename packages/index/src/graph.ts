@@ -4,7 +4,6 @@ import {
   GraphEdge,
   GraphFilterOptions,
   GraphNode,
-  ParsedDocument,
 } from '@okw/core';
 import { DefaultLinkResolver } from './link-resolver.js';
 
@@ -17,12 +16,6 @@ export async function buildGraphData(
   options: GraphFilterOptions = {}
 ): Promise<GraphData> {
   const allDocs = await index.getAll();
-  const docMap = new Map<string, ParsedDocument>();
-
-  for (const doc of allDocs) {
-    docMap.set(doc.path, doc);
-    docMap.set(doc.id, doc);
-  }
 
   // 1. Filter documents based on query, folder, and tags
   let filteredDocs = allDocs;
@@ -52,19 +45,25 @@ export async function buildGraphData(
     );
   }
 
-  const validPathSet = new Set(filteredDocs.map((d) => d.path));
+  const validPathSet = new Set<string>();
+  for (let i = 0; i < filteredDocs.length; i++) {
+    validPathSet.add(filteredDocs[i].path);
+  }
 
-  // 2. Build edges with provenance using fast batch resolver
+  // 2. Build edges with provenance using single-pass fast resolver
   const resolver = new DefaultLinkResolver(() => allDocs);
   const edges: GraphEdge[] = [];
   const edgeKeySet = new Set<string>();
   const degreeMap = new Map<string, number>();
 
-  for (const doc of filteredDocs) {
-    for (const link of doc.links) {
+  for (let d = 0; d < filteredDocs.length; d++) {
+    const doc = filteredDocs[d];
+    const links = doc.links;
+    for (let l = 0; l < links.length; l++) {
+      const link = links[l];
       const res = resolver.resolve(doc.path, link.target);
       if (res.resolved && res.targetPath && validPathSet.has(res.targetPath)) {
-        if (res.targetPath === doc.path) continue; // Skip self-edges in graph view
+        if (res.targetPath === doc.path) continue; // Skip self-edges
 
         const kind = link.isEmbed ? 'embed' : 'wikilink';
         const edgeKey = `${doc.path}->${res.targetPath}:${kind}:${link.line}`;
@@ -92,30 +91,36 @@ export async function buildGraphData(
   const tagNodes: GraphNode[] = [];
   if (options.includeTags) {
     const tagToDocs = new Map<string, string[]>();
-    for (const doc of filteredDocs) {
-      for (const tag of doc.tags) {
-        const list = tagToDocs.get(tag) || [];
+    for (let d = 0; d < filteredDocs.length; d++) {
+      const doc = filteredDocs[d];
+      for (let t = 0; t < doc.tags.length; t++) {
+        const tag = doc.tags[t];
+        let list = tagToDocs.get(tag);
+        if (!list) {
+          list = [];
+          tagToDocs.set(tag, list);
+        }
         list.push(doc.path);
-        tagToDocs.set(tag, list);
       }
     }
 
     for (const [tag, docPaths] of tagToDocs.entries()) {
-      const tagId = `tag:#${tag}`;
+      const tagNodeId = `tag:${tag}`;
       tagNodes.push({
-        id: tagId,
-        path: tagId,
+        id: tagNodeId,
+        path: tagNodeId,
         title: `#${tag}`,
         tags: [tag],
-        val: docPaths.length + 1,
+        val: docPaths.length,
         group: 'tag',
         isTagNode: true,
       });
 
-      for (const docPath of docPaths) {
+      for (let p = 0; p < docPaths.length; p++) {
+        const docPath = docPaths[p];
         edges.push({
           source: docPath,
-          target: tagId,
+          target: tagNodeId,
           kind: 'tag',
           provenance: { tag },
         });
@@ -124,18 +129,18 @@ export async function buildGraphData(
     }
   }
 
-  // 4. Build document nodes
+  // 4. Construct Node Objects
   let nodes: GraphNode[] = filteredDocs.map((doc) => {
-    const folderParts = doc.path.split('/');
-    const group = folderParts.length > 1 ? folderParts[0] : 'root';
-    const degree = degreeMap.get(doc.path) || 0;
+    const segments = doc.path.split('/');
+    const group = segments.length > 1 ? segments[0] : 'root';
+    const val = degreeMap.get(doc.path) || 0;
 
     return {
       id: doc.path,
       path: doc.path,
       title: doc.title,
       tags: doc.tags,
-      val: Math.max(1, degree),
+      val: Math.max(1, val),
       group,
       properties: doc.properties,
       isTagNode: false,
@@ -143,28 +148,40 @@ export async function buildGraphData(
   });
 
   if (options.includeTags) {
-    nodes = [...nodes, ...tagNodes];
+    nodes = nodes.concat(tagNodes);
   }
 
-  // 5. Local Graph extraction (focusNodeId & maxDepth)
-  if (options.focusNodeId) {
-    const maxDepth = options.maxDepth ?? 1;
-    const visited = new Set<string>([options.focusNodeId]);
-    let currentLevel = new Set<string>([options.focusNodeId]);
-
-    // Build adjacency list
-    const adj = new Map<string, Set<string>>();
-    for (const edge of edges) {
-      if (!adj.has(edge.source)) adj.set(edge.source, new Set());
-      if (!adj.has(edge.target)) adj.set(edge.target, new Set());
-      adj.get(edge.source)!.add(edge.target);
-      adj.get(edge.target)!.add(edge.source);
+  // 5. Hide Orphans filter
+  if (options.hideOrphans) {
+    const connectedIds = new Set<string>();
+    for (let e = 0; e < edges.length; e++) {
+      connectedIds.add(edges[e].source);
+      connectedIds.add(edges[e].target);
     }
+    nodes = nodes.filter((n) => connectedIds.has(n.id));
+  }
+
+  // 6. Local Graph Neighborhood Extraction (BFS)
+  if (options.focusNodeId) {
+    const focusId = options.focusNodeId;
+    const maxDepth = options.maxDepth ?? 1;
+
+    const adjacency = new Map<string, Set<string>>();
+    for (let e = 0; e < edges.length; e++) {
+      const edge = edges[e];
+      if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
+      if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
+      adjacency.get(edge.source)!.add(edge.target);
+      adjacency.get(edge.target)!.add(edge.source);
+    }
+
+    const visited = new Set<string>([focusId]);
+    let currentLevel = new Set<string>([focusId]);
 
     for (let depth = 0; depth < maxDepth; depth++) {
       const nextLevel = new Set<string>();
-      for (const nodeId of currentLevel) {
-        const neighbors = adj.get(nodeId);
+      for (const node of currentLevel) {
+        const neighbors = adjacency.get(node);
         if (neighbors) {
           for (const neighbor of neighbors) {
             if (!visited.has(neighbor)) {
@@ -179,22 +196,19 @@ export async function buildGraphData(
     }
 
     nodes = nodes.filter((n) => visited.has(n.id));
-    const visitedSet = new Set(nodes.map((n) => n.id));
+    const localNodeIds = new Set(nodes.map((n) => n.id));
+    const localEdges = edges.filter(
+      (e) => localNodeIds.has(e.source) && localNodeIds.has(e.target)
+    );
+
     return {
       nodes,
-      edges: edges.filter((e) => visitedSet.has(e.source) && visitedSet.has(e.target)),
+      edges: localEdges,
     };
   }
 
-  // 6. Hide orphans filter
-  if (options.hideOrphans) {
-    nodes = nodes.filter((n) => (degreeMap.get(n.id) || 0) > 0);
-    const nodeSet = new Set(nodes.map((n) => n.id));
-    return {
-      nodes,
-      edges: edges.filter((e) => nodeSet.has(e.source) && nodeSet.has(e.target)),
-    };
-  }
-
-  return { nodes, edges };
+  return {
+    nodes,
+    edges,
+  };
 }

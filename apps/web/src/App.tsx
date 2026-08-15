@@ -8,6 +8,7 @@ import { BacklinksPanel } from './components/BacklinksPanel.js';
 import { OutlinePanel } from './components/OutlinePanel.js';
 import { GraphView } from './components/GraphView.js';
 import { PropertiesPanel } from './components/PropertiesPanel.js';
+import { ViewContainer } from './components/views/ViewContainer.js';
 import { SearchModal } from './components/SearchModal.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ConflictModal } from './components/ConflictModal.js';
@@ -30,6 +31,8 @@ import {
   PanelLeft,
   Share2,
   Sliders,
+  LayoutGrid,
+  FileText,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -55,10 +58,13 @@ export const App: React.FC = () => {
     deletePath,
     openDirectoryVault,
     refreshVault,
+    updateNoteProperty,
+    createNoteWithProperties,
     dismissConflict,
     resolveConflictReload,
   } = useVault();
 
+  const [mainMode, setMainMode] = useState<'editor' | 'views'>('editor');
   const [viewMode, setViewMode] = useState<'split' | 'editor' | 'preview'>('split');
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState<
@@ -175,6 +181,7 @@ export const App: React.FC = () => {
     if (!activeTabPath) return;
     const res = index.resolveLink(activeTabPath, target);
     if (res.resolved && res.targetPath) {
+      setMainMode('editor');
       openNote(res.targetPath);
     } else {
       const cleanName = target.split('#')[0].split('|')[0].trim();
@@ -201,6 +208,26 @@ export const App: React.FC = () => {
             <span className="logo-text">OpenOb</span>
           </div>
           <span className="vault-badge">{vaultName}</span>
+
+          {/* Mode Switcher: Notes Editor vs Database Views (Phase 6) */}
+          <div className="view-mode-group" style={{ marginLeft: '12px' }}>
+            <button
+              className={`view-mode-btn ${mainMode === 'editor' ? 'active' : ''}`}
+              title="Notes Editor"
+              onClick={() => setMainMode('editor')}
+            >
+              <FileText size={14} />
+              <span>Editor</span>
+            </button>
+            <button
+              className={`view-mode-btn ${mainMode === 'views' ? 'active' : ''}`}
+              title="Notion-Like Database Views"
+              onClick={() => setMainMode('views')}
+            >
+              <LayoutGrid size={14} />
+              <span>Views</span>
+            </button>
+          </div>
         </div>
 
         <div className="header-center">
@@ -235,29 +262,31 @@ export const App: React.FC = () => {
             <FolderOpen size={16} />
           </button>
 
-          <div className="view-mode-group">
-            <button
-              className={`view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
-              title="Editor View"
-              onClick={() => setViewMode('editor')}
-            >
-              <BookOpen size={14} />
-            </button>
-            <button
-              className={`view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
-              title="Split View (Ctrl+\)"
-              onClick={() => setViewMode('split')}
-            >
-              <Columns size={14} />
-            </button>
-            <button
-              className={`view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
-              title="Preview View"
-              onClick={() => setViewMode('preview')}
-            >
-              <Eye size={14} />
-            </button>
-          </div>
+          {mainMode === 'editor' && (
+            <div className="view-mode-group">
+              <button
+                className={`view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
+                title="Editor View"
+                onClick={() => setViewMode('editor')}
+              >
+                <BookOpen size={14} />
+              </button>
+              <button
+                className={`view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
+                title="Split View (Ctrl+\)"
+                onClick={() => setViewMode('split')}
+              >
+                <Columns size={14} />
+              </button>
+              <button
+                className={`view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
+                title="Preview View"
+                onClick={() => setViewMode('preview')}
+              >
+                <Eye size={14} />
+              </button>
+            </div>
+          )}
 
           <div className="right-panel-toggles">
             <button
@@ -335,7 +364,10 @@ export const App: React.FC = () => {
             <FileTree
               entries={entries}
               activePath={activeTabPath}
-              onSelect={openNote}
+              onSelect={(path) => {
+                setMainMode('editor');
+                openNote(path);
+              }}
               onCreateNote={createNote}
               onCreateFolder={createFolder}
               onRename={renameNote}
@@ -344,59 +376,79 @@ export const App: React.FC = () => {
           </aside>
         )}
 
-        {/* Central Area: Tab Bar + Editor & Preview */}
+        {/* Central Area: Tab Bar + Editor & Preview OR Database Views */}
         <main className="editor-area">
-          <TabBar
-            tabs={openTabs}
-            activePath={activeTabPath}
-            onSelect={(path) => openNote(path)}
-            onClose={(path) => closeTab(path)}
-          />
+          {mainMode === 'views' ? (
+            <ViewContainer
+              index={index}
+              refreshKey={activeTab?.initialSnapshot?.version.hash}
+              onNavigate={(path) => {
+                setMainMode('editor');
+                openNote(path);
+              }}
+              onUpdateNoteProperty={updateNoteProperty}
+              onCreateNoteWithProperties={(props) => {
+                const title = prompt('Enter note title:');
+                if (title) {
+                  createNoteWithProperties(title, props);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <TabBar
+                tabs={openTabs}
+                activePath={activeTabPath}
+                onSelect={(path) => openNote(path)}
+                onClose={(path) => closeTab(path)}
+              />
 
-          <div className="content-split">
-            {activeTab ? (
-              <>
-                {(viewMode === 'editor' || viewMode === 'split') && (
-                  <div className="editor-container">
-                    <Editor
-                      key={activeTab.path}
-                      content={activeTab.content}
-                      onChange={(val) => updateContent(activeTab.path, val)}
-                      onSave={() => saveActiveNote()}
-                      onCommandPalette={() => setIsCommandPaletteOpen(true)}
-                      onNavigateWikilink={handleNavigateWikilink}
-                    />
+              <div className="content-split">
+                {activeTab ? (
+                  <>
+                    {(viewMode === 'editor' || viewMode === 'split') && (
+                      <div className="editor-container">
+                        <Editor
+                          key={activeTab.path}
+                          content={activeTab.content}
+                          onChange={(val) => updateContent(activeTab.path, val)}
+                          onSave={() => saveActiveNote()}
+                          onCommandPalette={() => setIsCommandPaletteOpen(true)}
+                          onNavigateWikilink={handleNavigateWikilink}
+                        />
+                      </div>
+                    )}
+
+                    {(viewMode === 'preview' || viewMode === 'split') && (
+                      <PreviewPane
+                        document={parsedDoc}
+                        onNavigateWikilink={handleNavigateWikilink}
+                        onToggleTask={toggleTask}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--text-muted)',
+                      gap: '12px',
+                    }}
+                  >
+                    <BookOpen size={36} style={{ opacity: 0.3 }} />
+                    <p>No document open</p>
+                    <button className="btn btn-primary" onClick={() => createNote()}>
+                      <FilePlus size={13} /> Create Note
+                    </button>
                   </div>
                 )}
-
-                {(viewMode === 'preview' || viewMode === 'split') && (
-                  <PreviewPane
-                    document={parsedDoc}
-                    onNavigateWikilink={handleNavigateWikilink}
-                    onToggleTask={toggleTask}
-                  />
-                )}
-              </>
-            ) : (
-              <div
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-muted)',
-                  gap: '12px',
-                }}
-              >
-                <BookOpen size={36} style={{ opacity: 0.3 }} />
-                <p>No document open</p>
-                <button className="btn btn-primary" onClick={() => createNote()}>
-                  <FilePlus size={13} /> Create Note
-                </button>
               </div>
-            )}
-          </div>
+            </>
+          )}
         </main>
 
         {/* Right Rail: Outline, Backlinks, Local Graph, or Properties */}
@@ -412,7 +464,10 @@ export const App: React.FC = () => {
             backlinks={backlinks}
             parsedDoc={parsedDoc}
             index={index}
-            onNavigate={(path) => openNote(path)}
+            onNavigate={(path) => {
+              setMainMode('editor');
+              openNote(path);
+            }}
             onCreateNote={(name) => createNote(name)}
           />
         )}
@@ -424,7 +479,10 @@ export const App: React.FC = () => {
               activeNotePath={activeTabPath}
               refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
               isLocal={true}
-              onNavigate={(path) => openNote(path)}
+              onNavigate={(path) => {
+                setMainMode('editor');
+                openNote(path);
+              }}
             />
           </div>
         )}
@@ -469,6 +527,7 @@ export const App: React.FC = () => {
               refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
               isLocal={false}
               onNavigate={(path) => {
+                setMainMode('editor');
                 openNote(path);
                 setIsGlobalGraphOpen(false);
               }}
@@ -495,7 +554,10 @@ export const App: React.FC = () => {
         isOpen={isCommandPaletteOpen}
         entries={entries}
         onClose={() => setIsCommandPaletteOpen(false)}
-        onOpenNote={(path) => openNote(path)}
+        onOpenNote={(path) => {
+          setMainMode('editor');
+          openNote(path);
+        }}
         onCreateNote={() => createNote()}
         onCreateFolder={() => createFolder()}
         onRefresh={() => refreshVault()}
@@ -509,7 +571,10 @@ export const App: React.FC = () => {
           setIsSearchModalOpen(false);
           setSelectedSearchTag(null);
         }}
-        onSelectResult={(path: VaultPath) => openNote(path)}
+        onSelectResult={(path: VaultPath) => {
+          setMainMode('editor');
+          openNote(path);
+        }}
         index={index}
       />
     </div>
