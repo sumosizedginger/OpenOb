@@ -17,6 +17,7 @@ export default defineConfig({
       '@okw/vault': path.resolve(__dirname, './packages/vault/src'),
       '@okw/markdown': path.resolve(__dirname, './packages/markdown/src'),
       '@okw/index': path.resolve(__dirname, './packages/index/src'),
+      '@okw/ai': path.resolve(__dirname, './packages/ai/src'),
     },
   },
 });

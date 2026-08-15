@@ -5,6 +5,7 @@
     { "path": "./packages/vault" },
     { "path": "./packages/markdown" },
     { "path": "./packages/index" },
+    { "path": "./packages/ai" },
     { "path": "./apps/web" }
   ]
 }

@@ -9,12 +9,14 @@ import { OutlinePanel } from './components/OutlinePanel.js';
 import { GraphView } from './components/GraphView.js';
 import { PropertiesPanel } from './components/PropertiesPanel.js';
 import { ViewContainer } from './components/views/ViewContainer.js';
+import { AIChatDrawer } from './components/ai/AIChatDrawer.js';
 import { SearchModal } from './components/SearchModal.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ConflictModal } from './components/ConflictModal.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { ParsedHeading, VaultPath } from '@okw/core';
 import { updateDocumentFrontmatter } from '@okw/markdown';
+import { ProposedEdit } from '@okw/ai';
 import {
   FolderPlus,
   FilePlus,
@@ -33,11 +35,13 @@ import {
   Sliders,
   LayoutGrid,
   FileText,
+  Bot,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const {
     vaultName,
+    storage,
     entries,
     openTabs,
     activeTab,
@@ -68,7 +72,7 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'split' | 'editor' | 'preview'>('split');
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState<
-    'backlinks' | 'outline' | 'graph' | 'properties' | null
+    'backlinks' | 'outline' | 'graph' | 'properties' | 'ai' | null
   >('outline');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -187,6 +191,22 @@ export const App: React.FC = () => {
       const cleanName = target.split('#')[0].split('|')[0].trim();
       if (confirm(`Note "${cleanName}" does not exist. Would you like to create it?`)) {
         createNote(cleanName);
+      }
+    }
+  };
+
+  // Phase 7: Apply user-accepted AI proposed edit (Constitution Law 19)
+  const handleApplyProposedEdit = async (proposal: ProposedEdit) => {
+    if (activeTab && activeTab.path === proposal.path) {
+      updateContent(proposal.path, proposal.proposedContent);
+      await saveActiveNote();
+    } else {
+      const snap = await storage.read(proposal.path);
+      await storage.write(proposal.path, snap.version, proposal.proposedContent);
+      const parsed = await index.getAll();
+      const updatedDoc = parsed.find((d) => d.path === proposal.path);
+      if (updatedDoc) {
+        await index.upsert(updatedDoc);
       }
     }
   };
@@ -325,6 +345,15 @@ export const App: React.FC = () => {
             >
               <Sliders size={15} />
             </button>
+            <button
+              className={`btn-icon ${showRightPanel === 'ai' ? 'active' : ''}`}
+              title="Toggle Local AI Assistant"
+              onClick={() =>
+                setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))
+              }
+            >
+              <Bot size={16} />
+            </button>
           </div>
         </div>
       </header>
@@ -451,7 +480,7 @@ export const App: React.FC = () => {
           )}
         </main>
 
-        {/* Right Rail: Outline, Backlinks, Local Graph, or Properties */}
+        {/* Right Rail: Outline, Backlinks, Local Graph, Properties, or AI Assistant */}
         {showRightPanel === 'outline' && parsedDoc && (
           <OutlinePanel
             headings={parsedDoc.headings}
@@ -502,6 +531,23 @@ export const App: React.FC = () => {
                   updateContent(activeTab.path, updated);
                 }
               }}
+            />
+          </div>
+        )}
+
+        {showRightPanel === 'ai' && (
+          <div style={{ width: '340px', height: '100%' }}>
+            <AIChatDrawer
+              storage={storage}
+              index={index}
+              activeNotePath={activeTabPath}
+              activeNoteContent={activeTab?.content}
+              onNavigate={(path) => {
+                setMainMode('editor');
+                openNote(path);
+              }}
+              onApplyProposedEdit={handleApplyProposedEdit}
+              onClose={() => setShowRightPanel(null)}
             />
           </div>
         )}

@@ -71,3 +71,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** Database Views (Table, Board/Kanban, List, Saved Views) and Property Queries are strictly derived on-the-fly from open file metadata in `DocumentIndex` with zero proprietary database locks (Constitution Law 21). Property mutations update Markdown YAML frontmatter in-place, preserving `# ...` comments, untouched fields, typed array items, whitespace padding, CRLF/LF line endings, and UTF-8 BOM, strictly conforming to YAML 1.2 specifications.
 
 **Reason:** Eliminates proprietary database lock-in, ensures 100% of notes remain transparent plain-text Markdown files on disk, and allows safe inline spreadsheet/kanban property editing without corrupting document body text or structure.
+
+## D-017 Local AI Provider Abstraction, Scoped Retrieval & Proposal-Based Edits
+
+**Decision:** AI is an optional, replaceable capability layer interacting through the abstract `AIProvider` contract (`OpenAICompatibleProvider` supporting Ollama, LM Studio, and custom local endpoints). Context retrieval is strictly bounded to user-selected scopes (selection, current note, folder, vault) with clickable note citations. All AI file modifications operate in `PROPOSE` mode producing structured diffs (`ProposedEdit`) applied only on explicit user approval via `SafeWriter` optimistic concurrency control.
+
+**Reason:** Enforces Constitution Laws 18 & 19 (AI failure never degrades core workspace functionality, and AI can never silently write to disk or bypass file permissions).
