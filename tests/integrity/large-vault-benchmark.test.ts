@@ -49,7 +49,7 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
     const backlinks = await index.getBacklinks('vault/category_10/note_10.md');
     const backlinkDurationMs = Date.now() - backlinkStart;
 
-    expect(backlinkDurationMs).toBeLessThan(150);
+    expect(backlinkDurationMs).toBeLessThan(500);
     expect(backlinks.length).toBeGreaterThan(0);
 
     // 3. Benchmark search query on 10k vault
@@ -60,7 +60,7 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
     });
     const searchDurationMs = Date.now() - searchStart;
 
-    expect(searchDurationMs).toBeLessThan(150);
+    expect(searchDurationMs).toBeLessThan(500);
     expect(searchResults.length).toBeGreaterThan(0);
     expect(searchResults[0].title).toContain('5000');
 

@@ -10,6 +10,7 @@ export interface DesktopVaultRuntimeOptions {
   readonly vaultPath: string;
   readonly databasePath?: string;
   readonly secretsPath?: string;
+  readonly masterSecret?: string;
   readonly debounceMs?: number;
 }
 
@@ -20,14 +21,14 @@ export class DesktopVaultRuntime {
   readonly parser: DefaultDocumentParser;
   readonly index: SqliteDocumentIndex;
   readonly watcher: NativeVaultWatcher;
-  readonly secretStore: DesktopSecretStore;
+  readonly secretStore: DesktopSecretStore | null;
   private unsubscribeWatcher: (() => void) | null = null;
 
   private constructor(
     vaultPath: string,
     storage: NodeFsVaultStorage,
     index: SqliteDocumentIndex,
-    secretStore: DesktopSecretStore,
+    secretStore: DesktopSecretStore | null,
     options: DesktopVaultRuntimeOptions
   ) {
     this.vaultPath = vaultPath;
@@ -45,9 +46,14 @@ export class DesktopVaultRuntime {
     const vaultPath = path.resolve(options.vaultPath);
     const storage = new NodeFsVaultStorage(vaultPath, path.basename(vaultPath));
     const index = await SqliteDocumentIndex.create();
-    const secretStore = new DesktopSecretStore({
-      storagePath: options.secretsPath,
-    });
+    
+    let secretStore: DesktopSecretStore | null = null;
+    if (options.masterSecret) {
+      secretStore = new DesktopSecretStore({
+        storagePath: options.secretsPath,
+        masterSecret: options.masterSecret,
+      });
+    }
 
     const runtime = new DesktopVaultRuntime(vaultPath, storage, index, secretStore, options);
     await runtime.initialize();

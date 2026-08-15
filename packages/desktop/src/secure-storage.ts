@@ -5,7 +5,7 @@ import { SecretStore } from '@okw/ai';
 
 export interface DesktopSecretStoreOptions {
   readonly storagePath?: string;
-  readonly masterSecret?: string;
+  readonly masterSecret: string;
 }
 
 interface EncryptedPayload {
@@ -19,13 +19,16 @@ export class DesktopSecretStore implements SecretStore {
   private readonly masterKey: Buffer;
   private memoryCache: Map<string, string> = new Map();
 
-  constructor(options: DesktopSecretStoreOptions = {}) {
+  constructor(options: DesktopSecretStoreOptions) {
+    if (!options?.masterSecret || typeof options.masterSecret !== 'string' || options.masterSecret.trim().length === 0) {
+      throw new Error('DesktopSecretStore requires a non-empty masterSecret passphrase');
+    }
+
     this.storagePath = options.storagePath ? path.resolve(options.storagePath) : null;
 
     // Derive 256-bit key using PBKDF2 with system salt
     const salt = Buffer.from('okw-desktop-key-salt-v1', 'utf8');
-    const secret = options.masterSecret || 'okw-device-bound-secret';
-    this.masterKey = crypto.pbkdf2Sync(secret, salt, 100000, 32, 'sha256');
+    this.masterKey = crypto.pbkdf2Sync(options.masterSecret, salt, 100000, 32, 'sha256');
 
     this.loadFromDisk();
   }

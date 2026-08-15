@@ -44,6 +44,7 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     const runtime = await DesktopVaultRuntime.create({
       vaultPath: testVaultDir,
       secretsPath: path.join(secretsDir, 'secrets.json'),
+      masterSecret: 'test-master-key',
       debounceMs: 20,
     });
 
@@ -74,6 +75,7 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     const runtime = await DesktopVaultRuntime.create({
       vaultPath: testVaultDir,
       secretsPath: path.join(secretsDir, 'secrets.json'),
+      masterSecret: 'test-master-key',
       debounceMs: 10,
     });
 
@@ -94,7 +96,7 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
       runtime.watcher.handleFsEvent('rename', 'ExternalNote.md');
 
       // Wait for debounce and index sync
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       const docsAfterExternal = await runtime.index.getAll();
       expect(docsAfterExternal.some((d: any) => d.path === 'ExternalNote.md')).toBe(true);

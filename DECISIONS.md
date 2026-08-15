@@ -84,11 +84,11 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 
 **Reason:** Empowers users to use their own cloud AI keys with strict privacy, zero secret leakage, and total workspace operational resilience.
 
-## D-019 Isolated Capability Host, Permission Manifest & Plugin SDK
+## D-019 Capability Host, Permission Manifest & First-Party Plugin SDK
 
-**Decision:** Plugins execute against an isolated capability host (`PluginHost`) interacting strictly through a sandboxed, permission-gated bridge (`PluginAPI`). All plugin capabilities (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) must be explicitly declared in `manifest.permissions`; undeclared invocations fail closed with `PermissionDeniedError` (Constitution Law 20, `F-006`). Crashes during plugin load, unload, or command execution are strictly contained, isolating the failing plugin into an `'error'` state with restart capability while leaving core note storage, editor, search, graph, and views 100% operational (Constitution Law 20, `F-007`). First-party plugins (`WordCount`, `DailyNotes`) are authored strictly against public `PluginAPI` interfaces with zero private internal package imports.
+**Decision:** First-party plugins execute against a host (`PluginHost`) interacting strictly through a permission-gated API bridge (`PluginAPI`). All plugin capabilities (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) must be explicitly declared in `manifest.permissions`; undeclared invocations fail closed with `PermissionDeniedError` checked against an immutable permission set (Constitution Law 20, `F-006`, `F-030`). Crashes during plugin load, unload, or command execution are strictly contained at the host boundary, isolating the failing plugin into an `'error'` state with restart capability while leaving core workspace operations 100% operational (Constitution Law 20, `F-007`). The current runtime is a same-realm permission facade; full execution isolation (Web Worker / iframe boundary) is a roadmap requirement prior to third-party plugin distribution (`F-032`).
 
-**Reason:** Enables rich modular ecosystem expansion while guaranteeing workspace security and crash resilience.
+**Reason:** Enables modular ecosystem expansion for first-party plugins while enforcing capability boundaries and crash resilience.
 
 ## D-020 First-Party Plugin Pack & Public API Dogfooding
 
@@ -98,12 +98,12 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 
 ## D-021 Full-System End-to-End Integration & Public Alpha Consolidation
 
-**Decision:** The entire Open Knowledge Workspace system across storage, parsing, indexing, search, graph visualization, Notion-like views, Local & Cloud AI, and sandboxed Plugin SDK is consolidated into a single unified architecture. The browser-based Public Alpha utilizes the lightweight `MemoryDocumentIndex` for instant zero-wasm startup, with the SQLite relational engine (`SqliteDocumentIndex`) delivered, integration-tested, and verified for desktop and large-vault scaling. All derived states remain 100% disposable and reconstructible from canonical Markdown files with exact parity. All write mutations enforce optimistic concurrency control, and all third-party and first-party capabilities adhere to strict permission gating and exception containment.
+**Decision:** The entire Open Knowledge Workspace system across storage, parsing, indexing, search, graph visualization, Notion-like views, Local & Cloud AI, and first-party Plugin SDK is consolidated into a single unified architecture. The browser-based Public Alpha utilizes the lightweight `MemoryDocumentIndex` for instant zero-wasm startup. The SQLite relational engine (`SqliteDocumentIndex`) is delivered as an in-memory WASM `sql.js` engine, integration-tested and verified with exact doc-by-doc rebuild parity from canonical Markdown files. All derived states remain 100% disposable and reconstructible from canonical Markdown files. All write mutations enforce optimistic concurrency control, and all first-party plugin capabilities adhere to strict permission gating and exception containment.
 
-**Reason:** Establishes complete architectural stability, verified zero-data-loss durability, and readiness for real-world dogfooding and public alpha release.
+**Reason:** Establishes architectural stability, verified zero-data-loss durability, and readiness for real-world dogfooding and public alpha release.
 
-## D-022 Desktop Wrapper, Native Vault Watcher & SQLite Native Scaling
+## D-022 Desktop Runtime Library, Native Vault Watcher & Authenticated Secret Store
 
-**Decision:** Native desktop deployments run on `@okw/desktop`, combining `NodeFsVaultStorage` for direct on-disk Markdown storage with `SqliteDocumentIndex` wired directly into the desktop backend (`DesktopVaultRuntime`), fulfilling the `D-021` obligation for 100,000+ note vaults. External filesystem changes are monitored via `NativeVaultWatcher` with debounce filtering and ignore rules for internal SafeWriter swap files (`.okw.tmp.*`). BYOK cloud AI secrets are persisted in `DesktopSecretStore` using authenticated AES-256-GCM encryption with machine-bound key derivation (Constitution Law 17, `F-005`). IPC interactions between the native shell and renderer use type-safe message channels.
+**Decision:** `@okw/desktop` provides a Node runtime library combining `NodeFsVaultStorage` for direct on-disk Markdown storage with `SqliteDocumentIndex` and `SafeWriter` in `DesktopVaultRuntime` (a packaged Electron desktop shell is planned for Phase 12, not delivered). External filesystem changes are monitored via `NativeVaultWatcher` with debounce filtering and ignore rules for internal SafeWriter swap files (`.okw.tmp.*`). BYOK cloud AI secrets are persisted in `DesktopSecretStore` using authenticated AES-256-GCM file encryption with explicit user-provided master passphrase key derivation (Constitution Law 17, `F-005`), not machine-bound. In-process IPC routing contracts are provided by `DesktopIpcBridge`.
 
-**Reason:** Enables high-performance native desktop execution with zero data-loss safe writing, live external file sync, and robust encryption.
+**Reason:** Enables high-performance native Node desktop execution with zero data-loss safe writing, live external file sync, and robust authenticated secret encryption.
