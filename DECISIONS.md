@@ -95,3 +95,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** First-party extensions (`Templates`, `CharacterBible`, `ManuscriptTools`, `DailyNotes`, `WordCount`) are built exclusively as modular plugins using the public `PluginAPI` surface (`@okw/plugin`) with zero private internal package imports. Dynamic templating performs variable interpolation (`{{title}}`, `{{date}}`, `{{time}}`), Character Bible structures world-building profiles with standard YAML properties, and Manuscript Tools aggregates multi-file statistics strictly using `api.vault` and `api.workspace` methods.
 
 **Reason:** Enforces Constitution Law 20 (no undocumented private escape hatches for first-party plugins) and guarantees third-party parity.
+
+## D-021 Full-System End-to-End Integration & Public Alpha Consolidation
+
+**Decision:** The entire Open Knowledge Workspace system across storage, parsing, indexing, search, graph visualization, Notion-like views, Local & Cloud AI, and sandboxed Plugin SDK is consolidated into a single unified architecture. All derived states (in-memory indexes, SQLite caches, graph representations, and view filters) remain 100% disposable and reconstructible from canonical Markdown files. All write mutations enforce optimistic concurrency control, and all third-party and first-party capabilities adhere to strict permission gating and exception containment.
+
+**Reason:** Establishes complete architectural stability, verified zero-data-loss durability, and readiness for real-world dogfooding and public alpha release.

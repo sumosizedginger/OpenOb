@@ -122,9 +122,7 @@ export async function retrieveContext(
             ? snap.content
             : new TextDecoder().decode(snap.content);
         const noteChunks = chunkDocumentByHeadings(res.path, res.title, text);
-        if (noteChunks.length > 0) {
-          chunks.push(noteChunks[0]);
-        }
+        chunks.push(...noteChunks.slice(0, 2));
       } catch {}
     }
   }
@@ -144,9 +142,7 @@ export async function retrieveContext(
             ? snap.content
             : new TextDecoder().decode(snap.content);
         const noteChunks = chunkDocumentByHeadings(res.path, res.title, text);
-        if (noteChunks.length > 0) {
-          chunks.push(noteChunks[0]);
-        }
+        chunks.push(...noteChunks.slice(0, 2));
       } catch {}
     }
   }

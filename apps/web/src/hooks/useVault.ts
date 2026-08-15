@@ -71,21 +71,83 @@ tags: [daily, log, sprint]
 
 ## Focus Items
 - [x] Initialized Open Knowledge Workspace
-- [x] Established Phase 0 (Foundation) and Phase 1 (Trustworthy Vault)
+- [x] Established Phase 0 through Phase 10 architectural foundations
 - [x] Verified zero data-loss safe save pipeline
-- [ ] Review with [[Architecture]] specifications
+- [ ] Review [[Characters/Kaelen]] and [[Manuscript/Chapter_01]]
 `,
-  'Projects/Quantum Computing.md': `---
-title: Quantum Computing Project
-tags: [project/quantum, science]
+  'Characters/Kaelen.md': `---
+title: Kaelen
+type: character
+role: protagonist
+status: active
+affiliations: [Aegis, Vanguard]
+aliases: [The Wanderer]
+tags: [character, worldbuilding]
 ---
 
-# Quantum Computing Project
+# Kaelen
 
-Exploring algorithms and hardware implementations.
-Related references:
-- [[Architecture]]
-- [[Welcome]]
+## Overview
+A skilled tactician navigating the fractured realms. Relies on instinct and deep lore.
+
+## Key Relationships
+- [[Characters/Seraphine]]: Trusted ally in [[Manuscript/Chapter_01]].
+- Connected to [[Projects/Alpha Roadmap]].
+`,
+  'Manuscript/Chapter_01.md': `---
+title: Chapter 1: The First Step
+type: chapter
+word_count: 1250
+status: draft
+tags: [manuscript, novel]
+---
+
+# Chapter 1: The First Step
+
+The mist hung thick over the valley as dawn broke across the jagged horizon. Kaelen adjusted the straps of his worn leather pack, feeling the quiet weight of the artifacts within.
+
+For seven years, the rumors had spoken of the lost archives beneath the Spire. Few who ventured into the ruins ever returned with their minds intact, but Kaelen possessed the cartographer's cipher.
+
+He glanced back one last time at the frontier outpost, where lanterns flickered faintly against the morning cold. There would be no retreat now. The path ahead led directly through the forgotten gorge.
+`,
+  'Projects/Alpha Roadmap.md': `---
+title: Alpha Release Roadmap
+type: project
+status: in_progress
+priority: high
+due: 2026-09-01
+tags: [project, roadmap]
+---
+
+# Alpha Release Roadmap
+
+Tracking delivery milestones across the workspace engine.
+
+## Milestones
+- [x] Storage & SafeWriter Core
+- [x] Disposable Relational Index & SQLite Engine
+- [x] 2D Graph Engine with Provenance Edges
+- [x] Notion-Like Views & Property Queries
+- [x] Local & BYOK Cloud AI
+- [x] Sandboxed Plugin SDK & First-Party Extensions
+`,
+  'Templates/Meeting.md': `---
+title: {{title}}
+date: {{date}}
+tags: [meeting, notes]
+---
+
+# {{title}}
+
+**Date:** {{date}} · **Time:** {{time}}
+
+## Attendees
+- 
+
+## Agenda & Discussion
+
+## Action Items
+- [ ] 
 `,
 };
 
