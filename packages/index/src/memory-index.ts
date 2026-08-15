@@ -35,7 +35,7 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
   }
 
   async getAll(): Promise<ParsedDocument[]> {
-    return Array.from(this.documents.values());
+    return Array.from(this.documents.values()).sort((a, b) => a.path.localeCompare(b.path));
   }
 
   async rebuild(docs: AsyncIterable<ParsedDocument> | ParsedDocument[]): Promise<void> {

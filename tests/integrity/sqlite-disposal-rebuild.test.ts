@@ -76,7 +76,7 @@ This is note number ${i}.
     for (let i = 0; i < 10; i++) {
       expect(rebuiltDocs[i].id).toBe(origDocs[i].id);
       expect(rebuiltDocs[i].title).toBe(origDocs[i].title);
-      expect(rebuiltDocs[i].hash).toBe(origDocs[i].hash);
+      expect(rebuiltDocs[i].sourceHash).toBe(origDocs[i].sourceHash);
       expect(rebuiltDocs[i].tags).toEqual(origDocs[i].tags);
       expect(rebuiltDocs[i].aliases).toEqual(origDocs[i].aliases);
       expect(rebuiltDocs[i].headings).toEqual(origDocs[i].headings);

@@ -8,6 +8,8 @@ import {
   LinkResolution,
   normalizeVaultPath,
   ParsedDocument,
+  ParsedHeading,
+  ParsedLink,
   SearchRequest,
   SearchResult,
   VaultPath,
@@ -42,8 +44,10 @@ CREATE TABLE IF NOT EXISTS links (
   source_doc_id TEXT NOT NULL,
   source_path TEXT NOT NULL,
   target_path TEXT,
-  raw_target TEXT NOT NULL,
+  target_name TEXT NOT NULL,
+  raw TEXT NOT NULL,
   display_text TEXT,
+  subpath TEXT,
   line INTEGER NOT NULL,
   is_embed INTEGER NOT NULL,
   FOREIGN KEY (source_doc_id) REFERENCES documents(id) ON DELETE CASCADE
@@ -60,9 +64,9 @@ CREATE TABLE IF NOT EXISTS headings (
 );
 
 CREATE TABLE IF NOT EXISTS tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id TEXT NOT NULL,
   tag TEXT NOT NULL,
-  PRIMARY KEY (doc_id, tag),
   FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
@@ -75,18 +79,18 @@ CREATE TABLE IF NOT EXISTS properties (
 );
 
 CREATE TABLE IF NOT EXISTS aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id TEXT NOT NULL,
   alias TEXT NOT NULL,
-  PRIMARY KEY (doc_id, alias),
   FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_source ON links(source_path);
-CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);
-CREATE INDEX IF NOT EXISTS idx_links_raw ON links(raw_target);
+CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
+CREATE INDEX IF NOT EXISTS idx_links_target_name ON links(target_name);
 CREATE INDEX IF NOT EXISTS idx_headings_doc ON headings(doc_id);
-CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
-CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
+CREATE INDEX IF NOT EXISTS idx_tags_doc ON tags(doc_id);
+CREATE INDEX IF NOT EXISTS idx_aliases_doc ON aliases(doc_id);
 CREATE INDEX IF NOT EXISTS idx_docs_path ON documents(path);
 `;
 
@@ -111,16 +115,10 @@ export class SqliteDocumentIndex implements DocumentIndex {
     return new SqliteDocumentIndex(db);
   }
 
-  /**
-   * Exports the database bytes for persistence if needed.
-   */
   export(): Uint8Array {
     return this.db.export();
   }
 
-  /**
-   * Closes the database.
-   */
   close(): void {
     this.db.close();
   }
@@ -137,7 +135,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
 
   async upsert(doc: ParsedDocument): Promise<void> {
     const hash = doc.sourceHash || (doc as any).hash || '';
-    const modifiedAt = (doc as any).modifiedAt ?? Date.now();
+    const modifiedAt = (doc as any).modifiedAt ?? 0;
     const size = (doc as any).size ?? doc.textContent.length;
     const lineCount = doc.lineCount ?? doc.textContent.split(/\r?\n/).length;
 
@@ -168,19 +166,22 @@ export class SqliteDocumentIndex implements DocumentIndex {
         ]
       );
 
-      // 3. Insert links
+      // 3. Insert links with subpath and raw preserving (P3-1)
       for (const link of doc.links) {
-        const rawTarget = link.target || (link as any).rawTarget || link.raw;
+        const targetName = link.target || (link as any).rawTarget || link.raw;
+        const raw = link.raw || `[[${targetName}]]`;
         const targetPath = (link as any).targetPath ?? null;
         this.safeRun(
-          `INSERT INTO links (source_doc_id, source_path, target_path, raw_target, display_text, line, is_embed)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             doc.id,
             doc.path,
             targetPath,
-            rawTarget,
+            targetName,
+            raw,
             link.displayText ?? null,
+            link.subpath ?? null,
             link.line,
             link.isEmbed ? 1 : 0,
           ]
@@ -198,7 +199,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
 
       // 5. Insert tags
       for (const tag of doc.tags) {
-        this.safeRun(`INSERT OR IGNORE INTO tags (doc_id, tag) VALUES (?, ?)`, [doc.id, tag]);
+        this.safeRun(`INSERT INTO tags (doc_id, tag) VALUES (?, ?)`, [doc.id, tag]);
       }
 
       // 6. Insert properties & aliases
@@ -213,7 +214,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
 
       if (doc.aliases) {
         for (const alias of doc.aliases) {
-          this.safeRun(`INSERT OR IGNORE INTO aliases (doc_id, alias) VALUES (?, ?)`, [doc.id, alias]);
+          this.safeRun(`INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`, [doc.id, alias]);
         }
       }
 
@@ -232,7 +233,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
       this.safeRun('DELETE FROM tags WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM properties WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM aliases WHERE doc_id = ?', [documentId]);
-      this.safeRun('DELETE FROM documents WHERE id = ?', [documentId]);
+      this.safeRun('DELETE FROM documents WHERE id = ? OR path = ?', [documentId, documentId]);
       this.db.run('COMMIT');
     } catch (err) {
       this.db.run('ROLLBACK');
@@ -242,6 +243,13 @@ export class SqliteDocumentIndex implements DocumentIndex {
 
   async rebuild(docs: AsyncIterable<ParsedDocument> | ParsedDocument[]): Promise<void> {
     this.db.run('BEGIN TRANSACTION');
+    let insertDocStmt: any = null;
+    let insertLinkStmt: any = null;
+    let insertHeadingStmt: any = null;
+    let insertTagStmt: any = null;
+    let insertPropStmt: any = null;
+    let insertAliasStmt: any = null;
+
     try {
       this.db.run('DELETE FROM links');
       this.db.run('DELETE FROM headings');
@@ -250,76 +258,102 @@ export class SqliteDocumentIndex implements DocumentIndex {
       this.db.run('DELETE FROM aliases');
       this.db.run('DELETE FROM documents');
 
+      insertDocStmt = this.db.prepare(
+        `INSERT INTO documents (id, path, title, hash, modified_at, size, word_count, line_count, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      insertLinkStmt = this.db.prepare(
+        `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      insertHeadingStmt = this.db.prepare(
+        `INSERT INTO headings (doc_id, level, text, slug, line) VALUES (?, ?, ?, ?, ?)`
+      );
+      insertTagStmt = this.db.prepare(
+        `INSERT INTO tags (doc_id, tag) VALUES (?, ?)`
+      );
+      insertPropStmt = this.db.prepare(
+        `INSERT OR REPLACE INTO properties (doc_id, key, value_json) VALUES (?, ?, ?)`
+      );
+      insertAliasStmt = this.db.prepare(
+        `INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`
+      );
+
       for await (const doc of docs) {
         const hash = doc.sourceHash || (doc as any).hash || '';
-        const modifiedAt = (doc as any).modifiedAt ?? Date.now();
+        const modifiedAt = (doc as any).modifiedAt ?? 0;
         const size = (doc as any).size ?? doc.textContent.length;
         const lineCount = doc.lineCount ?? doc.textContent.split(/\r?\n/).length;
 
-        this.safeRun(
-          `INSERT INTO documents (id, path, title, hash, modified_at, size, word_count, line_count, body)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            doc.id,
-            doc.path,
-            doc.title,
-            hash,
-            modifiedAt,
-            size,
-            doc.wordCount,
-            lineCount,
-            doc.textContent,
-          ]
-        );
+        insertDocStmt.run([
+          doc.id,
+          doc.path,
+          doc.title,
+          hash,
+          modifiedAt,
+          size,
+          doc.wordCount,
+          lineCount,
+          doc.textContent,
+        ]);
 
         for (const link of doc.links) {
-          const rawTarget = link.target || (link as any).rawTarget || link.raw;
+          const targetName = link.target || (link as any).rawTarget || link.raw;
+          const raw = link.raw || `[[${targetName}]]`;
           const targetPath = (link as any).targetPath ?? null;
-          this.safeRun(
-            `INSERT INTO links (source_doc_id, source_path, target_path, raw_target, display_text, line, is_embed)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              doc.id,
-              doc.path,
-              targetPath,
-              rawTarget,
-              link.displayText ?? null,
-              link.line,
-              link.isEmbed ? 1 : 0,
-            ]
-          );
+          insertLinkStmt.run([
+            doc.id,
+            doc.path,
+            targetPath,
+            targetName,
+            raw,
+            link.displayText ?? null,
+            link.subpath ?? null,
+            link.line,
+            link.isEmbed ? 1 : 0,
+          ]);
         }
 
         for (const heading of doc.headings) {
-          this.safeRun(
-            `INSERT INTO headings (doc_id, level, text, slug, line)
-             VALUES (?, ?, ?, ?, ?)`,
-            [doc.id, heading.level, heading.text, heading.slug, heading.line]
-          );
+          insertHeadingStmt.run([
+            doc.id,
+            heading.level,
+            heading.text,
+            heading.slug,
+            heading.line,
+          ]);
         }
 
         for (const tag of doc.tags) {
-          this.safeRun(`INSERT OR IGNORE INTO tags (doc_id, tag) VALUES (?, ?)`, [doc.id, tag]);
+          insertTagStmt.run([doc.id, tag]);
         }
 
         if (doc.properties) {
           for (const [key, val] of Object.entries(doc.properties)) {
-            this.safeRun(
-              `INSERT OR REPLACE INTO properties (doc_id, key, value_json) VALUES (?, ?, ?)`,
-              [doc.id, key, JSON.stringify(val)]
-            );
+            insertPropStmt.run([doc.id, key, JSON.stringify(val)]);
           }
         }
 
         if (doc.aliases) {
           for (const alias of doc.aliases) {
-            this.safeRun(`INSERT OR IGNORE INTO aliases (doc_id, alias) VALUES (?, ?)`, [doc.id, alias]);
+            insertAliasStmt.run([doc.id, alias]);
           }
         }
       }
 
+      insertDocStmt.free();
+      insertLinkStmt.free();
+      insertHeadingStmt.free();
+      insertTagStmt.free();
+      insertPropStmt.free();
+      insertAliasStmt.free();
+
       this.db.run('COMMIT');
     } catch (err) {
+      insertDocStmt?.free();
+      insertLinkStmt?.free();
+      insertHeadingStmt?.free();
+      insertTagStmt?.free();
+      insertPropStmt?.free();
+      insertAliasStmt?.free();
       this.db.run('ROLLBACK');
       throw err;
     }
@@ -358,23 +392,23 @@ export class SqliteDocumentIndex implements DocumentIndex {
   private async hydrateDocument(row: any): Promise<ParsedDocument> {
     const docId = row.id as string;
 
-    // Load links
+    // Load links (P3-1: preserve raw and subpath cleanly)
     const linkStmt = this.db.prepare(
-      'SELECT raw_target, target_path, display_text, line, is_embed FROM links WHERE source_doc_id = ? ORDER BY line ASC'
+      'SELECT raw, target_name, target_path, display_text, subpath, line, is_embed FROM links WHERE source_doc_id = ? ORDER BY line ASC'
     );
     this.safeBind(linkStmt, [docId]);
-    const links: any[] = [];
+    const links: ParsedLink[] = [];
     while (linkStmt.step()) {
       const l = linkStmt.getAsObject();
-      links.push({
-        raw: `[[${l.raw_target}]]`,
-        target: l.raw_target,
-        rawTarget: l.raw_target,
-        targetPath: l.target_path ?? undefined,
-        displayText: l.display_text ?? undefined,
-        line: l.line,
+      const linkObj: any = {
+        raw: l.raw as string,
+        target: l.target_name as string,
+        line: l.line as number,
         isEmbed: Boolean(l.is_embed),
-      });
+      };
+      if (l.display_text) linkObj.displayText = l.display_text as string;
+      if (l.subpath) linkObj.subpath = l.subpath as string;
+      links.push(linkObj);
     }
     linkStmt.free();
 
@@ -383,20 +417,20 @@ export class SqliteDocumentIndex implements DocumentIndex {
       'SELECT level, text, slug, line FROM headings WHERE doc_id = ? ORDER BY line ASC'
     );
     this.safeBind(headStmt, [docId]);
-    const headings: any[] = [];
+    const headings: ParsedHeading[] = [];
     while (headStmt.step()) {
       const h = headStmt.getAsObject();
       headings.push({
-        level: h.level,
-        text: h.text,
-        slug: h.slug,
-        line: h.line,
+        level: h.level as number,
+        text: h.text as string,
+        slug: h.slug as string,
+        line: h.line as number,
       });
     }
     headStmt.free();
 
-    // Load tags
-    const tagStmt = this.db.prepare('SELECT tag FROM tags WHERE doc_id = ?');
+    // Load tags in original insertion order
+    const tagStmt = this.db.prepare('SELECT tag FROM tags WHERE doc_id = ? ORDER BY id ASC');
     this.safeBind(tagStmt, [docId]);
     const tags: string[] = [];
     while (tagStmt.step()) {
@@ -416,8 +450,8 @@ export class SqliteDocumentIndex implements DocumentIndex {
     }
     propStmt.free();
 
-    // Load aliases
-    const aliasStmt = this.db.prepare('SELECT alias FROM aliases WHERE doc_id = ?');
+    // Load aliases in original insertion order
+    const aliasStmt = this.db.prepare('SELECT alias FROM aliases WHERE doc_id = ? ORDER BY id ASC');
     this.safeBind(aliasStmt, [docId]);
     const aliases: string[] = [];
     while (aliasStmt.step()) {
@@ -429,31 +463,33 @@ export class SqliteDocumentIndex implements DocumentIndex {
       id: row.id,
       path: row.path,
       title: row.title,
+      aliases,
+      headings,
+      links,
+      tags,
+      properties,
+      textContent: row.body,
       sourceHash: row.hash,
       lineCount: row.line_count || 1,
       wordCount: row.word_count,
-      properties,
-      aliases,
-      tags,
-      headings,
-      links,
-      textContent: row.body,
     };
   }
 
   resolveLink(sourcePath: VaultPath, rawTarget: string): LinkResolution {
     const target = rawTarget.trim();
-    if (!target) {
-      return { resolved: false };
-    }
+    if (!target) return { resolved: false };
 
+    const cleanTarget = target.split('#')[0].split('|')[0].trim();
+    if (!cleanTarget) return { resolved: false };
+
+    const targetWithExt = cleanTarget.endsWith('.md') ? cleanTarget : `${cleanTarget}.md`;
+
+    // 1. Exact relative path from source directory
     const sourceDir = dirnameVaultPath(sourcePath);
-
-    // 1. Exact relative path from source document's directory
     if (sourceDir) {
-      const relPathWithExt = joinVaultPath(sourceDir, target.endsWith('.md') ? target : `${target}.md`);
+      const relPath = joinVaultPath(sourceDir, targetWithExt);
       const stmt1 = this.db.prepare('SELECT path FROM documents WHERE path = ?');
-      this.safeBind(stmt1, [relPathWithExt]);
+      this.safeBind(stmt1, [relPath]);
       if (stmt1.step()) {
         const p = stmt1.getAsObject().path as string;
         stmt1.free();
@@ -462,10 +498,10 @@ export class SqliteDocumentIndex implements DocumentIndex {
       stmt1.free();
     }
 
-    // 2. Exact path from vault root
-    const rootPathWithExt = normalizeVaultPath(target.endsWith('.md') ? target : `${target}.md`);
+    // 2. Exact path from root
+    const rootPath = normalizeVaultPath(targetWithExt);
     const stmt2 = this.db.prepare('SELECT path FROM documents WHERE path = ?');
-    this.safeBind(stmt2, [rootPathWithExt]);
+    this.safeBind(stmt2, [rootPath]);
     if (stmt2.step()) {
       const p = stmt2.getAsObject().path as string;
       stmt2.free();
@@ -473,20 +509,20 @@ export class SqliteDocumentIndex implements DocumentIndex {
     }
     stmt2.free();
 
-    // 3. Match basename anywhere in vault
-    const targetBaseName = target.replace(/\.md$/i, '').toLowerCase();
-    const res = this.db.exec('SELECT path FROM documents');
+    // 3. Match basename anywhere in vault using SQLite query
+    const baseStmt = this.db.prepare(`
+      SELECT path FROM documents
+      WHERE LOWER(path) = LOWER(?)
+         OR LOWER(path) LIKE LOWER('%/' || ?)
+         OR LOWER(path) = LOWER(?)
+         OR LOWER(path) LIKE LOWER('%/' || ?)
+    `);
+    this.safeBind(baseStmt, [targetWithExt, targetWithExt, cleanTarget, cleanTarget]);
     const candidatePaths: string[] = [];
-
-    if (res.length > 0) {
-      for (const row of res[0].values) {
-        const p = row[0] as string;
-        const docBase = basenameVaultPath(p, '.md').toLowerCase();
-        if (docBase === targetBaseName) {
-          candidatePaths.push(p);
-        }
-      }
+    while (baseStmt.step()) {
+      candidatePaths.push(baseStmt.getAsObject().path as string);
     }
+    baseStmt.free();
 
     if (candidatePaths.length === 1) {
       return { resolved: true, targetPath: candidatePaths[0] };
@@ -506,7 +542,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
       JOIN documents d ON a.doc_id = d.id
       WHERE LOWER(a.alias) = LOWER(?)
     `);
-    this.safeBind(aliasStmt, [target]);
+    this.safeBind(aliasStmt, [cleanTarget]);
     const aliasMatches: string[] = [];
     while (aliasStmt.step()) {
       aliasMatches.push(aliasStmt.getAsObject().path as string);
@@ -530,38 +566,49 @@ export class SqliteDocumentIndex implements DocumentIndex {
   async getBacklinks(documentPathOrId: string): Promise<Backlink[]> {
     const targetDoc = await this.get(documentPathOrId);
     const targetPath = targetDoc ? targetDoc.path : documentPathOrId;
+    const targetId = targetDoc ? targetDoc.id : documentPathOrId;
+    const targetBasename = basenameVaultPath(targetPath, '.md');
 
     const backlinks: Backlink[] = [];
 
-    const allLinksStmt = this.db.prepare(`
-      SELECT l.source_doc_id, l.source_path, l.raw_target, l.line, d.title, d.body
+    // Pure Relational Indexed Query (P3-6 / P3-3 / P3-4)
+    const stmt = this.db.prepare(`
+      SELECT l.source_doc_id, l.source_path, l.target_name, l.raw, l.line, d.title, d.body
       FROM links l
       JOIN documents d ON l.source_doc_id = d.id
+      WHERE l.source_doc_id != ?
+        AND l.source_path != ?
+        AND (
+          LOWER(l.target_name) = LOWER(?)
+          OR LOWER(l.target_name) = LOWER(?)
+          OR LOWER(l.target_name || '.md') = LOWER(?)
+          OR LOWER(l.target_name) IN (SELECT LOWER(alias) FROM aliases WHERE doc_id = ?)
+        )
+      ORDER BY l.line ASC
     `);
+    this.safeBind(stmt, [targetId, targetPath, targetPath, targetBasename, targetPath, targetId]);
 
-    while (allLinksStmt.step()) {
-      const row = allLinksStmt.getAsObject();
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
       const sourcePath = row.source_path as string;
-      const rawTarget = row.raw_target as string;
+      const targetName = row.target_name as string;
+      const rawLink = (row.raw as string) || `[[${targetName}]]`;
 
-      const resolution = this.resolveLink(sourcePath, rawTarget);
-      if (resolution.resolved && resolution.targetPath === targetPath) {
-        const body = (row.body as string) || '';
-        const lines = body.split(/\r?\n/);
-        const lineIdx = (row.line as number) - 1;
-        const excerpt = lineIdx >= 0 && lineIdx < lines.length ? lines[lineIdx].trim() : undefined;
+      const body = (row.body as string) || '';
+      const lines = body.split(/\r?\n/);
+      const lineIdx = (row.line as number) - 1;
+      const excerpt = lineIdx >= 0 && lineIdx < lines.length ? lines[lineIdx].trim() : undefined;
 
-        backlinks.push({
-          sourceDocumentId: row.source_doc_id as string,
-          sourcePath,
-          sourceTitle: (row.title as string) || sourcePath,
-          rawLink: rawTarget,
-          line: row.line as number,
-          excerpt,
-        });
-      }
+      backlinks.push({
+        sourceDocumentId: row.source_doc_id as string,
+        sourcePath,
+        sourceTitle: (row.title as string) || sourcePath,
+        rawLink,
+        line: row.line as number,
+        excerpt,
+      });
     }
-    allLinksStmt.free();
+    stmt.free();
 
     return backlinks;
   }
@@ -574,8 +621,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
     const seenPaths = new Set<string>();
 
     for (const link of doc.links) {
-      const raw = link.target || (link as any).rawTarget || link.raw;
-      const res = this.resolveLink(doc.path, raw);
+      const res = this.resolveLink(doc.path, link.target);
       if (res.resolved && res.targetPath && !seenPaths.has(res.targetPath)) {
         seenPaths.add(res.targetPath);
         const targetDoc = await this.get(res.targetPath);
@@ -589,12 +635,17 @@ export class SqliteDocumentIndex implements DocumentIndex {
   }
 
   async query(request: SearchRequest): Promise<SearchResult[]> {
-    const results: SearchResult[] = [];
-    const queryLower = request.query.toLowerCase().trim();
-    if (!queryLower) return [];
+    const q = request.query.trim().toLowerCase();
+    if (!q) return [];
 
-    // Query SQLite documents table
+    const results: SearchResult[] = [];
+    const tokens = q.split(/\s+/).filter(Boolean);
+
+    // Fast direct query over documents table
     const stmt = this.db.prepare('SELECT id, path, title, body FROM documents');
+    const tagStmt = this.db.prepare('SELECT tag FROM tags WHERE doc_id = ?');
+    const aliasStmt = this.db.prepare('SELECT alias FROM aliases WHERE doc_id = ?');
+    const headStmt = this.db.prepare('SELECT text FROM headings WHERE doc_id = ?');
 
     while (stmt.step()) {
       const row = stmt.getAsObject();
@@ -603,62 +654,105 @@ export class SqliteDocumentIndex implements DocumentIndex {
       const title = row.title as string;
       const body = (row.body as string) || '';
 
-      // Load tags for this document
-      const tagStmt = this.db.prepare('SELECT tag FROM tags WHERE doc_id = ?');
-      this.safeBind(tagStmt, [id]);
-      const docTags: string[] = [];
-      while (tagStmt.step()) {
-        docTags.push(tagStmt.getAsObject().tag as string);
-      }
-      tagStmt.free();
-
-      // Load aliases for this document
-      const aliasStmt = this.db.prepare('SELECT alias FROM aliases WHERE doc_id = ?');
-      this.safeBind(aliasStmt, [id]);
-      const docAliases: string[] = [];
-      while (aliasStmt.step()) {
-        docAliases.push(aliasStmt.getAsObject().alias as string);
-      }
-      aliasStmt.free();
-
       // Scope folder filter
       if (request.scope?.folders && request.scope.folders.length > 0) {
-        const inFolder = request.scope.folders.some((f) => {
+        const inScope = request.scope.folders.some((f) => {
           const normF = f.replace(/\/+$/, '');
           return path === normF || path.startsWith(`${normF}/`);
         });
-        if (!inFolder) continue;
+        if (!inScope) continue;
       }
 
-      // Scope tag filter
+      // Check tag filter if scope requires it
       if (request.scope?.tags && request.scope.tags.length > 0) {
-        const hasTag = request.scope.tags.some((t) =>
-          docTags.some((dt) => dt.toLowerCase() === t.toLowerCase())
-        );
+        this.safeBind(tagStmt, [id]);
+        let hasTag = false;
+        while (tagStmt.step()) {
+          const t = tagStmt.getAsObject().tag as string;
+          if (request.scope.tags.includes(t)) {
+            hasTag = true;
+            break;
+          }
+        }
+        tagStmt.reset();
         if (!hasTag) continue;
       }
+
+      let score = 0;
+      let source: SearchResult['source'] = 'fts';
+      let excerpt: string | undefined;
 
       const titleLower = title.toLowerCase();
       const pathLower = path.toLowerCase();
       const bodyLower = body.toLowerCase();
 
-      let score = 0;
-      let excerpt: string | undefined;
+      // 1. Exact or prefix title / navigation match
+      if (titleLower === q || pathLower === q) {
+        score += 100;
+        source = 'navigation';
+      } else if (titleLower.startsWith(q) || pathLower.startsWith(q)) {
+        score += 70;
+        source = 'navigation';
+      } else if (titleLower.includes(q)) {
+        score += 50;
+        source = 'navigation';
+      }
 
-      if (pathLower === queryLower || titleLower === queryLower) {
-        score = 100;
-      } else if (titleLower.includes(queryLower)) {
-        score = 75;
-      } else if (docAliases.some((a) => a.toLowerCase().includes(queryLower))) {
-        score = 60;
-      } else if (docTags.some((t) => t.toLowerCase().includes(queryLower))) {
-        score = 50;
-      } else if (bodyLower.includes(queryLower)) {
-        score = 30;
-        const idx = bodyLower.indexOf(queryLower);
-        const start = Math.max(0, idx - 40);
-        const end = Math.min(body.length, idx + queryLower.length + 60);
-        excerpt = (start > 0 ? '...' : '') + body.slice(start, end).trim() + (end < body.length ? '...' : '');
+      // 2. Alias match (check only if query might match)
+      this.safeBind(aliasStmt, [id]);
+      while (aliasStmt.step()) {
+        const alias = (aliasStmt.getAsObject().alias as string).toLowerCase();
+        if (alias.includes(q)) {
+          score += 40;
+          break;
+        }
+      }
+      aliasStmt.reset();
+
+      // 3. Tag match
+      this.safeBind(tagStmt, [id]);
+      while (tagStmt.step()) {
+        const tag = (tagStmt.getAsObject().tag as string).toLowerCase();
+        if (tag.includes(q)) {
+          score += 30;
+          source = 'property';
+          break;
+        }
+      }
+      tagStmt.reset();
+
+      // 4. Heading match (headings are inside body text, so only check if body contains q)
+      if (bodyLower.includes(q)) {
+        this.safeBind(headStmt, [id]);
+        while (headStmt.step()) {
+          const hText = headStmt.getAsObject().text as string;
+          if (hText.toLowerCase().includes(q)) {
+            score += 20;
+            if (!excerpt) excerpt = `## ${hText}`;
+            break;
+          }
+        }
+        headStmt.reset();
+      }
+
+      // 5. Full text body match
+      let bodyMatches = 0;
+      for (const token of tokens) {
+        const idx = bodyLower.indexOf(token);
+        if (idx !== -1) {
+          bodyMatches++;
+          if (!excerpt) {
+            const start = Math.max(0, idx - 40);
+            const end = Math.min(body.length, idx + token.length + 60);
+            excerpt = (start > 0 ? '...' : '') + body.slice(start, end).trim() + '...';
+          }
+        }
+      }
+
+      if (bodyMatches === tokens.length) {
+        score += 15 + bodyMatches * 2;
+      } else if (bodyMatches > 0) {
+        score += bodyMatches * 2;
       }
 
       if (score > 0) {
@@ -668,14 +762,18 @@ export class SqliteDocumentIndex implements DocumentIndex {
           title,
           excerpt,
           score,
-          source: 'fts',
+          source,
         });
       }
     }
+
     stmt.free();
+    tagStmt.free();
+    aliasStmt.free();
+    headStmt.free();
 
     return results
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
       .slice(0, request.limit ?? 50);
   }
 }

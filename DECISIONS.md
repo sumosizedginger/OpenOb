@@ -66,7 +66,7 @@ Record product and architecture decisions here until they become large enough fo
 
 ## D-013 DocumentIndex Extends SearchEngine Contract Unification
 
-**Decision:** `DocumentIndex` formally extends the `SearchEngine` interface so every index implementation (in-memory, SQLite+FTS5) provides query capabilities directly.
+**Decision:** `DocumentIndex` formally extends the `SearchEngine` interface so every index implementation (in-memory, SQLite) provides unified query and backlink capabilities directly with verified behavioral parity.
 
 **Reason:** Eliminates ad-hoc typecasting between index and search subsystems, keeps derived search and relational lookups coupled to the same rebuild lifecycle, and guarantees seamless interchangeability across adapters.
 
