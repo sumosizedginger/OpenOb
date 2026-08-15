@@ -59,3 +59,49 @@ export interface WriteResult {
   readonly previousVersion: FileVersion | null;
   readonly wasCreated: boolean;
 }
+
+/**
+ * Phase 5 Graph Model Interfaces (Constitution Law 21: Derived from DocumentIndex only)
+ */
+
+export type GraphEdgeKind = 'wikilink' | 'embed' | 'tag' | 'property';
+
+export interface GraphEdgeProvenance {
+  readonly line?: number;
+  readonly isEmbed?: boolean;
+  readonly propertyKey?: string;
+  readonly tag?: string;
+}
+
+export interface GraphNode {
+  readonly id: string;
+  readonly path: VaultPath;
+  readonly title: string;
+  readonly tags: string[];
+  readonly val: number; // Node weight (degree / backlink count)
+  readonly group: string; // Folder or primary category
+  readonly properties?: Record<string, any>;
+  readonly isTagNode?: boolean;
+}
+
+export interface GraphEdge {
+  readonly source: string; // Source node id / path
+  readonly target: string; // Target node id / path
+  readonly kind: GraphEdgeKind;
+  readonly provenance?: GraphEdgeProvenance;
+}
+
+export interface GraphData {
+  readonly nodes: GraphNode[];
+  readonly edges: GraphEdge[];
+}
+
+export interface GraphFilterOptions {
+  readonly includeTags?: boolean;
+  readonly folders?: string[];
+  readonly filterTags?: string[];
+  readonly searchQuery?: string;
+  readonly hideOrphans?: boolean;
+  readonly focusNodeId?: string; // Local graph center
+  readonly maxDepth?: number; // Local graph radius (default: 1 or 2)
+}

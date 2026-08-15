@@ -1,5 +1,6 @@
 import {
   basenameVaultPath,
+  ConflictError,
   dirnameVaultPath,
   DocumentIndex,
   DocumentParser,
@@ -53,8 +54,8 @@ export function rewriteWikilinkTarget(
 }
 
 /**
- * Block-aware wikilink rewriting (P4-4).
- * Protects YAML frontmatter, fenced code blocks (``` / ~~~), and inline code (`...`).
+ * Block-aware wikilink rewriting (P4-4 & P4-4R).
+ * Strictly isolates YAML frontmatter at index 0 and protects fenced (``` / ~~~) and inline (`...`) code blocks.
  */
 export function rewriteNoteWikilinks(
   content: string,
@@ -62,11 +63,21 @@ export function rewriteNoteWikilinks(
 ): { content: string; rewrittenCount: number } {
   let rewrittenCount = 0;
 
-  // Protect frontmatter, fenced code blocks, and inline code spans
-  const protectedPattern = /^(---[\s\S]*?\n---)|(```[\s\S]*?```)|(~~~[\s\S]*?~~~)|(`[^`\n]+`)/gm;
+  // 1. Separate YAML frontmatter if present at index 0 (P4-4R)
+  let frontmatter = '';
+  let body = content;
+
+  const fmMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  if (fmMatch && fmMatch.index === 0) {
+    frontmatter = fmMatch[0];
+    body = content.slice(frontmatter.length);
+  }
+
+  // 2. Protect fenced code blocks (``` / ~~~) and inline code spans (`...`)
+  const codeBlockPattern = /(```[\s\S]*?```)|(~~~[\s\S]*?~~~)|(`[^`\n]+`)/g;
 
   let lastIndex = 0;
-  let result = '';
+  let resultBody = '';
   let match: RegExpExecArray | null;
 
   const rewriteSegment = (seg: string): string => {
@@ -81,23 +92,23 @@ export function rewriteNoteWikilinks(
     });
   };
 
-  while ((match = protectedPattern.exec(content)) !== null) {
-    const textBefore = content.slice(lastIndex, match.index);
-    result += rewriteSegment(textBefore);
-    result += match[0];
+  while ((match = codeBlockPattern.exec(body)) !== null) {
+    const textBefore = body.slice(lastIndex, match.index);
+    resultBody += rewriteSegment(textBefore);
+    resultBody += match[0];
     lastIndex = match.index + match[0].length;
   }
 
-  if (lastIndex < content.length) {
-    result += rewriteSegment(content.slice(lastIndex));
+  if (lastIndex < body.length) {
+    resultBody += rewriteSegment(body.slice(lastIndex));
   }
 
-  return { content: result, rewrittenCount };
+  return { content: frontmatter + resultBody, rewrittenCount };
 }
 
 /**
  * Safely renames a markdown note and refactors all incoming wikilinks across the vault.
- * Hardened against F-001 silent overwrites, partial write failures, and code block corruptions (P4-1, P4-2, P4-4).
+ * Hardened against F-001 silent overwrites, partial write failures, and code block corruptions (P4-1, P4-1R, P4-2, P4-4, P4-4R).
  */
 export async function renameDocument(
   storage: VaultStorage,
@@ -152,9 +163,26 @@ export async function renameDocument(
     totalRewrittenCount += selfRewrite.rewrittenCount;
   }
 
-  // 3. Move target file on disk first (P4-2 ordering)
-  // Concurrency check: expectedVersion null prevents overwriting an unexpected file
+  // 3. Move target file on disk with pre-delete version re-check (P4-1R, P4-2)
   await storage.write(normNewPath, null, renamedNoteContent);
+
+  const preDeleteStat = await storage.stat(normOldPath);
+  if (
+    preDeleteStat?.version &&
+    preDeleteStat.version.token !== oldSnapshot.version.token &&
+    preDeleteStat.version.hash !== oldSnapshot.version.hash
+  ) {
+    // Abort and rollback newly written file to prevent destroying concurrent external edit (P4-1R)
+    await storage.remove(normNewPath);
+    throw new ConflictError(
+      normOldPath,
+      oldSnapshot.version,
+      preDeleteStat.version,
+      undefined,
+      `Safe rename aborted: "${normOldPath}" was modified externally prior to deletion.`
+    );
+  }
+
   await storage.remove(normOldPath);
 
   // 4. Concurrency-checked reference refactoring with rollback journal (P4-1, P4-2)

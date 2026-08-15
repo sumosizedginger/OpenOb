@@ -6,11 +6,13 @@ import { TabBar } from './components/TabBar.js';
 import { PreviewPane } from './components/PreviewPane.js';
 import { BacklinksPanel } from './components/BacklinksPanel.js';
 import { OutlinePanel } from './components/OutlinePanel.js';
+import { GraphView } from './components/GraphView.js';
+import { PropertiesPanel } from './components/PropertiesPanel.js';
 import { SearchModal } from './components/SearchModal.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ConflictModal } from './components/ConflictModal.js';
 import { CommandPalette } from './components/CommandPalette.js';
-import { ParsedHeading } from '@okw/core';
+import { ParsedHeading, VaultPath } from '@okw/core';
 import {
   FolderPlus,
   FilePlus,
@@ -25,6 +27,8 @@ import {
   ListTree,
   PanelLeftClose,
   PanelLeft,
+  Share2,
+  Sliders,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -56,9 +60,34 @@ export const App: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<'split' | 'editor' | 'preview'>('split');
   const [showSidebar, setShowSidebar] = useState(true);
-  const [showRightPanel, setShowRightPanel] = useState<'backlinks' | 'outline' | null>('outline');
+  const [showRightPanel, setShowRightPanel] = useState<
+    'backlinks' | 'outline' | 'graph' | 'properties' | null
+  >('outline');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
+  const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
+
+  // Aggregate vault tags for Properties & Tags Explorer
+  useEffect(() => {
+    let isMounted = true;
+    const aggregateTags = async () => {
+      const docs = await index.getAll();
+      const tagMap = new Map<string, number>();
+      for (const doc of docs) {
+        for (const tag of doc.tags) {
+          tagMap.set(tag, (tagMap.get(tag) || 0) + 1);
+        }
+      }
+      if (isMounted) {
+        setAllTags(tagMap);
+      }
+    };
+    aggregateTags();
+    return () => {
+      isMounted = false;
+    };
+  }, [index, parsedDoc]);
 
   // Global window keyboard shortcuts for Phase 2 Workspace
   useEffect(() => {
@@ -77,6 +106,12 @@ export const App: React.FC = () => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setIsSearchModalOpen((prev) => !prev);
+      }
+
+      // Ctrl/Cmd+G: Toggle Global Graph View
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setIsGlobalGraphOpen((prev) => !prev);
       }
 
       // Ctrl/Cmd+B: Toggle Sidebar
@@ -118,135 +153,143 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveActiveNote, activeTabPath, closeTab]);
 
-  // Navigate wikilink clicked inside preview
-  const handleNavigateWikilink = async (target: string) => {
-    const resolution = index.resolveLink(activeTabPath || '', target);
-    if (resolution && resolution.resolved && resolution.targetPath) {
-      await openNote(resolution.targetPath);
-    } else {
-      await createNote(target);
-    }
+  const handleSelectHeading = (_heading: ParsedHeading) => {
+    // Select heading line in preview/editor
   };
 
-  // Jump to heading in preview / document (P2-3 fix)
-  const handleSelectHeading = (heading: ParsedHeading) => {
-    if (viewMode === 'editor') {
-      setViewMode('split');
-    }
-    setTimeout(() => {
-      const headingElem = document.getElementById(`heading-${heading.line}`);
-      if (headingElem) {
-        headingElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const handleNavigateWikilink = (target: string) => {
+    if (!activeTabPath) return;
+    const res = index.resolveLink(activeTabPath, target);
+    if (res.resolved && res.targetPath) {
+      openNote(res.targetPath);
+    } else {
+      const cleanName = target.split('#')[0].split('|')[0].trim();
+      if (confirm(`Note "${cleanName}" does not exist. Would you like to create it?`)) {
+        createNote(cleanName);
       }
-    }, 50);
+    }
   };
 
   return (
     <div className="app-container">
-      {/* Top Header Bar */}
-      <header className="top-bar">
-        <div className="top-bar-left">
+      {/* Top Navbar */}
+      <header className="app-header">
+        <div className="header-left">
           <button
             className="btn-icon"
             onClick={() => setShowSidebar((prev) => !prev)}
-            title="Toggle Left Sidebar (Ctrl+B)"
+            title="Toggle Sidebar (Ctrl+B)"
           >
             {showSidebar ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
           </button>
-
-          <div className="app-brand">
-            <BookOpen size={18} />
-            <span>Open Knowledge Workspace</span>
+          <div className="app-logo">
+            <ShieldCheck size={18} className="logo-icon" />
+            <span className="logo-text">OpenOb</span>
           </div>
+          <span className="vault-badge">{vaultName}</span>
+        </div>
 
-          <div className="vault-badge" title="Active local vault">
-            <ShieldCheck size={13} color="var(--status-success)" />
-            <span>{vaultName}</span>
-          </div>
-
+        <div className="header-center">
           <button
-            className="btn"
-            onClick={openDirectoryVault}
-            title="Open a local folder on your computer as a vault (File System Access API)"
+            className="search-trigger-btn"
+            onClick={() => setIsCommandPaletteOpen(true)}
+            title="Quick Open (Ctrl+P)"
           >
-            <FolderOpen size={13} /> Open Folder Vault
+            <Search size={14} />
+            <span>Search or jump to note...</span>
+            <kbd>Ctrl+P</kbd>
           </button>
         </div>
 
-        <div className="top-bar-actions">
+        <div className="header-right">
           <button
-            className="btn"
-            onClick={() => setIsCommandPaletteOpen(true)}
-            title="Quick Open Notes (Ctrl+P)"
+            className={`btn-icon ${isGlobalGraphOpen ? 'active' : ''}`}
+            title="Graph View (Ctrl+G)"
+            onClick={() => setIsGlobalGraphOpen((prev) => !prev)}
           >
-            <Search size={13} /> Quick Open <span className="command-badge">Ctrl+P</span>
+            <Share2 size={15} />
           </button>
 
           <button
-            className="btn"
-            onClick={() => setIsSearchModalOpen(true)}
-            title="Global Vault Search (Ctrl+Shift+F)"
+            className="btn-icon"
+            title="Open Directory from Disk"
+            onClick={openDirectoryVault}
           >
-            <Search size={13} color="var(--accent-primary)" /> Search <span className="command-badge">Ctrl+Shift+F</span>
+            <FolderOpen size={16} />
           </button>
 
-          <div style={{ display: 'flex', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '2px', background: 'var(--bg-secondary)' }}>
+          <div className="view-mode-group">
             <button
-              className={`btn-icon ${viewMode === 'editor' ? 'active' : ''}`}
-              title="Editor Only (Ctrl+E)"
+              className={`view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
+              title="Editor View"
               onClick={() => setViewMode('editor')}
             >
-              <Eye size={14} />
+              <BookOpen size={14} />
             </button>
             <button
-              className={`btn-icon ${viewMode === 'split' ? 'active' : ''}`}
-              title="Split View: Editor + Live Preview (Ctrl+\)"
+              className={`view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
+              title="Split View (Ctrl+\)"
               onClick={() => setViewMode('split')}
             >
               <Columns size={14} />
             </button>
             <button
-              className={`btn-icon ${viewMode === 'preview' ? 'active' : ''}`}
-              title="Live Preview Only"
+              className={`view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
+              title="Preview View"
               onClick={() => setViewMode('preview')}
             >
-              <BookOpen size={14} />
+              <Eye size={14} />
             </button>
           </div>
 
-          <button
-            className={`btn-icon ${showRightPanel === 'outline' ? 'active' : ''}`}
-            title="Toggle Outline Panel"
-            onClick={() => setShowRightPanel((prev) => (prev === 'outline' ? null : 'outline'))}
-          >
-            <ListTree size={14} />
-          </button>
-
-          <button
-            className={`btn-icon ${showRightPanel === 'backlinks' ? 'active' : ''}`}
-            title="Toggle Backlinks Panel"
-            onClick={() => setShowRightPanel((prev) => (prev === 'backlinks' ? null : 'backlinks'))}
-          >
-            <Link2 size={14} />
-          </button>
-
-          <button
-            className="btn btn-primary"
-            onClick={() => saveActiveNote()}
-            title="Safe Save (Ctrl+S)"
-          >
-            Save Note
-          </button>
+          <div className="right-panel-toggles">
+            <button
+              className={`btn-icon ${showRightPanel === 'outline' ? 'active' : ''}`}
+              title="Toggle Outline"
+              onClick={() =>
+                setShowRightPanel((prev) => (prev === 'outline' ? null : 'outline'))
+              }
+            >
+              <ListTree size={16} />
+            </button>
+            <button
+              className={`btn-icon ${showRightPanel === 'backlinks' ? 'active' : ''}`}
+              title="Toggle Backlinks"
+              onClick={() =>
+                setShowRightPanel((prev) => (prev === 'backlinks' ? null : 'backlinks'))
+              }
+            >
+              <Link2 size={16} />
+            </button>
+            <button
+              className={`btn-icon ${showRightPanel === 'graph' ? 'active' : ''}`}
+              title="Toggle Local Graph"
+              onClick={() =>
+                setShowRightPanel((prev) => (prev === 'graph' ? null : 'graph'))
+              }
+            >
+              <Share2 size={15} />
+            </button>
+            <button
+              className={`btn-icon ${showRightPanel === 'properties' ? 'active' : ''}`}
+              title="Toggle Properties & Tags"
+              onClick={() =>
+                setShowRightPanel((prev) => (prev === 'properties' ? null : 'properties'))
+              }
+            >
+              <Sliders size={15} />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Workspace Split */}
-      <div className="main-workspace">
+      {/* Main Workspace Layout */}
+      <div className="workspace-body">
         {/* Left Sidebar: File Tree */}
         {showSidebar && (
-          <aside className="sidebar">
+          <aside className="workspace-sidebar">
             <div className="sidebar-header">
-              <span className="sidebar-title">Files & Folders</span>
+              <span className="sidebar-title">Files</span>
               <div className="sidebar-header-actions">
                 <button
                   className="btn-icon"
@@ -339,7 +382,7 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        {/* Right Rail: Outline or Backlinks */}
+        {/* Right Rail: Outline, Backlinks, Local Graph, or Properties */}
         {showRightPanel === 'outline' && parsedDoc && (
           <OutlinePanel
             headings={parsedDoc.headings}
@@ -356,6 +399,29 @@ export const App: React.FC = () => {
             onCreateNote={(name) => createNote(name)}
           />
         )}
+
+        {showRightPanel === 'graph' && (
+          <div style={{ width: '320px', height: '100%' }}>
+            <GraphView
+              index={index}
+              activeNotePath={activeTabPath}
+              isLocal={true}
+              onNavigate={(path) => openNote(path)}
+            />
+          </div>
+        )}
+
+        {showRightPanel === 'properties' && (
+          <div style={{ width: '300px', height: '100%' }}>
+            <PropertiesPanel
+              parsedDoc={parsedDoc}
+              allTags={allTags}
+              onSelectTag={(_tag) => {
+                setIsSearchModalOpen(true);
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Bottom Status Bar */}
@@ -367,6 +433,24 @@ export const App: React.FC = () => {
         onSave={() => saveActiveNote()}
         onOpenConflictModal={() => {}}
       />
+
+      {/* Global Full-Screen Graph Modal */}
+      {isGlobalGraphOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-6xl h-[85vh] bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col">
+            <GraphView
+              index={index}
+              activeNotePath={activeTabPath}
+              isLocal={false}
+              onNavigate={(path) => {
+                openNote(path);
+                setIsGlobalGraphOpen(false);
+              }}
+              onClose={() => setIsGlobalGraphOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Conflict Resolution Modal */}
       {conflictData && activeTab && (
@@ -391,12 +475,12 @@ export const App: React.FC = () => {
         onRefresh={() => refreshVault()}
       />
 
-      {/* Global Vault Search Modal (Ctrl+Shift+F) */}
+      {/* Global Search Modal (Ctrl+Shift+F) */}
       <SearchModal
         isOpen={isSearchModalOpen}
-        index={index}
         onClose={() => setIsSearchModalOpen(false)}
-        onSelectResult={(path) => openNote(path)}
+        onSelectResult={(path: VaultPath) => openNote(path)}
+        index={index}
       />
     </div>
   );

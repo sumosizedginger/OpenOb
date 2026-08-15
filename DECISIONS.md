@@ -74,6 +74,12 @@
 
 ## D-014 Vault-Wide Safe Note Rename & Wikilink Refactoring
 
-**Decision:** Note renames execute through `renameDocument(storage, index, parser, oldPath, newPath, options)` which atomically rewrites referencing `[[wikilinks]]` across the vault, preserves subpaths (`#Heading`) and aliases (`|Display`), handles internal self-references, preserves CRLF/LF line endings, and renames canonical storage before updating the derived index.
+**Decision:** Note renames execute through `renameDocument(storage, index, parser, oldPath, newPath, options)` which atomically rewrites referencing `[[wikilinks]]` across the vault, preserves subpaths (`#Heading`) and aliases (`|Display`), protects code blocks and frontmatter, handles internal self-references, preserves CRLF/LF line endings, and renames canonical storage before updating the derived index, backed by an exception-safe rollback journal.
 
-**Reason:** Eliminates broken incoming backlinks during folder reorganization (`F-010`, `F-011`) while guaranteeing strict data integrity and zero corruption.
+**Reason:** Eliminates broken incoming backlinks during folder reorganization (`F-010`, `F-011`) while guaranteeing strict data integrity and zero silent overwrites (`F-001`).
+
+## D-015 Pure-Derived Provenance-Aware Graph & Structured Metadata
+
+**Decision:** All graph models, node degrees, and edges (`wikilink`, `embed`, `tag`, `property`) are strictly derived from `DocumentIndex` via `buildGraphData(index, options)` with zero direct storage access (Constitution Law 21). Interactive Canvas graph simulation uses rapid auto-cooling decay to prevent main-thread editor typing stalls.
+
+**Reason:** Guarantees absolute single-writer indexing architecture, ensures graph views scale to thousands of notes without file I/O overhead, and preserves sub-16ms editor responsiveness (Performance Stop Rule).

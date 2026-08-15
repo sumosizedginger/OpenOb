@@ -17,17 +17,31 @@ import { DefaultLinkResolver } from './link-resolver.js';
 export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
   private documents = new Map<string, ParsedDocument>();
   private linkResolver: LinkResolver;
+  private cachedDocArray: ParsedDocument[] | null = null;
 
   constructor() {
-    this.linkResolver = new DefaultLinkResolver(() => Array.from(this.documents.values()));
+    this.linkResolver = new DefaultLinkResolver(() => this.getDocArray());
+  }
+
+  private getDocArray(): ParsedDocument[] {
+    if (!this.cachedDocArray) {
+      this.cachedDocArray = Array.from(this.documents.values());
+    }
+    return this.cachedDocArray;
+  }
+
+  private invalidateCache(): void {
+    this.cachedDocArray = null;
   }
 
   async upsert(doc: ParsedDocument): Promise<void> {
     this.documents.set(doc.id, doc);
+    this.invalidateCache();
   }
 
   async remove(documentId: string): Promise<void> {
     this.documents.delete(documentId);
+    this.invalidateCache();
   }
 
   async get(documentId: string): Promise<ParsedDocument | null> {
@@ -40,30 +54,33 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
 
   async rebuild(docs: AsyncIterable<ParsedDocument> | ParsedDocument[]): Promise<void> {
     this.documents.clear();
-    if (Array.isArray(docs)) {
-      for (const doc of docs) {
-        this.documents.set(doc.id, doc);
-      }
-    } else {
-      for await (const doc of docs) {
-        this.documents.set(doc.id, doc);
-      }
+    for await (const doc of docs) {
+      this.documents.set(doc.id, doc);
     }
+    this.invalidateCache();
   }
 
-  async getBacklinks(documentId: string): Promise<Backlink[]> {
-    const targetDoc = this.documents.get(documentId);
-    if (!targetDoc) return [];
+  resolveLink(sourcePath: string, rawTarget: string) {
+    return this.linkResolver.resolve(sourcePath, rawTarget);
+  }
+
+  async getBacklinks(documentPathOrId: string): Promise<Backlink[]> {
+    const targetDoc =
+      (await this.get(documentPathOrId)) ||
+      Array.from(this.documents.values()).find((d) => d.path === documentPathOrId);
+
+    if (!targetDoc) {
+      return [];
+    }
 
     const backlinks: Backlink[] = [];
 
     for (const sourceDoc of this.documents.values()) {
-      if (sourceDoc.id === documentId) continue;
+      if (sourceDoc.id === targetDoc.id) continue;
 
       for (const link of sourceDoc.links) {
         const resolution = this.linkResolver.resolve(sourceDoc.path, link.target);
         if (resolution.resolved && resolution.targetPath === targetDoc.path) {
-          // Extract line snippet as excerpt
           const lines = sourceDoc.textContent.split(/\r?\n/);
           const lineText = lines[link.line - 1] || '';
 
@@ -83,26 +100,26 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
   }
 
   async getOutgoingLinks(documentId: string): Promise<ParsedDocument[]> {
-    const doc = this.documents.get(documentId);
+    const doc = await this.get(documentId);
     if (!doc) return [];
 
     const outgoing: ParsedDocument[] = [];
+    const seenPaths = new Set<string>();
 
     for (const link of doc.links) {
-      const resolution = this.linkResolver.resolve(doc.path, link.target);
-      if (resolution.resolved && resolution.targetPath) {
-        const targetDoc = this.documents.get(resolution.targetPath);
-        if (targetDoc && !outgoing.some((d) => d.id === targetDoc.id)) {
+      const res = this.linkResolver.resolve(doc.path, link.target);
+      if (res.resolved && res.targetPath && !seenPaths.has(res.targetPath)) {
+        seenPaths.add(res.targetPath);
+        const targetDoc = Array.from(this.documents.values()).find(
+          (d) => d.path === res.targetPath
+        );
+        if (targetDoc) {
           outgoing.push(targetDoc);
         }
       }
     }
 
     return outgoing;
-  }
-
-  resolveLink(sourcePath: string, rawTarget: string) {
-    return this.linkResolver.resolve(sourcePath, rawTarget);
   }
 
   async query(request: SearchRequest): Promise<SearchResult[]> {
@@ -113,7 +130,6 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
     const tokens = q.split(/\s+/).filter(Boolean);
 
     for (const doc of this.documents.values()) {
-      // Scope filtering: ensure folder prefix has a trailing slash or matches exactly (L-01)
       if (request.scope?.folders && request.scope.folders.length > 0) {
         const inScope = request.scope.folders.some((f) => {
           const normF = f.replace(/\/+$/, '');
@@ -121,8 +137,9 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
         });
         if (!inScope) continue;
       }
+
       if (request.scope?.tags && request.scope.tags.length > 0) {
-        const hasTag = request.scope.tags.some((t) => doc.tags.includes(t));
+        const hasTag = doc.tags.some((t) => request.scope!.tags!.includes(t));
         if (!hasTag) continue;
       }
 
@@ -132,8 +149,8 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
 
       const titleLower = doc.title.toLowerCase();
       const pathLower = doc.path.toLowerCase();
+      const bodyLower = doc.textContent.toLowerCase();
 
-      // 1. Exact or prefix title / navigation match
       if (titleLower === q || pathLower === q) {
         score += 100;
         source = 'navigation';
@@ -145,34 +162,21 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
         source = 'navigation';
       }
 
-      // 2. Alias match
-      for (const alias of doc.aliases) {
-        if (alias.toLowerCase().includes(q)) {
-          score += 40;
-          break;
-        }
+      if (doc.aliases?.some((a) => a.toLowerCase().includes(q))) {
+        score += 40;
       }
 
-      // 3. Tag match
-      for (const tag of doc.tags) {
-        if (tag.toLowerCase().includes(q)) {
-          score += 30;
-          source = 'property';
-          break;
-        }
+      if (doc.tags.some((t) => t.toLowerCase().includes(q))) {
+        score += 30;
+        source = 'property';
       }
 
-      // 4. Heading match
-      for (const h of doc.headings) {
-        if (h.text.toLowerCase().includes(q)) {
-          score += 20;
-          if (!excerpt) excerpt = `## ${h.text}`;
-          break;
-        }
+      const matchingHeading = doc.headings.find((h) => h.text.toLowerCase().includes(q));
+      if (matchingHeading) {
+        score += 20;
+        if (!excerpt) excerpt = `## ${matchingHeading.text}`;
       }
 
-      // 5. Full text body match
-      const bodyLower = doc.textContent.toLowerCase();
       let bodyMatches = 0;
       for (const token of tokens) {
         const idx = bodyLower.indexOf(token);
@@ -204,13 +208,8 @@ export class MemoryDocumentIndex implements DocumentIndex, SearchEngine {
       }
     }
 
-    // Sort descending by score
-    results.sort((a, b) => b.score - a.score);
-
-    if (request.limit && request.limit > 0) {
-      return results.slice(0, request.limit);
-    }
-
-    return results;
+    return results
+      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+      .slice(0, request.limit ?? 50);
   }
 }
