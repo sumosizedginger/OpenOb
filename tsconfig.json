@@ -6,6 +6,7 @@
     { "path": "./packages/markdown" },
     { "path": "./packages/index" },
     { "path": "./packages/ai" },
+    { "path": "./packages/plugin" },
     { "path": "./apps/web" }
   ]
 }

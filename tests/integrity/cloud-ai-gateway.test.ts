@@ -68,13 +68,16 @@ describe('Phase 8 Exit Gate: BYOK Cloud AI, Secret Isolation & Failure Resilienc
     await storage.write('Architecture.md', null, noteContent);
     await index.upsert(await parser.parse('Architecture.md', noteContent));
 
-    // 2. Create AI Manager with broken provider
-    const manager = new AIManager({ activeProviderId: 'anthropic' });
+    // 2. Create AI Provider with unreachable endpoint (ensures clean offline CI execution)
+    const brokenProvider = new AnthropicProvider({
+      apiKey: 'sk-ant-test-mock',
+      baseUrl: 'http://127.0.0.1:59999/v1',
+    });
 
     // 3. Verify AI failure is non-blocking
     let aiFailed = false;
     try {
-      const stream = manager.chat({
+      const stream = brokenProvider.chat({
         model: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'Summarize note' }],
       });

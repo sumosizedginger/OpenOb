@@ -16,6 +16,7 @@
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.4",
     "@okw/ai": "*",
+    "@okw/plugin": "*",
     "@okw/core": "*",
     "@okw/index": "*",
     "@okw/markdown": "*",

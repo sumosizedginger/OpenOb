@@ -83,3 +83,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** Cloud AI providers (OpenAI, Anthropic Claude, Google Gemini, OpenRouter) integrate through unified `AIManager` with zero hardcoded API keys in application state. Secrets are isolated in `SecretStore` with masked UI presentation (`sk-...WXYZ`), and all outbound request errors and logs pass through `redactSecrets()` sanitization (Constitution Law 17, `F-005`). Provider 4xx/5xx failures are fully isolated and cannot impede core note storage, search, graph, or database view operations (Constitution Law 18).
 
 **Reason:** Empowers users to use their own cloud AI keys with strict privacy, zero secret leakage, and total workspace operational resilience.
+
+## D-019 Isolated Capability Host, Permission Manifest & Plugin SDK
+
+**Decision:** Plugins execute against an isolated capability host (`PluginHost`) interacting strictly through a sandboxed, permission-gated bridge (`PluginAPI`). All plugin capabilities (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) must be explicitly declared in `manifest.permissions`; undeclared invocations fail closed with `PermissionDeniedError` (Constitution Law 20, `F-006`). Crashes during plugin load, unload, or command execution are strictly contained, isolating the failing plugin into an `'error'` state with restart capability while leaving core note storage, editor, search, graph, and views 100% operational (Constitution Law 20, `F-007`). First-party plugins (`WordCount`, `DailyNotes`) are authored strictly against public `PluginAPI` interfaces with zero private internal package imports.
+
+**Reason:** Enables rich modular ecosystem expansion while guaranteeing workspace security and crash resilience.

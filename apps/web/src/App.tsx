@@ -18,6 +18,14 @@ import { ParsedHeading, VaultPath } from '@okw/core';
 import { updateDocumentFrontmatter } from '@okw/markdown';
 import { ProposedEdit } from '@okw/ai';
 import {
+  PluginHost,
+  wordCountManifest,
+  WordCountPlugin,
+  dailyNotesManifest,
+  DailyNotesPlugin,
+} from '@okw/plugin';
+import { PluginManagerModal } from './components/plugins/PluginManagerModal.js';
+import {
   FolderPlus,
   FilePlus,
   BookOpen,
@@ -36,6 +44,7 @@ import {
   LayoutGrid,
   FileText,
   Bot,
+  Boxes,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -79,7 +88,40 @@ export const App: React.FC = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
+  const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
+
+  // Initialize PluginHost with First-Party Plugins (Constitution Law 20)
+  const [pluginHost] = useState<PluginHost>(() => {
+    const host = new PluginHost({
+      storage,
+      index,
+      activeNotePath: activeTabPath,
+      openNote: async (p) => {
+        setMainMode('editor');
+        openNote(p);
+      },
+      showNotice: (msg) => {
+        alert(msg);
+      },
+    });
+
+    host.registerPlugin(wordCountManifest, () => new WordCountPlugin());
+    host.registerPlugin(dailyNotesManifest, () => new DailyNotesPlugin());
+    host.enablePlugin(wordCountManifest.id);
+    host.enablePlugin(dailyNotesManifest.id);
+
+    return host;
+  });
+
+  // Keep plugin host context updated with live state
+  useEffect(() => {
+    pluginHost.updateContext({
+      storage,
+      index,
+      activeNotePath: activeTabPath,
+    });
+  }, [pluginHost, storage, index, activeTabPath]);
 
   // Aggregate vault tags for Properties & Tags Explorer
   useEffect(() => {
@@ -265,6 +307,14 @@ export const App: React.FC = () => {
             onClick={() => setIsGlobalGraphOpen((prev) => !prev)}
           >
             <Share2 size={15} />
+          </button>
+
+          <button
+            className={`btn-icon ${isPluginModalOpen ? 'active' : ''}`}
+            title="Plugin Manager"
+            onClick={() => setIsPluginModalOpen(true)}
+          >
+            <Boxes size={15} />
           </button>
 
           <button
@@ -615,6 +665,14 @@ export const App: React.FC = () => {
           openNote(path);
         }}
         index={index}
+      />
+
+      {/* Plugin Manager Modal (Constitution Law 20) */}
+      <PluginManagerModal
+        isOpen={isPluginModalOpen}
+        pluginHost={pluginHost}
+        onClose={() => setIsPluginModalOpen(false)}
+        onRefresh={() => {}}
       />
     </div>
   );

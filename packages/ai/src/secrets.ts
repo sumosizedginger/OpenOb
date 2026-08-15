@@ -96,11 +96,11 @@ export function redactSecrets(text: string, knownSecrets: string[] = []): string
   // 2. Pattern-based redaction: Bearer tokens
   sanitized = sanitized.replace(/Bearer\s+([A-Za-z0-9_\-\.]{10,})/gi, 'Bearer [REDACTED_TOKEN]');
 
-  // 3. Pattern-based redaction: OpenAI keys (sk-...)
-  sanitized = sanitized.replace(/sk-[a-zA-Z0-9_\-]{20,}/g, 'sk-[REDACTED]');
-
-  // 4. Pattern-based redaction: Anthropic keys (sk-ant-...)
+  // 3. Pattern-based redaction: Anthropic keys (sk-ant-...)
   sanitized = sanitized.replace(/sk-ant-[a-zA-Z0-9_\-]{20,}/g, 'sk-ant-[REDACTED]');
+
+  // 4. Pattern-based redaction: OpenAI keys (sk-...)
+  sanitized = sanitized.replace(/sk-[a-zA-Z0-9_\-]{20,}/g, 'sk-[REDACTED]');
 
   // 5. Pattern-based redaction: Google AI Studio keys (AIza...)
   sanitized = sanitized.replace(/AIza[0-9A-Za-z\-_]{30,}/g, 'AIza[REDACTED]');

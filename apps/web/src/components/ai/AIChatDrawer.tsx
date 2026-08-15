@@ -72,8 +72,14 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync active provider
+  // Sync active provider and abort any in-flight stream (P8-1)
   useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsGenerating(false);
+    }
+
     aiManager.setActiveProviderId(providerId);
     localStorage.setItem('okw_ai_provider', providerId);
 
