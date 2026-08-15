@@ -8,7 +8,7 @@ import {
   VaultStorage,
 } from '@okw/core';
 import { DefaultDocumentParser, toggleTaskAtLine } from '@okw/markdown';
-import { MemoryDocumentIndex, rebuildVaultIndex } from '@okw/index';
+import { MemoryDocumentIndex, rebuildVaultIndex, renameDocument } from '@okw/index';
 import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage } from '@okw/vault';
 
 export interface OpenTab {
@@ -327,17 +327,36 @@ export function useVault() {
     await refreshVault();
   };
 
-  // Rename a note
+  // Rename a note safely with automatic incoming link refactoring (F-010 / F-011)
   const renameNote = async (from: VaultPath, to: VaultPath) => {
     const normTo = to.endsWith('.md') ? to : `${to}.md`;
-    await storage.move(from, normTo);
-    setOpenTabs((prev) =>
-      prev.map((tab) => (tab.path === from ? { ...tab, path: normTo, title: normTo.replace(/\.md$/, '') } : tab))
-    );
-    if (activeTabPath === from) {
-      setActiveTabPath(normTo);
+    try {
+      const res = await renameDocument(storage, index, parser, from, normTo, { updateLinks: true });
+      
+      // Update tab paths and reload content for tabs that had links refactored
+      const updatedOpenTabs = await Promise.all(
+        openTabs.map(async (tab) => {
+          if (tab.path === from) {
+            const content = await storage.readText(normTo);
+            return { ...tab, path: normTo, title: normTo.replace(/\.md$/, ''), content };
+          }
+          if (res.updatedFiles.includes(tab.path)) {
+            const content = await storage.readText(tab.path);
+            return { ...tab, content };
+          }
+          return tab;
+        })
+      );
+      setOpenTabs(updatedOpenTabs);
+
+      if (activeTabPath === from) {
+        setActiveTabPath(normTo);
+      }
+      await refreshVault();
+    } catch (err: any) {
+      console.error('Rename failed:', err);
+      alert(`Rename failed: ${err.message}`);
     }
-    await refreshVault();
   };
 
   // Delete a note / folder

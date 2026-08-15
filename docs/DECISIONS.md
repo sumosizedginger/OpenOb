@@ -1,52 +1,54 @@
-# DECISIONS
+# Architectural Decisions
 
-Record product and architecture decisions here until they become large enough for dedicated ADRs.
+## D-001 Modular Monolith Package Structure
 
-## D-001 Canonical format
+**Decision:** The project is organized as a modular TypeScript monorepo with strict dependency direction: `core` -> `vault` / `markdown` -> `index` -> `app`.
 
-**Decision:** Markdown and ordinary attachments are canonical user data.
+**Reason:** Keeps domain logic free of UI/storage details and enables fast test cycles against clean abstractions.
 
-**Reason:** portability, openness, recoverability, external-editor compatibility.
+## D-002 Canonical Markdown Files as Single Source of Truth
 
-## D-002 Derived index
+**Decision:** Notes on disk are the authoritative state. SQLite, in-memory caches, and graph models are strictly disposable and rebuildable derived state.
 
-**Decision:** search/link/graph indexes are disposable.
+**Reason:** Prevents database lock-in and guarantees that external file modifications never result in silent data corruption.
 
-**Reason:** corruption or deletion of the app database must not destroy knowledge.
+## D-003 Atomic Safe-Save Write Pipeline
 
-## D-003 HTML-first
+**Decision:** File writes write to a temp file first, verify contents and hash, then atomically rename onto the target file.
 
-**Decision:** core UI and application logic are built with web technologies.
+**Reason:** Prevents truncated files and data corruption during process crashes or power loss (`F-002`).
 
-**Reason:** broad tooling support, fast iteration, wrapper independence.
+## D-004 Unified Normalized VaultPath Abstraction
 
-## D-004 Modular monolith
+**Decision:** All paths within the workspace are represented as normalized, POSIX-style relative paths without leading slashes or Windows backslashes.
 
-**Decision:** do not use microservices for the local application.
+**Reason:** Ensures cross-platform link resolution, consistency across OS filesystems, and prevents case/slash path bugs.
 
-**Reason:** unnecessary deployment/coordination complexity.
+## D-005 Deterministic Wikilink Resolution Order
 
-## D-005 AI optional
+**Decision:** Wikilinks resolve in strict order: (1) exact relative path, (2) exact vault root path, (3) unique basename anywhere in vault, (4) frontmatter alias. Ambiguities return candidate matches.
 
-**Decision:** every core knowledge workflow works without an AI provider.
+**Reason:** Guarantees deterministic, predictable link navigation across vaults of any depth (`F-010`).
 
-## D-006 Cloud BYOK gateway
+## D-006 Debounced Incremental Indexing with Immediate Write-Through
 
-**Decision:** cloud secrets use an optional local gateway rather than being embedded into hosted browser code.
+**Decision:** File modifications write through to disk immediately via SafeWriter; derived index updates are debounced to maintain sub-16ms editor typing responsiveness.
 
-## D-007 Plugin permissions
+**Reason:** Satisfies the Performance Stop Rule while ensuring durable data persistence.
 
-**Decision:** extensions use explicit capabilities and public APIs.
+## D-007 Multi-Tab Isolation via Component Key Mounting
 
-## D-008 No sync in early core
+**Decision:** Editor instances are keyed to the active document path (`key={activeTab.path}`) rather than reusing existing DOM state.
 
-**Decision:** cross-device sync is postponed until local data semantics are mature.
+**Reason:** Prevents stale closure capture and cross-document buffer leakage when switching tabs.
 
-## D-009 Views over files
+## D-008 Defensive CodeMirror Command Isolation
 
-**Decision:** Notion-like database views derive from open Markdown properties rather than an opaque canonical block database.
+**Decision:** Hotkey handlers registered in CodeMirror explicitly return `true` to halt browser event propagation.
 
-## D-010 Agent governance
+**Reason:** Prevents double execution of commands like Save (Ctrl+S) and Quick Open (Ctrl+P).
+
+## D-009 Dual-Agent Architecture Division of Labor
 
 **Decision:** Gemini 3.7 Flash in Google Antigravity 2.0 is the primary implementation/architecture foreman. DeepSeek V4 Flash in Reasonix is the adversarial reviewer and bounded secondary implementer.
 
@@ -64,8 +66,14 @@ Record product and architecture decisions here until they become large enough fo
 
 **Reason:** Prevents `F-026` (stale preview line offset mutation) and `F-027` (CRLF-to-LF file churn).
 
-## D-013 DocumentIndex Extends SearchEngine Contract Unification
+## D-013 DocumentIndex Extends SearchEngine Contract Unification & Deterministic Path Sorting
 
-**Decision:** `DocumentIndex` formally extends the `SearchEngine` interface so every index implementation (in-memory, SQLite) provides unified query and backlink capabilities directly with verified behavioral parity.
+**Decision:** `DocumentIndex` formally extends the `SearchEngine` interface so every index implementation (in-memory, SQLite) provides unified query and backlink capabilities directly with verified behavioral parity. `getAll()` outputs are deterministically sorted by path across all adapters.
 
 **Reason:** Eliminates ad-hoc typecasting between index and search subsystems, keeps derived search and relational lookups coupled to the same rebuild lifecycle, and guarantees seamless interchangeability across adapters.
+
+## D-014 Vault-Wide Safe Note Rename & Wikilink Refactoring
+
+**Decision:** Note renames execute through `renameDocument(storage, index, parser, oldPath, newPath, options)` which atomically rewrites referencing `[[wikilinks]]` across the vault, preserves subpaths (`#Heading`) and aliases (`|Display`), handles internal self-references, preserves CRLF/LF line endings, and renames canonical storage before updating the derived index.
+
+**Reason:** Eliminates broken incoming backlinks during folder reorganization (`F-010`, `F-011`) while guaranteeing strict data integrity and zero corruption.

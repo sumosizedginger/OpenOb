@@ -304,6 +304,7 @@ export const App: React.FC = () => {
                       onChange={(val) => updateContent(activeTab.path, val)}
                       onSave={() => saveActiveNote()}
                       onCommandPalette={() => setIsCommandPaletteOpen(true)}
+                      onNavigateWikilink={handleNavigateWikilink}
                     />
                   </div>
                 )}
@@ -349,7 +350,10 @@ export const App: React.FC = () => {
         {showRightPanel === 'backlinks' && activeTab && (
           <BacklinksPanel
             backlinks={backlinks}
+            parsedDoc={parsedDoc}
+            index={index}
             onNavigate={(path) => openNote(path)}
+            onCreateNote={(name) => createNote(name)}
           />
         )}
       </div>

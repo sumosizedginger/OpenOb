@@ -14,6 +14,7 @@ import {
   SearchResult,
   VaultPath,
 } from '@okw/core';
+import { DefaultLinkResolver } from './link-resolver.js';
 
 let SQL_PROMISE: Promise<SqlJsStatic> | null = null;
 
@@ -166,11 +167,43 @@ export class SqliteDocumentIndex implements DocumentIndex {
         ]
       );
 
-      // 3. Insert links with subpath and raw preserving (P3-1)
+      // 3. Insert headings
+      for (const heading of doc.headings) {
+        this.safeRun(
+          `INSERT INTO headings (doc_id, level, text, slug, line)
+           VALUES (?, ?, ?, ?, ?)`,
+          [doc.id, heading.level, heading.text, heading.slug, heading.line]
+        );
+      }
+
+      // 4. Insert tags
+      for (const tag of doc.tags) {
+        this.safeRun(`INSERT INTO tags (doc_id, tag) VALUES (?, ?)`, [doc.id, tag]);
+      }
+
+      // 5. Insert properties & aliases
+      if (doc.properties) {
+        for (const [key, val] of Object.entries(doc.properties)) {
+          this.safeRun(
+            `INSERT OR REPLACE INTO properties (doc_id, key, value_json) VALUES (?, ?, ?)`,
+            [doc.id, key, JSON.stringify(val)]
+          );
+        }
+      }
+
+      if (doc.aliases) {
+        for (const alias of doc.aliases) {
+          this.safeRun(`INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`, [doc.id, alias]);
+        }
+      }
+
+      // 6. Insert links with authoritative target resolution (P3-6A)
       for (const link of doc.links) {
         const targetName = link.target || (link as any).rawTarget || link.raw;
         const raw = link.raw || `[[${targetName}]]`;
-        const targetPath = (link as any).targetPath ?? null;
+        const res = this.resolveLink(doc.path, targetName);
+        const targetPath = res.resolved && res.targetPath ? res.targetPath : null;
+
         this.safeRun(
           `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -188,35 +221,19 @@ export class SqliteDocumentIndex implements DocumentIndex {
         );
       }
 
-      // 4. Insert headings
-      for (const heading of doc.headings) {
-        this.safeRun(
-          `INSERT INTO headings (doc_id, level, text, slug, line)
-           VALUES (?, ?, ?, ?, ?)`,
-          [doc.id, heading.level, heading.text, heading.slug, heading.line]
-        );
-      }
-
-      // 5. Insert tags
-      for (const tag of doc.tags) {
-        this.safeRun(`INSERT INTO tags (doc_id, tag) VALUES (?, ?)`, [doc.id, tag]);
-      }
-
-      // 6. Insert properties & aliases
-      if (doc.properties) {
-        for (const [key, val] of Object.entries(doc.properties)) {
-          this.safeRun(
-            `INSERT OR REPLACE INTO properties (doc_id, key, value_json) VALUES (?, ?, ?)`,
-            [doc.id, key, JSON.stringify(val)]
-          );
-        }
-      }
-
-      if (doc.aliases) {
-        for (const alias of doc.aliases) {
-          this.safeRun(`INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`, [doc.id, alias]);
-        }
-      }
+      // 7. Update previously unresolved links across vault that now resolve to this new document
+      const docBasename = basenameVaultPath(doc.path, '.md');
+      this.safeRun(
+        `UPDATE links
+         SET target_path = ?
+         WHERE target_path IS NULL
+           AND (
+             LOWER(target_name) = LOWER(?)
+             OR LOWER(target_name) = LOWER(?)
+             OR LOWER(target_name || '.md') = LOWER(?)
+           )`,
+        [doc.path, doc.path, docBasename, doc.path]
+      );
 
       this.db.run('COMMIT');
     } catch (err) {
@@ -244,11 +261,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
   async rebuild(docs: AsyncIterable<ParsedDocument> | ParsedDocument[]): Promise<void> {
     this.db.run('BEGIN TRANSACTION');
     let insertDocStmt: any = null;
-    let insertLinkStmt: any = null;
     let insertHeadingStmt: any = null;
     let insertTagStmt: any = null;
     let insertPropStmt: any = null;
     let insertAliasStmt: any = null;
+    let insertLinkStmt: any = null;
 
     try {
       this.db.run('DELETE FROM links');
@@ -260,9 +277,6 @@ export class SqliteDocumentIndex implements DocumentIndex {
 
       insertDocStmt = this.db.prepare(
         `INSERT INTO documents (id, path, title, hash, modified_at, size, word_count, line_count, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      );
-      insertLinkStmt = this.db.prepare(
-        `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       insertHeadingStmt = this.db.prepare(
         `INSERT INTO headings (doc_id, level, text, slug, line) VALUES (?, ?, ?, ?, ?)`
@@ -277,7 +291,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
         `INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`
       );
 
+      const allParsed: ParsedDocument[] = [];
+
+      // Phase 1: Insert all documents, headings, tags, aliases
       for await (const doc of docs) {
+        allParsed.push(doc);
         const hash = doc.sourceHash || (doc as any).hash || '';
         const modifiedAt = (doc as any).modifiedAt ?? 0;
         const size = (doc as any).size ?? doc.textContent.length;
@@ -294,23 +312,6 @@ export class SqliteDocumentIndex implements DocumentIndex {
           lineCount,
           doc.textContent,
         ]);
-
-        for (const link of doc.links) {
-          const targetName = link.target || (link as any).rawTarget || link.raw;
-          const raw = link.raw || `[[${targetName}]]`;
-          const targetPath = (link as any).targetPath ?? null;
-          insertLinkStmt.run([
-            doc.id,
-            doc.path,
-            targetPath,
-            targetName,
-            raw,
-            link.displayText ?? null,
-            link.subpath ?? null,
-            link.line,
-            link.isEmbed ? 1 : 0,
-          ]);
-        }
 
         for (const heading of doc.headings) {
           insertHeadingStmt.run([
@@ -340,20 +341,47 @@ export class SqliteDocumentIndex implements DocumentIndex {
       }
 
       insertDocStmt.free();
-      insertLinkStmt.free();
       insertHeadingStmt.free();
       insertTagStmt.free();
       insertPropStmt.free();
       insertAliasStmt.free();
 
+      // Phase 2: Authoritative fast in-memory link resolution across batch (P3-6A)
+      const resolver = new DefaultLinkResolver(() => allParsed);
+      insertLinkStmt = this.db.prepare(
+        `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      for (const doc of allParsed) {
+        for (const link of doc.links) {
+          const targetName = link.target || (link as any).rawTarget || link.raw;
+          const raw = link.raw || `[[${targetName}]]`;
+          const res = resolver.resolve(doc.path, targetName);
+          const targetPath = res.resolved && res.targetPath ? res.targetPath : null;
+
+          insertLinkStmt.run([
+            doc.id,
+            doc.path,
+            targetPath,
+            targetName,
+            raw,
+            link.displayText ?? null,
+            link.subpath ?? null,
+            link.line,
+            link.isEmbed ? 1 : 0,
+          ]);
+        }
+      }
+
+      insertLinkStmt.free();
       this.db.run('COMMIT');
     } catch (err) {
       insertDocStmt?.free();
-      insertLinkStmt?.free();
       insertHeadingStmt?.free();
       insertTagStmt?.free();
       insertPropStmt?.free();
       insertAliasStmt?.free();
+      insertLinkStmt?.free();
       this.db.run('ROLLBACK');
       throw err;
     }
@@ -567,26 +595,21 @@ export class SqliteDocumentIndex implements DocumentIndex {
     const targetDoc = await this.get(documentPathOrId);
     const targetPath = targetDoc ? targetDoc.path : documentPathOrId;
     const targetId = targetDoc ? targetDoc.id : documentPathOrId;
-    const targetBasename = basenameVaultPath(targetPath, '.md');
 
     const backlinks: Backlink[] = [];
 
-    // Pure Relational Indexed Query (P3-6 / P3-3 / P3-4)
+    // Exact Relational Indexed Query on target_path (P3-6A & P3-6B)
+    // Constitution Law 22: 100% authoritative resolution without false positives
     const stmt = this.db.prepare(`
       SELECT l.source_doc_id, l.source_path, l.target_name, l.raw, l.line, d.title, d.body
       FROM links l
       JOIN documents d ON l.source_doc_id = d.id
       WHERE l.source_doc_id != ?
         AND l.source_path != ?
-        AND (
-          LOWER(l.target_name) = LOWER(?)
-          OR LOWER(l.target_name) = LOWER(?)
-          OR LOWER(l.target_name || '.md') = LOWER(?)
-          OR LOWER(l.target_name) IN (SELECT LOWER(alias) FROM aliases WHERE doc_id = ?)
-        )
+        AND l.target_path = ?
       ORDER BY l.line ASC
     `);
-    this.safeBind(stmt, [targetId, targetPath, targetPath, targetBasename, targetPath, targetId]);
+    this.safeBind(stmt, [targetId, targetPath, targetPath]);
 
     while (stmt.step()) {
       const row = stmt.getAsObject();
