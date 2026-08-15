@@ -5,13 +5,56 @@ export interface FrontmatterResult {
 }
 
 /**
+ * Parses scalar YAML values into their JavaScript types (number, boolean, null, string).
+ */
+export function parseScalar(raw: string): any {
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed.toLowerCase() === 'null' || trimmed === '~') {
+    return null;
+  }
+  if (trimmed.toLowerCase() === 'true' || trimmed.toLowerCase() === 'yes') {
+    return true;
+  }
+  if (trimmed.toLowerCase() === 'false' || trimmed.toLowerCase() === 'no') {
+    return false;
+  }
+
+  // Quoted strings
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    if (trimmed.startsWith('"')) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return trimmed.slice(1, -1);
+      }
+    }
+    return trimmed.slice(1, -1);
+  }
+
+  // Preserve leading zero strings like '007' as strings
+  if (/^0\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Numbers
+  if (!isNaN(Number(trimmed)) && !trimmed.startsWith('0x') && !trimmed.startsWith('0b')) {
+    return Number(trimmed);
+  }
+
+  return trimmed;
+}
+
+/**
  * Parses YAML frontmatter from a Markdown document (M-03, P5-1).
- * Supports inline lists [a, b] and multiline list items (- item).
+ * Supports inline lists [a, b], multiline list items (- item), and typed array items.
  */
 export function parseFrontmatter(text: string): FrontmatterResult {
   // Strip BOM if present (M-03)
   const cleanText = text.startsWith('\uFEFF') ? text.slice(1) : text;
-  const match = cleanText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  const match = cleanText.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
 
   if (!match) {
     return {
@@ -34,7 +77,8 @@ export function parseFrontmatter(text: string): FrontmatterResult {
 
     // Check for multiline list item (- item) under current list key
     if (line.match(/^\s*-\s+/) && currentListKey) {
-      const itemVal = rawTrimmed.replace(/^-\s+/, '').trim().replace(/^["']|["']$/g, '');
+      const itemValStr = rawTrimmed.replace(/^-\s+/, '').trim();
+      const itemVal = parseScalar(itemValStr);
       if (!Array.isArray(properties[currentListKey])) {
         properties[currentListKey] = [];
       }
@@ -64,25 +108,11 @@ export function parseFrontmatter(text: string): FrontmatterResult {
       const items = valStr
         .slice(1, -1)
         .split(',')
-        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
-        .filter(Boolean);
+        .map((s) => parseScalar(s))
+        .filter((item) => item !== undefined);
       properties[key] = items;
-    } else if (valStr.toLowerCase() === 'true') {
-      properties[key] = true;
-    } else if (valStr.toLowerCase() === 'false') {
-      properties[key] = false;
-    } else if (valStr.toLowerCase() === 'null') {
-      properties[key] = null;
-    } else if (!isNaN(Number(valStr)) && valStr !== '') {
-      properties[key] = Number(valStr);
     } else {
-      if (
-        (valStr.startsWith('"') && valStr.endsWith('"')) ||
-        (valStr.startsWith("'") && valStr.endsWith("'"))
-      ) {
-        valStr = valStr.slice(1, -1);
-      }
-      properties[key] = valStr;
+      properties[key] = parseScalar(valStr);
     }
   }
 
@@ -98,7 +128,7 @@ export function parseFrontmatter(text: string): FrontmatterResult {
  */
 export function serializeYamlValue(val: any): string {
   if (val === null || val === undefined) {
-    return '""';
+    return 'null';
   }
   if (typeof val === 'boolean') {
     return val ? 'true' : 'false';
@@ -110,17 +140,21 @@ export function serializeYamlValue(val: any): string {
     return `[${val.map((item) => serializeYamlValue(item)).join(', ')}]`;
   }
   if (typeof val === 'string') {
-    const trimmed = val.trim();
+    const trimmed = val;
     // Quote strings that could be misinterpreted by YAML parsers
     const needsQuoting =
+      trimmed === '' ||
       trimmed === 'true' ||
       trimmed === 'false' ||
       trimmed === 'null' ||
+      trimmed === '~' ||
       trimmed === 'yes' ||
       trimmed === 'no' ||
+      /^0\d+$/.test(trimmed) ||
       !isNaN(Number(trimmed)) ||
       /[:#{}[\]"',&*!|>?%@`]/.test(trimmed) ||
-      trimmed.includes('\n');
+      trimmed.includes('\n') ||
+      trimmed.includes('\r');
 
     if (needsQuoting) {
       return JSON.stringify(trimmed);
@@ -132,37 +166,83 @@ export function serializeYamlValue(val: any): string {
 
 /**
  * Safely updates YAML frontmatter in a Markdown document while preserving
- * line endings (CRLF / LF) and formatting (D-012, P5-1).
+ * comments (# ...), untouched fields, line endings (CRLF / LF), and BOM (D-012, P5-1).
  */
 export function updateDocumentFrontmatter(
   content: string,
-  properties: Record<string, any>
+  newProperties: Record<string, any>
 ): string {
-  const isCrlf = content.includes('\r\n');
+  const hasBom = content.startsWith('\uFEFF');
+  const cleanContent = hasBom ? content.slice(1) : content;
+  const isCrlf = cleanContent.includes('\r\n');
   const eol = isCrlf ? '\r\n' : '\n';
 
   // 1. Separate existing frontmatter from body
-  let body = content;
-  const cleanContent = content.startsWith('\uFEFF') ? content.slice(1) : content;
-  const fmMatch = cleanContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  let existingYaml: string | null = null;
+  let body = cleanContent;
+
+  const fmMatch = cleanContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (fmMatch && fmMatch.index === 0) {
+    existingYaml = fmMatch[1];
     body = cleanContent.slice(fmMatch[0].length);
   }
 
-  // If properties are empty, return body without frontmatter
-  const keys = Object.keys(properties);
-  if (keys.length === 0) {
-    return body;
+  // If new properties are empty and no existing frontmatter, return body
+  const newKeys = Object.keys(newProperties);
+  if (newKeys.length === 0 && !existingYaml) {
+    return (hasBom ? '\uFEFF' : '') + body;
   }
 
-  // 2. Build new frontmatter block
-  const lines: string[] = ['---'];
-  for (const key of keys) {
-    const serializedVal = serializeYamlValue(properties[key]);
-    lines.push(`${key}: ${serializedVal}`);
-  }
-  lines.push('---');
+  const processedKeys = new Set<string>();
+  const outputLines: string[] = ['---'];
 
-  const newFrontmatter = lines.join(eol) + eol;
-  return newFrontmatter + body;
+  if (existingYaml !== null) {
+    const lines = existingYaml.split(/\r?\n/);
+    let skippingKey: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Check if continuing a multiline list of a deleted key
+      if (skippingKey && line.match(/^\s*-\s+/)) {
+        continue;
+      } else {
+        skippingKey = null;
+      }
+
+      // Preserve comments and blank lines inside frontmatter
+      if (!trimmed || trimmed.startsWith('#')) {
+        outputLines.push(line);
+        continue;
+      }
+
+      const colonIdx = line.indexOf(':');
+      if (colonIdx !== -1) {
+        const key = line.slice(0, colonIdx).trim();
+        if (key in newProperties) {
+          // In-place key update
+          const val = newProperties[key];
+          outputLines.push(`${key}: ${serializeYamlValue(val)}`);
+          processedKeys.add(key);
+        } else {
+          // Key was deleted: skip this line and any multiline children
+          skippingKey = key;
+        }
+      }
+    }
+  }
+
+  // Append any new properties that were not present in existing lines
+  for (const key of newKeys) {
+    if (!processedKeys.has(key)) {
+      outputLines.push(`${key}: ${serializeYamlValue(newProperties[key])}`);
+    }
+  }
+
+  outputLines.push('---');
+
+  const newFrontmatter = outputLines.join(eol) + eol;
+  const result = (hasBom ? '\uFEFF' : '') + newFrontmatter + body;
+  return result;
 }

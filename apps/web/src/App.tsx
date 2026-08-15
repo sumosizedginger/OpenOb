@@ -89,7 +89,7 @@ export const App: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [index, parsedDoc]);
+  }, [index, activeTab?.initialSnapshot?.version.hash]);
 
   // Global window keyboard shortcuts for Phase 2 Workspace
   useEffect(() => {
@@ -156,12 +156,19 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveActiveNote, activeTabPath, closeTab]);
 
-  // P5-2: Restored heading navigation in preview and editor
+  // P5-2: Restored heading navigation in preview and editor (matching heading-line IDs)
   const handleSelectHeading = (heading: ParsedHeading) => {
-    const previewEl = document.getElementById(heading.slug);
-    if (previewEl) {
-      previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (viewMode === 'editor') {
+      setViewMode('split');
     }
+    setTimeout(() => {
+      const headingEl =
+        document.getElementById(`heading-${heading.line}`) ||
+        document.getElementById(heading.slug);
+      if (headingEl) {
+        headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 50);
   };
 
   const handleNavigateWikilink = (target: string) => {
@@ -415,7 +422,7 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
-              refreshKey={parsedDoc?.sourceHash || activeTab?.content}
+              refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
               isLocal={true}
               onNavigate={(path) => openNote(path)}
             />
@@ -459,7 +466,7 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
-              refreshKey={parsedDoc?.sourceHash || activeTab?.content}
+              refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
               isLocal={false}
               onNavigate={(path) => {
                 openNote(path);
