@@ -16,6 +16,7 @@ import {
 interface GraphViewProps {
   index: DocumentIndex;
   activeNotePath?: VaultPath | null;
+  refreshKey?: any;
   onNavigate: (path: VaultPath) => void;
   onClose?: () => void;
   isLocal?: boolean;
@@ -51,10 +52,12 @@ const GROUP_COLORS = [
 export const GraphView: React.FC<GraphViewProps> = ({
   index,
   activeNotePath,
+  refreshKey,
   onNavigate,
   onClose,
   isLocal = false,
 }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Filter & view state
@@ -64,18 +67,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const [maxDepth, setMaxDepth] = useState(isLocal ? 1 : 2);
   const localMode = isLocal;
 
-  // Graph data & sim state
+  // Graph data & tooltip state
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] });
-  const [hoveredNode, setHoveredNode] = useState<SimNode | null>(null);
+  const [tooltipNode, setTooltipNode] = useState<SimNode | null>(null);
 
-  // Transform (pan/zoom)
+  // Refs for persistent non-restarting physics loop (P5-4)
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
+  const dragDistanceRef = useRef(0);
   const draggedNodeRef = useRef<SimNode | null>(null);
+  const hoveredNodeRef = useRef<SimNode | null>(null);
   const simNodesRef = useRef<SimNode[]>([]);
   const simEdgesRef = useRef<SimEdge[]>([]);
   const animFrameRef = useRef<number | null>(null);
+  const dprRef = useRef(1);
 
   // Color map for folder groups
   const groupColorMap = useMemo(() => {
@@ -92,7 +98,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return map;
   }, [graphData]);
 
-  // Load graph data when filters or active note changes
+  // Load graph data when filters, active note, or refreshKey changes (P5-6)
   useEffect(() => {
     let isMounted = true;
     const fetchGraph = async () => {
@@ -113,15 +119,42 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [index, activeNotePath, includeTags, hideOrphans, searchQuery, localMode, maxDepth]);
+  }, [index, activeNotePath, refreshKey, includeTags, hideOrphans, searchQuery, localMode, maxDepth]);
+
+  // Handle ResizeObserver for crisp Retina / dynamic DPR canvas rendering (P5-5)
+  useEffect(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width === 0 || height === 0) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        dprRef.current = dpr;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+        if (transformRef.current.x === 0 && transformRef.current.y === 0) {
+          transformRef.current.x = width / 2;
+          transformRef.current.y = height / 2;
+        }
+      }
+    });
+
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Initialize simulation nodes & edges
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const width = canvas.width || 600;
-    const height = canvas.height || 500;
+    const container = containerRef.current;
+    const width = container?.clientWidth || 600;
+    const height = container?.clientHeight || 500;
 
     const existingMap = new Map(simNodesRef.current.map((n) => [n.id, n]));
 
@@ -154,15 +187,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
     simNodesRef.current = simNodes;
     simEdgesRef.current = simEdges;
-
-    // Reset center on initial load
-    if (transformRef.current.scale === 1 && transformRef.current.x === 0) {
-      transformRef.current.x = width / 2;
-      transformRef.current.y = height / 2;
-    }
   }, [graphData, groupColorMap]);
 
-  // Physics animation loop with auto-cooling
+  // Persistent Physics animation loop (P5-4: does NOT restart on hover!)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -174,8 +201,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const alphaDecay = 0.02;
 
     const render = () => {
-      const { width, height } = canvas;
-      ctx.clearRect(0, 0, width, height);
+      const container = containerRef.current;
+      const cssWidth = container?.clientWidth || 600;
+      const cssHeight = container?.clientHeight || 500;
+      const dpr = dprRef.current;
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
 
       const nodes = simNodesRef.current;
       const edges = simEdgesRef.current;
@@ -223,8 +256,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         // Center gravity & velocity damping
         for (const node of nodes) {
           if (node === draggedNodeRef.current) continue;
-          node.vx += (width / 2 - node.x) * 0.001 * alpha;
-          node.vy += (height / 2 - node.y) * 0.001 * alpha;
+          node.vx += (cssWidth / 2 - node.x) * 0.001 * alpha;
+          node.vy += (cssHeight / 2 - node.y) * 0.001 * alpha;
 
           node.vx *= 0.85;
           node.vy *= 0.85;
@@ -242,22 +275,22 @@ export const GraphView: React.FC<GraphViewProps> = ({
       ctx.translate(panX, panY);
       ctx.scale(scale, scale);
 
-      // Connected neighborhood for hover
+      const currentHovered = hoveredNodeRef.current;
       const connectedNodeIds = new Set<string>();
-      if (hoveredNode) {
-        connectedNodeIds.add(hoveredNode.id);
+      if (currentHovered) {
+        connectedNodeIds.add(currentHovered.id);
         for (const edge of edges) {
-          if (edge.source.id === hoveredNode.id) connectedNodeIds.add(edge.target.id);
-          if (edge.target.id === hoveredNode.id) connectedNodeIds.add(edge.source.id);
+          if (edge.source.id === currentHovered.id) connectedNodeIds.add(edge.target.id);
+          if (edge.target.id === currentHovered.id) connectedNodeIds.add(edge.source.id);
         }
       }
 
       // Draw Edges
       for (const edge of edges) {
         const isHovered =
-          hoveredNode &&
-          (edge.source.id === hoveredNode.id || edge.target.id === hoveredNode.id);
-        const isDimmed = hoveredNode && !isHovered;
+          currentHovered &&
+          (edge.source.id === currentHovered.id || edge.target.id === currentHovered.id);
+        const isDimmed = currentHovered && !isHovered;
 
         ctx.beginPath();
         ctx.moveTo(edge.source.x, edge.source.y);
@@ -283,9 +316,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       // Draw Nodes
       for (const node of nodes) {
-        const isHovered = hoveredNode?.id === node.id;
+        const isHovered = currentHovered?.id === node.id;
         const isConnected = connectedNodeIds.has(node.id);
-        const isDimmed = hoveredNode && !isConnected;
+        const isDimmed = currentHovered && !isConnected;
         const isActive = node.path === activeNotePath;
 
         ctx.beginPath();
@@ -324,6 +357,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       }
 
       ctx.restore();
+      ctx.restore();
       animFrameRef.current = requestAnimationFrame(render);
     };
 
@@ -331,9 +365,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [activeNotePath, hoveredNode, isLocal]);
+  }, [activeNotePath, isLocal]);
 
-  // Coordinate helper: Canvas screen coords -> graph world coords
+  // Coordinate helper: Canvas screen coords -> graph world coords (P5-5)
   const screenToWorld = (screenX: number, screenY: number) => {
     const { x: panX, y: panY, scale } = transformRef.current;
     return {
@@ -349,7 +383,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const clickY = e.clientY - rect.top;
     const world = screenToWorld(clickX, clickY);
 
-    // Check if clicked a node
+    dragDistanceRef.current = 0;
+
     const hitNode = simNodesRef.current.find((n) => {
       const dx = n.x - world.x;
       const dy = n.y - world.y;
@@ -371,6 +406,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const world = screenToWorld(clickX, clickY);
 
     if (draggedNodeRef.current) {
+      dragDistanceRef.current += Math.abs(world.x - draggedNodeRef.current.x) + Math.abs(world.y - draggedNodeRef.current.y);
       draggedNodeRef.current.x = world.x;
       draggedNodeRef.current.y = world.y;
       draggedNodeRef.current.vx = 0;
@@ -379,19 +415,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
 
     if (isDraggingRef.current) {
-      transformRef.current.x = clickX - dragStartRef.current.x;
-      transformRef.current.y = clickY - dragStartRef.current.y;
+      const newX = clickX - dragStartRef.current.x;
+      const newY = clickY - dragStartRef.current.y;
+      dragDistanceRef.current += Math.abs(newX - transformRef.current.x) + Math.abs(newY - transformRef.current.y);
+      transformRef.current.x = newX;
+      transformRef.current.y = newY;
       return;
     }
 
-    // Hover detection
+    // Hover detection without restarting simulation loop (P5-4)
     const hitNode = simNodesRef.current.find((n) => {
       const dx = n.x - world.x;
       const dy = n.y - world.y;
       return Math.sqrt(dx * dx + dy * dy) <= n.radius + 4;
     });
 
-    setHoveredNode(hitNode || null);
+    hoveredNodeRef.current = hitNode || null;
+    setTooltipNode(hitNode || null);
   };
 
   const handleMouseUp = () => {
@@ -402,6 +442,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
   };
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Suppress click navigation if user was dragging (P5-7)
+    if (dragDistanceRef.current > 5) {
+      return;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
@@ -434,17 +479,20 @@ export const GraphView: React.FC<GraphViewProps> = ({
   };
 
   const resetView = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!container) return;
     transformRef.current = {
-      x: canvas.width / 2,
-      y: canvas.height / 2,
+      x: container.clientWidth / 2,
+      y: container.clientHeight / 2,
       scale: 1,
     };
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden select-none border border-slate-800/80 rounded-lg">
+    <div
+      ref={containerRef}
+      className="relative w-full h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden select-none border border-slate-800/80 rounded-lg"
+    >
       {/* Top Controls Bar */}
       <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-10">
         <div className="flex items-center gap-2">
@@ -519,14 +567,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
       <div className="relative flex-1 w-full h-full">
         <canvas
           ref={canvasRef}
-          width={800}
-          height={600}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onClick={handleClick}
           onWheel={handleWheel}
-          className="w-full h-full cursor-grab active:cursor-grabbing"
+          className="w-full h-full cursor-grab active:cursor-grabbing block"
         />
 
         {/* Zoom Controls Overlay */}
@@ -559,28 +605,28 @@ export const GraphView: React.FC<GraphViewProps> = ({
         </div>
 
         {/* Tooltip Overlay */}
-        {hoveredNode && (
+        {tooltipNode && (
           <div className="absolute top-3 left-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg p-2.5 shadow-xl text-xs z-10 max-w-xs animate-in fade-in duration-150">
             <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-              {hoveredNode.isTagNode ? (
+              {tooltipNode.isTagNode ? (
                 <Tag className="w-3.5 h-3.5 text-purple-400" />
               ) : (
                 <Sparkles className="w-3.5 h-3.5 text-sky-400" />
               )}
-              {hoveredNode.title}
+              {tooltipNode.title}
             </div>
-            {!hoveredNode.isTagNode && (
-              <div className="text-[11px] text-slate-400 truncate mt-0.5">{hoveredNode.path}</div>
+            {!tooltipNode.isTagNode && (
+              <div className="text-[11px] text-slate-400 truncate mt-0.5">{tooltipNode.path}</div>
             )}
             <div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-slate-800 text-[10px] text-slate-400">
-              <span>{hoveredNode.val} connections</span>
-              {!hoveredNode.isTagNode && hoveredNode.group !== 'root' && (
+              <span>{tooltipNode.val} connections</span>
+              {!tooltipNode.isTagNode && tooltipNode.group !== 'root' && (
                 <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
-                  {hoveredNode.group}
+                  {tooltipNode.group}
                 </span>
               )}
-              {hoveredNode.tags.length > 0 && !hoveredNode.isTagNode && (
-                <span className="text-purple-400">#{hoveredNode.tags.join(' #')}</span>
+              {tooltipNode.tags.length > 0 && !tooltipNode.isTagNode && (
+                <span className="text-purple-400">#{tooltipNode.tags.join(' #')}</span>
               )}
             </div>
           </div>

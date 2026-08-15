@@ -13,6 +13,7 @@ import { StatusBar } from './components/StatusBar.js';
 import { ConflictModal } from './components/ConflictModal.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { ParsedHeading, VaultPath } from '@okw/core';
+import { updateDocumentFrontmatter } from '@okw/markdown';
 import {
   FolderPlus,
   FilePlus,
@@ -65,6 +66,7 @@ export const App: React.FC = () => {
   >('outline');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
 
@@ -105,6 +107,7 @@ export const App: React.FC = () => {
       // Ctrl/Cmd+Shift+F: Global Vault Search
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
+        setSelectedSearchTag(null);
         setIsSearchModalOpen((prev) => !prev);
       }
 
@@ -153,8 +156,12 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveActiveNote, activeTabPath, closeTab]);
 
-  const handleSelectHeading = (_heading: ParsedHeading) => {
-    // Select heading line in preview/editor
+  // P5-2: Restored heading navigation in preview and editor
+  const handleSelectHeading = (heading: ParsedHeading) => {
+    const previewEl = document.getElementById(heading.slug);
+    if (previewEl) {
+      previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const handleNavigateWikilink = (target: string) => {
@@ -192,7 +199,10 @@ export const App: React.FC = () => {
         <div className="header-center">
           <button
             className="search-trigger-btn"
-            onClick={() => setIsCommandPaletteOpen(true)}
+            onClick={() => {
+              setSelectedSearchTag(null);
+              setIsCommandPaletteOpen(true);
+            }}
             title="Quick Open (Ctrl+P)"
           >
             <Search size={14} />
@@ -405,6 +415,7 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
+              refreshKey={parsedDoc?.sourceHash || activeTab?.content}
               isLocal={true}
               onNavigate={(path) => openNote(path)}
             />
@@ -416,8 +427,15 @@ export const App: React.FC = () => {
             <PropertiesPanel
               parsedDoc={parsedDoc}
               allTags={allTags}
-              onSelectTag={(_tag) => {
+              onSelectTag={(tag) => {
+                setSelectedSearchTag(tag);
                 setIsSearchModalOpen(true);
+              }}
+              onUpdateProperties={(newProps) => {
+                if (activeTab) {
+                  const updated = updateDocumentFrontmatter(activeTab.content, newProps);
+                  updateContent(activeTab.path, updated);
+                }
               }}
             />
           </div>
@@ -441,6 +459,7 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
+              refreshKey={parsedDoc?.sourceHash || activeTab?.content}
               isLocal={false}
               onNavigate={(path) => {
                 openNote(path);
@@ -478,7 +497,11 @@ export const App: React.FC = () => {
       {/* Global Search Modal (Ctrl+Shift+F) */}
       <SearchModal
         isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
+        initialTag={selectedSearchTag}
+        onClose={() => {
+          setIsSearchModalOpen(false);
+          setSelectedSearchTag(null);
+        }}
         onSelectResult={(path: VaultPath) => openNote(path)}
         index={index}
       />
