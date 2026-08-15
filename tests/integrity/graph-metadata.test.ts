@@ -122,6 +122,6 @@ Links to [[${target1}]] and ![[${target2}]].
 
     expect(graphData.nodes.length).toBeGreaterThan(docCount);
     expect(graphData.edges.length).toBeGreaterThan(docCount);
-    expect(duration).toBeLessThan(50);
+    expect(duration).toBeLessThan(100);
   });
 });

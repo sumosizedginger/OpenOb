@@ -77,3 +77,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** AI is an optional, replaceable capability layer interacting through the abstract `AIProvider` contract (`OpenAICompatibleProvider` supporting Ollama, LM Studio, and custom local endpoints). Context retrieval is strictly bounded to user-selected scopes (selection, current note, folder, vault) with clickable note citations. All AI file modifications operate in `PROPOSE` mode producing structured diffs (`ProposedEdit`) applied only on explicit user approval via `SafeWriter` optimistic concurrency control.
 
 **Reason:** Enforces Constitution Laws 18 & 19 (AI failure never degrades core workspace functionality, and AI can never silently write to disk or bypass file permissions).
+
+## D-018 Bring-Your-Own-Key (BYOK) Cloud AI, Secret Isolation & Multi-Provider Parity
+
+**Decision:** Cloud AI providers (OpenAI, Anthropic Claude, Google Gemini, OpenRouter) integrate through unified `AIManager` with zero hardcoded API keys in application state. Secrets are isolated in `SecretStore` with masked UI presentation (`sk-...WXYZ`), and all outbound request errors and logs pass through `redactSecrets()` sanitization (Constitution Law 17, `F-005`). Provider 4xx/5xx failures are fully isolated and cannot impede core note storage, search, graph, or database view operations (Constitution Law 18).
+
+**Reason:** Empowers users to use their own cloud AI keys with strict privacy, zero secret leakage, and total workspace operational resilience.

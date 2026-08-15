@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  AIManager,
   AIModel,
-  AIProvider,
+  AIProviderId,
   ChatMessage,
   Citation,
-  LocalAIConfig,
-  OpenAICompatibleProvider,
   ProposedEdit,
   RetrievalScope,
   RetrievalScopeType,
+  StandardSecretStore,
   extractCitations,
   formatContextPrompt,
   parseProposedEditFromResponse,
@@ -38,12 +38,7 @@ interface AIChatDrawerProps {
   onClose?: () => void;
 }
 
-const DEFAULT_CONFIG: LocalAIConfig = {
-  endpointUrl: 'http://localhost:11434/v1', // Ollama default
-  defaultModel: 'llama3',
-  temperature: 0.7,
-  maxContextTokens: 4096,
-};
+const secretStore = new StandardSecretStore();
 
 export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   storage,
@@ -54,17 +49,13 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   onApplyProposedEdit,
   onClose,
 }) => {
-  const [config, setConfig] = useState<LocalAIConfig>(() => {
-    try {
-      const stored = localStorage.getItem('okw_ai_config');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return DEFAULT_CONFIG;
+  const [providerId, setProviderId] = useState<AIProviderId>(() => {
+    return (localStorage.getItem('okw_ai_provider') as AIProviderId) || 'ollama';
   });
 
-  const [provider, setProvider] = useState<AIProvider>(() => new OpenAICompatibleProvider(config));
+  const [aiManager] = useState<AIManager>(() => new AIManager({ activeProviderId: providerId }, secretStore));
   const [models, setModels] = useState<AIModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>(config.defaultModel || 'llama3');
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [scopeType, setScopeType] = useState<RetrievalScopeType>('current_note');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState('');
@@ -73,32 +64,42 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [availableDocs, setAvailableDocs] = useState<{ path: VaultPath; title: string }[]>([]);
 
+  // Secret settings
+  const [maskedKey, setMaskedKey] = useState<string | null>(null);
+  const [inputApiKey, setInputApiKey] = useState('');
+  const [keySavedMessage, setKeySavedMessage] = useState(false);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Update provider when config changes
+  // Sync active provider
   useEffect(() => {
-    const prov = new OpenAICompatibleProvider(config);
-    setProvider(prov);
-    try {
-      localStorage.setItem('okw_ai_config', JSON.stringify(config));
-    } catch {}
-  }, [config]);
+    aiManager.setActiveProviderId(providerId);
+    localStorage.setItem('okw_ai_provider', providerId);
 
-  // Load available models and documents
+    const refreshProviderData = async () => {
+      const masked = await secretStore.getMaskedSecret(providerId);
+      setMaskedKey(masked);
+
+      try {
+        const modelList = await aiManager.listModels();
+        setModels(modelList);
+        const defaultMod = modelList.find((m: AIModel) => m.isDefault) || modelList[0];
+        if (defaultMod) {
+          setSelectedModel(defaultMod.id);
+        }
+      } catch {
+        setModels([{ id: 'default', name: 'Default Model' }]);
+      }
+    };
+
+    refreshProviderData();
+  }, [providerId, aiManager]);
+
+  // Load available documents for citation matching
   useEffect(() => {
     let isMounted = true;
-    const initData = async () => {
-      try {
-        const modelList = await provider.listModels();
-        if (isMounted && modelList.length > 0) {
-          setModels(modelList);
-          if (!modelList.some((m: AIModel) => m.id === selectedModel)) {
-            setSelectedModel(modelList[0].id);
-          }
-        }
-      } catch {}
-
+    const initDocs = async () => {
       try {
         const docs = await index.getAll();
         if (isMounted) {
@@ -107,16 +108,39 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       } catch {}
     };
 
-    initData();
+    initDocs();
     return () => {
       isMounted = false;
     };
-  }, [provider, index]);
+  }, [index]);
 
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isGenerating]);
+
+  const handleSaveApiKey = async () => {
+    if (!inputApiKey.trim()) return;
+    await secretStore.setSecret(providerId, inputApiKey.trim());
+    setInputApiKey('');
+    const masked = await secretStore.getMaskedSecret(providerId);
+    setMaskedKey(masked);
+    setKeySavedMessage(true);
+    setTimeout(() => setKeySavedMessage(false), 2000);
+
+    // Refresh models with new key
+    const modelList = await aiManager.listModels();
+    if (modelList.length > 0) {
+      setModels(modelList);
+      setSelectedModel(modelList[0].id);
+    }
+  };
+
+  const handleClearApiKey = async () => {
+    await secretStore.clearSecret(providerId);
+    setMaskedKey(null);
+    setInputApiKey('');
+  };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -157,10 +181,9 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     let assistantResponse = '';
 
     try {
-      const stream = provider.chat({
+      const stream = aiManager.chat({
         model: selectedModel,
         messages: [systemMessage, ...updatedMessages],
-        temperature: config.temperature,
         signal: abortController.signal,
       });
 
@@ -203,7 +226,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           ...prev,
           {
             role: 'assistant',
-            content: `⚠️ AI Request Failed: ${err.message}\n\nEnsure your local model server (Ollama / LM Studio) is running.`,
+            content: `⚠️ AI Request Failed: ${err.message}`,
           },
         ]);
       }
@@ -233,14 +256,17 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       <div className="flex items-center justify-between px-3 py-2.5 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-sky-400" />
-          <span className="text-xs font-semibold text-slate-200">Local AI Assistant</span>
+          <span className="text-xs font-semibold text-slate-200">AI Assistant</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono uppercase">
+            {providerId}
+          </span>
         </div>
 
         <div className="flex items-center gap-1">
           <button
             onClick={() => setShowSettings(!showSettings)}
             className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-            title="AI Settings"
+            title="BYOK & AI Settings"
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
@@ -255,38 +281,65 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         </div>
       </div>
 
-      {/* Settings Modal */}
+      {/* Settings Modal (BYOK & Provider Selection) */}
       {showSettings && (
-        <div className="p-3 bg-slate-900/95 border-b border-slate-800 text-xs space-y-2 animate-in slide-in-from-top-1">
+        <div className="p-3 bg-slate-900/95 border-b border-slate-800 text-xs space-y-2.5 animate-in slide-in-from-top-1">
           <div className="font-semibold text-slate-200 flex items-center justify-between">
-            <span>Local AI Endpoint</span>
+            <span>AI Provider & BYOK Keys</span>
             <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-200">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+
           <div>
-            <label className="text-[11px] text-slate-400">Endpoint URL:</label>
-            <input
-              type="text"
-              value={config.endpointUrl}
-              onChange={(e) => setConfig((prev: LocalAIConfig) => ({ ...prev, endpointUrl: e.target.value }))}
-              placeholder="http://localhost:11434/v1"
+            <label className="text-[11px] text-slate-400">Provider:</label>
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value as AIProviderId)}
               className="w-full mt-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
-            />
+            >
+              <option value="ollama">Ollama (Local)</option>
+              <option value="lmstudio">LM Studio (Local)</option>
+              <option value="openai">OpenAI (BYOK)</option>
+              <option value="anthropic">Anthropic Claude (BYOK)</option>
+              <option value="gemini">Google Gemini (BYOK)</option>
+              <option value="openrouter">OpenRouter (BYOK)</option>
+            </select>
           </div>
-          <div>
-            <label className="text-[11px] text-slate-400">Default Model:</label>
-            <input
-              type="text"
-              value={selectedModel}
-              onChange={(e) => {
-                setSelectedModel(e.target.value);
-                setConfig((prev: LocalAIConfig) => ({ ...prev, defaultModel: e.target.value }));
-              }}
-              placeholder="llama3"
-              className="w-full mt-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
-            />
-          </div>
+
+          {providerId !== 'ollama' && providerId !== 'lmstudio' && (
+            <div className="space-y-1">
+              <label className="text-[11px] text-slate-400 flex items-center justify-between">
+                <span>API Key:</span>
+                {maskedKey && <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>}
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="password"
+                  placeholder={maskedKey ? 'Enter new key to replace' : 'Paste API Key (sk-...)'}
+                  value={inputApiKey}
+                  onChange={(e) => setInputApiKey(e.target.value)}
+                  className="flex-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
+                />
+                <button
+                  onClick={handleSaveApiKey}
+                  disabled={!inputApiKey.trim()}
+                  className="px-2 py-1 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-white text-[11px]"
+                >
+                  Save
+                </button>
+                {maskedKey && (
+                  <button
+                    onClick={handleClearApiKey}
+                    className="px-2 py-1 bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 rounded text-[11px]"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {keySavedMessage && <div className="text-[10px] text-emerald-400">✓ Key securely saved</div>}
+            </div>
+          )}
         </div>
       )}
 
@@ -311,7 +364,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer max-w-[110px] truncate"
+            className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer max-w-[130px] truncate"
           >
             {models.map((m: AIModel) => (
               <option key={m.id} value={m.id}>
@@ -329,7 +382,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
             <Sparkles className="w-6 h-6 mx-auto text-sky-400/60" />
             <p>Ask anything about your notes or request changes.</p>
             <div className="text-[11px] text-slate-600">
-              Citations and proposed edits are generated automatically.
+              Cloud BYOK & Local AI supported with strict secret protection.
             </div>
           </div>
         )}
