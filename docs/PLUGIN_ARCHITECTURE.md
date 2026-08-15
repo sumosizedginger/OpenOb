@@ -54,15 +54,18 @@ Plugins must not import internal modules.
 
 ## Isolation
 
-Preferred model:
+Current runtime model (First-Party Plugins):
+- First-party plugins execute in the same JavaScript realm against `PluginHost` and `PluginAPI`.
+- Capability permissions are validated fail-closed against an immutable snapshot of declared permissions (`F-006`, `F-030`).
+- Runtime crashes during plugin lifecycle (load, unload, command execution) are trapped and contained, preventing workspace failure (`F-007`).
+- Note: This is a permission facade, not an execution isolation boundary (`F-032`).
 
-- plugin logic in a worker or equivalent isolated host
-- rich UI isolated where possible
-- message-based calls into public APIs
-- host validates permissions
-- host owns lifecycle
+Target model (Required before third-party plugin distribution):
+- Plugin logic in a dedicated Web Worker or isolated iframe.
+- Message-based capability proxy over `postMessage`.
+- Strict CSP and capability token isolation to prevent access to DOM or ambient storage (`sessionStorage`).
 
-A plugin crash should be recoverable:
+A plugin crash is recoverable:
 
 ```text
 Plugin failed

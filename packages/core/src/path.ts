@@ -13,8 +13,20 @@ export function normalizeVaultPath(rawPath: string): VaultPath {
     throw new SecurityError('Path must be a string');
   }
 
+  const trimmed = rawPath.trim();
+
+  // Check for UNC prefix (\\ or //)
+  if (trimmed.startsWith('\\\\') || trimmed.startsWith('//')) {
+    throw new SecurityError(`UNC path not allowed in vault: "${rawPath}"`);
+  }
+
+  // Check for Windows drive letter prefix (e.g. C: or C:/)
+  if (/^[a-zA-Z]:/.test(trimmed)) {
+    throw new SecurityError(`Drive letter prefix not allowed in vault: "${rawPath}"`);
+  }
+
   // Convert Windows backslashes to forward slashes
-  let path = rawPath.replace(/\\/g, '/').trim();
+  let path = trimmed.replace(/\\/g, '/');
 
   // Strip leading slashes
   while (path.startsWith('/')) {
@@ -43,9 +55,9 @@ export function normalizeVaultPath(rawPath: string): VaultPath {
       }
       resolved.pop();
     } else {
-      // Check for illegal or dangerous characters in filename
-      if (segment.includes('\0')) {
-        throw new SecurityError(`Null byte in path: "${rawPath}"`);
+      // Check for illegal or dangerous characters in filename segment
+      if (segment.includes('\0') || segment.includes(':')) {
+        throw new SecurityError(`Invalid character in path segment: "${rawPath}"`);
       }
       resolved.push(segment);
     }

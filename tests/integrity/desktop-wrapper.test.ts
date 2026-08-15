@@ -166,4 +166,62 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     expect(failRes.success).toBe(false);
     expect(failRes.error).toContain('No handler registered');
   });
+
+  it('DesktopVaultRuntime: persists SQLite index to disk, restarts cleanly, and recovers from corruption (P1-SQLITE-001)', async () => {
+    const dbPath = path.join(testVaultDir, '.okw', 'index.db');
+
+    // 1. Seed note and start runtime with databasePath
+    fs.writeFileSync(path.join(testVaultDir, 'Note1.md'), '# Note One\n\nFirst persistent note.', 'utf8');
+    const runtime1 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    // Checkpoint should have written database file to disk
+    expect(fs.existsSync(dbPath)).toBe(true);
+    expect(fs.statSync(dbPath).size).toBeGreaterThan(0);
+    const docs1 = await runtime1.index.getAll();
+    expect(docs1.length).toBe(1);
+    expect(docs1[0].path).toBe('Note1.md');
+    await runtime1.close();
+
+    // 2. Restart new runtime instance pointing to same databasePath -> loads directly from disk
+    const runtime2 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    const docs2 = await runtime2.index.getAll();
+    expect(docs2.length).toBe(1);
+    expect(docs2[0].path).toBe('Note1.md');
+    await runtime2.close();
+
+    // 3. Delete DB file -> restart -> exact reconstruction from Markdown
+    fs.unlinkSync(dbPath);
+    expect(fs.existsSync(dbPath)).toBe(false);
+
+    const runtime3 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    const docs3 = await runtime3.index.getAll();
+    expect(docs3.length).toBe(1);
+    expect(docs3[0].path).toBe('Note1.md');
+    expect(fs.existsSync(dbPath)).toBe(true);
+    await runtime3.close();
+
+    // 4. Corrupt DB file (truncate / write garbage) -> restart -> safe recovery from Markdown
+    fs.writeFileSync(dbPath, 'GARBAGE_CORRUPTED_BYTES');
+    const runtime4 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    const docs4 = await runtime4.index.getAll();
+    expect(docs4.length).toBe(1);
+    expect(docs4[0].path).toBe('Note1.md');
+    await runtime4.close();
+  });
 });

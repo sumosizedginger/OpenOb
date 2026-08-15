@@ -123,6 +123,8 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     }
   }
 
+  readonly atomicWrites: boolean = true;
+
   async read(rawPath: VaultPath): Promise<FileSnapshot> {
     const norm = normalizeVaultPath(rawPath);
     const { handle } = await this.getHandleForPath(norm, false, false);
@@ -130,6 +132,7 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const hash = computeContentHash(bytes);
+    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
     const version: FileVersion = {
       token: createVersionToken(hash, file.lastModified, file.size),
       hash,
@@ -140,7 +143,8 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       path: norm,
       version,
       content: bytes,
-      textContent: new TextDecoder().decode(bytes),
+      textContent: new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+      hasBom,
       modifiedAt: file.lastModified,
       size: file.size,
     };
@@ -148,7 +152,7 @@ export class BrowserFSAVaultStorage implements VaultStorage {
 
   async readText(rawPath: VaultPath): Promise<string> {
     const snap = await this.read(rawPath);
-    return snap.textContent ?? new TextDecoder().decode(snap.content);
+    return snap.textContent ?? new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
   }
 
   async write(
@@ -194,16 +198,43 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       }
     }
 
-    const { handle } = await this.getHandleForPath(norm, true, false);
+    const { parent: parentDirHandle, name: filename } = await this.getHandleForPath(norm, true, false);
+
     const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const newHash = computeContentHash(bytes);
+    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
 
-    // Create a writable stream to write content
-    const writable = await handle.createWritable();
-    await writable.write(bytes);
-    await writable.close();
+    // Atomic write strategy: write to temporary file then move/swap over target if supported
+    const tempName = `${filename}.okw.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+    let targetHandle: FileSystemFileHandle;
 
-    const updatedFile = await handle.getFile();
+    try {
+      const tempHandle = await parentDirHandle.getFileHandle(tempName, { create: true });
+      const writable = await tempHandle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+
+      if (typeof (tempHandle as any).move === 'function') {
+        await (tempHandle as any).move(filename);
+        targetHandle = await parentDirHandle.getFileHandle(filename, { create: false });
+      } else {
+        // Fallback for browsers without FileSystemHandle.move()
+        try {
+          await parentDirHandle.removeEntry(tempName);
+        } catch {}
+        targetHandle = await parentDirHandle.getFileHandle(filename, { create: true });
+        const directWritable = await targetHandle.createWritable();
+        await directWritable.write(bytes);
+        await directWritable.close();
+      }
+    } catch (err: any) {
+      try {
+        await parentDirHandle.removeEntry(tempName);
+      } catch {}
+      throw err;
+    }
+
+    const updatedFile = await targetHandle.getFile();
     const newVersion: FileVersion = {
       token: createVersionToken(newHash, updatedFile.lastModified, updatedFile.size),
       hash: newHash,
@@ -215,7 +246,8 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       path: norm,
       version: newVersion,
       content: bytes,
-      textContent: typeof content === 'string' ? content : new TextDecoder().decode(bytes),
+      textContent: typeof content === 'string' ? content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+      hasBom,
       modifiedAt: updatedFile.lastModified,
       size: updatedFile.size,
     };

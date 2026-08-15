@@ -127,7 +127,7 @@ Updated with veteran lore.`;
     await index.upsert(await parser.parse('Characters/Kaelen.md', updatedKaelenText));
 
     // -------------------------------------------------------------------------
-    // 6. Sandboxed Plugin SDK & First-Party Dogfooding (Phases 9 & 10)
+    // 6. First-Party Plugin Host & Capability Dogfooding (Phases 9 & 10)
     // -------------------------------------------------------------------------
     let navigatedPath: string | null = null;
     const notices: string[] = [];

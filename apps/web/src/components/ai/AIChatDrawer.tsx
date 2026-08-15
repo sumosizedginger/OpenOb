@@ -100,6 +100,13 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     };
 
     refreshProviderData();
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
   }, [providerId, aiManager]);
 
   // Load available documents for citation matching

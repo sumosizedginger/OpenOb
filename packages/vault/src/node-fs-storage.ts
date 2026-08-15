@@ -144,6 +144,7 @@ export class NodeFsVaultStorage implements VaultStorage {
       const [content, stats] = await Promise.all([fs.readFile(diskPath), fs.stat(diskPath)]);
       const bytes = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
       const hash = computeContentHash(bytes);
+      const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
       const version: FileVersion = {
         token: createVersionToken(hash, stats.mtimeMs, stats.size),
         hash,
@@ -154,7 +155,8 @@ export class NodeFsVaultStorage implements VaultStorage {
         path: normalizeVaultPath(rawPath),
         version,
         content: bytes,
-        textContent: new TextDecoder().decode(bytes),
+        textContent: new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+        hasBom,
         modifiedAt: stats.mtimeMs,
         size: stats.size,
       };

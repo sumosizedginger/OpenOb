@@ -53,7 +53,7 @@ Do not automatically scan arbitrary localhost ports.
 
 ## Markdown Rendering
 
-Rendered Markdown must be sanitized.
+Rendered Markdown must be safe from XSS. The application renders Markdown structured elements as native React JSX components with text escaping rather than executing raw HTML or `dangerouslySetInnerHTML`.
 
 Treat:
 

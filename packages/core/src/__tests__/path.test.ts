@@ -24,11 +24,22 @@ describe('normalizeVaultPath', () => {
   it('throws SecurityError on directory traversal out of root', () => {
     expect(() => normalizeVaultPath('../escape.md')).toThrow(SecurityError);
     expect(() => normalizeVaultPath('notes/../../escape.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('..\\..\\escape.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('a\\..\\..\\evil.md')).toThrow(SecurityError);
     expect(() => normalizeVaultPath('..')).toThrow(SecurityError);
   });
 
-  it('throws SecurityError on null bytes', () => {
+  it('throws SecurityError on Windows drive letter and UNC paths', () => {
+    expect(() => normalizeVaultPath('C:\\evil.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('C:evil.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('D:/folder/note.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('\\\\server\\share\\note.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('//server/share/note.md')).toThrow(SecurityError);
+  });
+
+  it('throws SecurityError on null bytes and colon characters', () => {
     expect(() => normalizeVaultPath('notes/test\0.md')).toThrow(SecurityError);
+    expect(() => normalizeVaultPath('notes/test:stream.md')).toThrow(SecurityError);
   });
 });
 

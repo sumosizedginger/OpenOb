@@ -25,6 +25,7 @@ export interface FileSnapshot {
   readonly version: FileVersion;
   readonly content: Uint8Array;
   readonly textContent?: string;
+  readonly hasBom?: boolean;
   readonly modifiedAt: number;
   readonly size: number;
 }

@@ -65,4 +65,30 @@ describe('NodeFsVaultStorage (Real Filesystem)', () => {
     expect(await vault.exists('folder1/noteA.md')).toBe(false);
     expect(await vault.exists('folder1/noteA_renamed.md')).toBe(true);
   });
+
+  it('preserves UTF-8 BOM across read, edit, and save cycle (P2-DL-002)', async () => {
+    const bomString = '\uFEFF# Title with BOM\nInitial content';
+    const res1 = await vault.write('bom-note.md', null, bomString);
+    
+    // Check disk bytes
+    const diskBytes1 = await fs.readFile(path.join(tmpDir, 'bom-note.md'));
+    expect([...diskBytes1.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF]);
+
+    // Read through vault storage
+    const snap1 = await vault.read('bom-note.md');
+    expect(snap1.hasBom).toBe(true);
+    expect(snap1.textContent).toBe(bomString);
+
+    // Edit content (retaining or modifying string)
+    const editedString = snap1.textContent + '\nEdited content.';
+    await vault.write('bom-note.md', snap1.version, editedString);
+
+    // Check disk bytes after save
+    const diskBytes2 = await fs.readFile(path.join(tmpDir, 'bom-note.md'));
+    expect([...diskBytes2.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF]);
+
+    const snap2 = await vault.read('bom-note.md');
+    expect(snap2.hasBom).toBe(true);
+    expect(snap2.textContent).toBe(editedString);
+  });
 });

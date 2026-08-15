@@ -29,6 +29,8 @@ export class NativeVaultWatcher implements VaultWatcher {
     this.ignorePatterns = options.ignorePatterns ?? DEFAULT_IGNORE_PATTERNS;
   }
 
+  isDegraded: boolean = false;
+
   async start(): Promise<void> {
     if (this.watcher) return;
 
@@ -46,12 +48,20 @@ export class NativeVaultWatcher implements VaultWatcher {
         }
       );
     } catch (err) {
-      // Fallback for non-recursive platforms
+      console.warn(
+        '[NativeVaultWatcher] Recursive filesystem watching not supported on this platform; falling back to top-level directory watch.'
+      );
+      this.isDegraded = true;
       this.watcher = fs.watch(this.rootPath, (eventType, filename) => {
         if (!filename) return;
         this.handleFsEvent(eventType, filename);
       });
     }
+
+    this.watcher.on('error', (err) => {
+      console.error('[NativeVaultWatcher] Filesystem watcher encountered error:', err);
+      this.isDegraded = true;
+    });
   }
 
   async stop(): Promise<void> {

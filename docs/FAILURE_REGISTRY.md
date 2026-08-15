@@ -218,3 +218,27 @@ Scenario: A plugin bridge attempts a versioned write to an existing file; upon e
 
 Mitigation: Distinguish file non-existence from concurrency conflict; never swallow `ConflictError`, allowing concurrency exceptions to propagate to host error containment without modifying disk state.
 
+### F-032 Plugin Realm Capability Boundary Leakage
+
+Scenario: First-party plugins executing in the same JavaScript realm can access `sessionStorage` secrets, `fetch()`, `Function('return this')()`, or the editor DOM outside the `PluginAPI` permission facade.
+
+Mitigation: Document same-realm boundary for first-party plugins; enforce strict Worker/iframe boundary with postMessage capability routing before any third-party plugin distribution is permitted.
+
+### F-033 Browser FSA Non-Atomic Write Interruption
+
+Scenario: Browser File System Access API performs truncate-write via `createWritable()` directly on canonical files. A power loss or tab crash mid-stream results in a truncated or zero-byte canonical note.
+
+Mitigation: Implement atomic temporary file creation and swap (`.okw.tmp.*` followed by `move()`), with explicit capability flags and fallbacks.
+
+### F-034 Silent UTF-8 BOM Stripping
+
+Scenario: User opens a note originating from Windows tooling containing a leading byte order mark (`\uFEFF` / `0xEF,0xBB,0xBF`). Standard `TextDecoder` strips the byte order mark on read, and saving the note drops the BOM, silently altering canonical byte fidelity.
+
+Mitigation: Decode with `{ ignoreBOM: true }`, preserve the leading BOM in the editor buffer and text representation, and record `hasBom` flag in snapshot metadata.
+
+### F-035 Sanitizer Entity Encoding and Nested Tag Bypasses
+
+Scenario: HTML sanitizer regexes fail to account for HTML entity-encoded attribute names (e.g. `on&#101;rror=`), nested script tag constructions (`<scr<script>ipt>`), or CSS `url(javascript:...)`, resulting in latent XSS vulnerabilities if raw HTML rendering is introduced.
+
+Mitigation: Never render untrusted raw HTML in the application; enforce React JSX element generation with text escaping, and maintain strict attack-corpus unit tests.
+

@@ -287,4 +287,60 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
     const createdDoc = await storage.read(`Daily/${today}.md`);
     expect(new TextDecoder().decode(createdDoc.content)).toContain(`# Daily Note: ${today}`);
   });
+
+  it('P1-PLUGIN-001 (F-032): Documents same-realm capability facade boundary and fail-closed permission enforcement', async () => {
+    const storage = new MemoryVaultStorage();
+    const index = new MemoryDocumentIndex();
+
+    await storage.write('Secret.md', null, '# Secret Note');
+
+    const readOnlyManifest: PluginManifest = {
+      id: 'readonly.plugin',
+      name: 'ReadOnly Plugin',
+      version: '1.0.0',
+      apiVersion: '1.x',
+      permissions: ['vault.read'],
+    };
+
+    let pluginApi: PluginAPI | null = null;
+
+    class ReadOnlyPlugin implements Plugin {
+      onload(api: PluginAPI) {
+        pluginApi = api;
+      }
+      onunload() {}
+    }
+
+    const host = new PluginHost({
+      storage,
+      index,
+      activeNotePath: null,
+      openNote: async () => {},
+      showNotice: () => {},
+    });
+
+    host.registerPlugin(readOnlyManifest, () => new ReadOnlyPlugin());
+    await host.enablePlugin(readOnlyManifest.id);
+
+    expect(pluginApi).not.toBeNull();
+
+    // Permitted call succeeds
+    const text = await pluginApi!.vault.read('Secret.md');
+    expect(text).toBe('# Secret Note');
+
+    // Undeclared write capability fails closed
+    await expect(pluginApi!.vault.write('Secret.md', '# Hijacked')).rejects.toThrow(
+      PermissionDeniedError
+    );
+
+    // Undeclared search capability fails closed
+    await expect(pluginApi!.search.query('Secret')).rejects.toThrow(
+      PermissionDeniedError
+    );
+
+    // Undeclared AI capability fails closed
+    await expect(pluginApi!.ai.chat('test')).rejects.toThrow(
+      PermissionDeniedError
+    );
+  });
 });

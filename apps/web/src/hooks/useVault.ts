@@ -262,7 +262,7 @@ export function useVault() {
 
     try {
       const snapshot = await storage.read(path);
-      const content = snapshot.textContent || new TextDecoder().decode(snapshot.content);
+      const content = snapshot.textContent || new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
       const parsed = await parser.parse(path, content, snapshot.version.hash);
 
       const newTab: OpenTab = {
@@ -309,7 +309,7 @@ export function useVault() {
       prev.map((tab) => {
         if (tab.path === targetPath) {
           const isDirty = tab.initialSnapshot
-            ? (tab.initialSnapshot.textContent || new TextDecoder().decode(tab.initialSnapshot.content)) !== newContent
+            ? (tab.initialSnapshot.textContent || new TextDecoder('utf-8', { ignoreBOM: true }).decode(tab.initialSnapshot.content)) !== newContent
             : true;
           return { ...tab, content: newContent, isDirty };
         }
@@ -446,7 +446,7 @@ export function useVault() {
         openTabs.map(async (tab) => {
           if (tab.path === from) {
             const snap = await storage.read(normTo);
-            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
             return {
               ...tab,
               path: normTo,
@@ -458,7 +458,7 @@ export function useVault() {
           }
           if (res.updatedFiles.includes(tab.path)) {
             const snap = await storage.read(tab.path);
-            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
             return {
               ...tab,
               content,
@@ -557,7 +557,7 @@ export function useVault() {
       }
 
       const snap = await storage.read(path);
-      const text = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+      const text = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
       const parsed = await parser.parse(path, text);
       const currentProps = parsed.properties || {};
       const newProps = { ...currentProps };
@@ -573,7 +573,7 @@ export function useVault() {
     } catch (err: any) {
       if (err?.name === 'ConflictError' || err?.message?.includes('Conflict')) {
         const freshSnap = await storage.read(path);
-        const diskContent = typeof freshSnap.content === 'string' ? freshSnap.content : new TextDecoder().decode(freshSnap.content);
+        const diskContent = typeof freshSnap.content === 'string' ? freshSnap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(freshSnap.content);
         setConflictData({
           path,
           diskContent,
@@ -637,7 +637,7 @@ export function useVault() {
       const diskText =
         typeof snap.content === 'string'
           ? snap.content
-          : new TextDecoder().decode(snap.content);
+          : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
 
       if (diskText.trim() !== proposal.originalContent.trim()) {
         setConflictData({
@@ -662,7 +662,7 @@ export function useVault() {
         const diskContent =
           typeof freshSnap.content === 'string'
             ? freshSnap.content
-            : new TextDecoder().decode(freshSnap.content);
+            : new TextDecoder('utf-8', { ignoreBOM: true }).decode(freshSnap.content);
         setConflictData({
           path: proposal.path,
           diskContent,

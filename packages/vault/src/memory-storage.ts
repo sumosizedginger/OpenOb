@@ -139,11 +139,13 @@ export class MemoryVaultStorage implements VaultStorage {
       modifiedAt: file.modifiedAt,
       size: file.content.byteLength,
     };
+    const hasBom = file.content.byteLength >= 3 && file.content[0] === 0xEF && file.content[1] === 0xBB && file.content[2] === 0xBF;
     return {
       path: file.path,
       version,
       content: file.content.slice(),
-      textContent: new TextDecoder().decode(file.content),
+      textContent: new TextDecoder('utf-8', { ignoreBOM: true }).decode(file.content),
+      hasBom,
       modifiedAt: file.modifiedAt,
       size: file.content.byteLength,
     };
@@ -151,7 +153,7 @@ export class MemoryVaultStorage implements VaultStorage {
 
   async readText(rawPath: VaultPath): Promise<string> {
     const snap = await this.read(rawPath);
-    return snap.textContent ?? new TextDecoder().decode(snap.content);
+    return snap.textContent ?? new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
   }
 
   async write(
