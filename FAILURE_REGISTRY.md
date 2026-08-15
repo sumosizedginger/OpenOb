@@ -206,3 +206,15 @@ Scenario: Prompt-injection content in a note induces the model to emit a proposa
 
 Mitigation: Proposal parser strictly binds `proposal.path` to the verified `targetPath` of the active note, completely ignoring model-emitted destination paths.
 
+### F-030 Plugin Manifest Mutable Permission Self-Escalation
+
+Scenario: A plugin receives its manifest object via the public API bridge (`api.manifest`) and pushes undeclared capabilities (e.g. `vault.write`, `ai.use`) directly to the mutable array at runtime, causing the capability gatekeeper to approve unauthorized operations.
+
+Mitigation: The gatekeeper captures an immutable `Set<PluginPermission>` at registration time and exposes only a deep-frozen projection of the manifest to plugin instances.
+
+### F-031 Plugin API Concurrency Conflict Catch-All Overwrite
+
+Scenario: A plugin bridge attempts a versioned write to an existing file; upon encountering a `ConflictError` from a concurrent user edit, a generic catch block falls back to an unversioned write (`expectedVersion: null`), silently clobbering the user's modifications.
+
+Mitigation: Distinguish file non-existence from concurrency conflict; never swallow `ConflictError`, allowing concurrency exceptions to propagate to host error containment without modifying disk state.
+

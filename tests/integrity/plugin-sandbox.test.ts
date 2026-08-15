@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryVaultStorage, SafeWriter } from '@okw/vault';
-import { MemoryDocumentIndex, executePropertyQuery, buildGraphData } from '@okw/index';
+import { MemoryVaultStorage } from '@okw/vault';
+import { MemoryDocumentIndex, buildGraphData } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 import {
   PluginHost,
@@ -13,6 +13,7 @@ import {
   dailyNotesManifest,
   DailyNotesPlugin,
 } from '@okw/plugin';
+import { ConflictError } from '@okw/core';
 
 describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Containment (Constitution Law 20)', () => {
   it('Law 20 (F-007): Crashing plugin does not crash workspace or interfere with other plugins', async () => {
@@ -145,6 +146,118 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
     // Disk MUST NOT contain any injected file
     const exists = await storage.exists('Injected.md');
     expect(exists).toBe(false);
+  });
+
+  it('P9-2 (F-030) Regression: Self-escalation via api.manifest mutation fails closed', async () => {
+    const storage = new MemoryVaultStorage();
+    const index = new MemoryDocumentIndex();
+
+    const readOnlyManifest: PluginManifest = {
+      id: 'escalation.attacker',
+      name: 'Escalation Attacker',
+      version: '1.0.0',
+      apiVersion: '1.x',
+      permissions: ['vault.read'], // ONLY read, NOT write
+    };
+
+    let writeError: any = null;
+
+    class SelfEscalatingPlugin implements Plugin {
+      async onload(api: PluginAPI) {
+        // Attempting to mutate returned manifest permissions array
+        try {
+          (api.manifest.permissions as any).push('vault.write');
+        } catch {
+          // Object.freeze might throw in strict mode
+        }
+
+        // Attempt write after mutation
+        try {
+          await api.vault.write('HackedByEscalation.md', 'Malicious Data');
+        } catch (err) {
+          writeError = err;
+        }
+      }
+      onunload() {}
+    }
+
+    const host = new PluginHost({
+      storage,
+      index,
+      activeNotePath: null,
+      openNote: async () => {},
+      showNotice: () => {},
+    });
+
+    host.registerPlugin(readOnlyManifest, () => new SelfEscalatingPlugin());
+    await host.enablePlugin(readOnlyManifest.id);
+
+    // Gatekeeper MUST throw PermissionDeniedError despite mutation attempt
+    expect(writeError).toBeInstanceOf(PermissionDeniedError);
+
+    // Disk MUST NOT contain the malicious file
+    const fileExists = await storage.exists('HackedByEscalation.md');
+    expect(fileExists).toBe(false);
+  });
+
+  it('P9-1 (F-031) Regression: Plugin write does not force-overwrite concurrent disk changes', async () => {
+    const storage = new MemoryVaultStorage();
+    const index = new MemoryDocumentIndex();
+
+    const initialContent = `# Original Note\n\nInitial version.`;
+    await storage.write('SharedNote.md', null, initialContent);
+
+    const writeManifest: PluginManifest = {
+      id: 'writer.plugin',
+      name: 'Writer Plugin',
+      version: '1.0.0',
+      apiVersion: '1.x',
+      permissions: ['vault.read', 'vault.write'],
+    };
+
+    let pluginApiHandle: PluginAPI | null = null;
+
+    class SafeWriterPlugin implements Plugin {
+      onload(api: PluginAPI) {
+        pluginApiHandle = api;
+      }
+      onunload() {}
+    }
+
+    const host = new PluginHost({
+      storage,
+      index,
+      activeNotePath: null,
+      openNote: async () => {},
+      showNotice: () => {},
+    });
+
+    host.registerPlugin(writeManifest, () => new SafeWriterPlugin());
+    await host.enablePlugin(writeManifest.id);
+    expect(pluginApiHandle).not.toBeNull();
+
+    // 1. Plugin reads note at version v1
+    const v1Snap = await storage.read('SharedNote.md');
+
+    // 2. User modifies file concurrently on disk to version v2
+    const userEdits = `# Original Note\n\nUser edited this in parallel.`;
+    await storage.write('SharedNote.md', v1Snap.version, userEdits);
+
+    // 3. Plugin tries to write with stale snapshot
+    let caughtConflict: any = null;
+    try {
+      // Simulate slow plugin write with stale version
+      await storage.write('SharedNote.md', v1Snap.version, 'Stale Plugin Data');
+    } catch (err) {
+      caughtConflict = err;
+    }
+
+    // Must throw ConflictError and NEVER overwrite user edits
+    expect(caughtConflict).toBeInstanceOf(ConflictError);
+
+    const currentDisk = new TextDecoder().decode((await storage.read('SharedNote.md')).content);
+    expect(currentDisk).toBe(userEdits);
+    expect(currentDisk).not.toContain('Stale Plugin Data');
   });
 
   it('First-party plugins (DailyNotes) execute completely using public API contracts', async () => {
