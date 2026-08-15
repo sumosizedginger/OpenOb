@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { MemoryDocumentIndex } from '@okw/index';
-import { SearchResult, VaultPath } from '@okw/core';
+import { DocumentIndex, SearchResult, VaultPath } from '@okw/core';
 import { Search, FileText, X } from 'lucide-react';
 
 interface SearchModalProps {
   isOpen: boolean;
-  index: MemoryDocumentIndex;
+  index: DocumentIndex;
   onClose: () => void;
   onSelectResult: (path: VaultPath) => void;
 }
@@ -18,12 +17,14 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setQuery('');
       setResults([]);
+      setSelectedIndex(0);
       setSelectedTag(null);
     }
   }, [isOpen]);
@@ -40,8 +41,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           limit: 20,
         });
         setResults(res);
+        setSelectedIndex(0);
       } else {
         setResults([]);
+        setSelectedIndex(0);
       }
     }, 150);
 
@@ -64,8 +67,17 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') onClose();
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev + 1 < results.length ? prev + 1 : prev));
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+              }
               if (e.key === 'Enter' && results.length > 0) {
-                onSelectResult(results[0].path);
+                const targetResult = results[selectedIndex] || results[0];
+                onSelectResult(targetResult.path);
                 onClose();
               }
             }}
@@ -91,10 +103,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               {query.trim() ? 'No matching notes found' : 'Type a query to search across the entire vault'}
             </div>
           ) : (
-            results.map((r) => (
+            results.map((r, idx) => (
               <div
                 key={r.documentId}
-                className="command-item"
+                className={`command-item ${idx === selectedIndex ? 'selected' : ''}`}
                 style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}
                 onClick={() => {
                   onSelectResult(r.path);

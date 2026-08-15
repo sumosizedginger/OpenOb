@@ -55,7 +55,7 @@ export interface SearchEngine {
   query(request: SearchRequest): Promise<SearchResult[]>;
 }
 
-export interface DocumentIndex {
+export interface DocumentIndex extends SearchEngine {
   upsert(doc: ParsedDocument): Promise<void>;
   remove(documentId: string): Promise<void>;
   rebuild(docs: AsyncIterable<ParsedDocument> | ParsedDocument[]): Promise<void>;
@@ -64,4 +64,5 @@ export interface DocumentIndex {
   getBacklinks(documentId: string): Promise<Backlink[]>;
   getOutgoingLinks(documentId: string): Promise<ParsedDocument[]>;
   resolveLink(sourcePath: VaultPath, rawTarget: string): LinkResolution;
+  query(request: SearchRequest): Promise<SearchResult[]>;
 }

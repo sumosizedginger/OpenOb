@@ -181,3 +181,16 @@ Mitigation: no feature considered done without acceptance tests.
 Scenario: each feature adds small overhead until normal use feels bad.
 
 Mitigation: repeatable large-vault benchmarks in CI/release process.
+
+### F-026 Stale preview checkbox line mutation
+
+Scenario: clicking a task checkbox in a debounced preview triggers mutation using a stale line number against a shifted live buffer, mutating the wrong task.
+
+Mitigation: content-aware line re-location (`toggleTaskAtLine` with target text verification).
+
+### F-027 End-of-line (EOL) format churn on mutation
+
+Scenario: in-place string mutation splits on `\r?\n` and rejoins with `\n`, silently converting Windows CRLF files to POSIX LF across the entire document.
+
+Mitigation: detect and preserve dominant document EOL delimiter across all mutation utilities.
+

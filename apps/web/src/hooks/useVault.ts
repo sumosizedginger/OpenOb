@@ -225,10 +225,10 @@ export function useVault() {
     }
   };
 
-  // Toggle Markdown checkbox task at line
-  const toggleTask = (lineNumber: number) => {
+  // Toggle Markdown checkbox task at line with content-aware verification (P2-1)
+  const toggleTask = (lineNumber: number, targetText?: string) => {
     if (!activeTab || !activeTabPath) return;
-    const newContent = toggleTaskAtLine(activeTab.content, lineNumber);
+    const newContent = toggleTaskAtLine(activeTab.content, lineNumber, targetText);
     updateContent(activeTabPath, newContent);
   };
 

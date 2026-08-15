@@ -6,7 +6,7 @@ import { Callout } from './Callout.js';
 interface PreviewPaneProps {
   document: ParsedDocument | null;
   onNavigateWikilink: (target: string) => void;
-  onToggleTask?: (lineNumber: number) => void;
+  onToggleTask?: (lineNumber: number, text?: string) => void;
 }
 
 export const PreviewPane: React.FC<PreviewPaneProps> = ({
@@ -125,7 +125,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
           <input
             type="checkbox"
             checked={taskItem.checked}
-            onChange={() => onToggleTask?.(lineNumber)}
+            onChange={() => onToggleTask?.(lineNumber, taskItem.text)}
             style={{ marginTop: '4px', cursor: 'pointer' }}
           />
           <span

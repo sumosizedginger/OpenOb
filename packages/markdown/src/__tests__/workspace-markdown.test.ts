@@ -49,6 +49,35 @@ describe('Phase 2 Markdown Capabilities: Callouts, Tasks, Outline', () => {
     expect(updated2).toContain('- [ ] Task 2: Build frontend UI');
   });
 
+  it('re-locates correct task when lines are inserted above (P2-1 / F-026 Regression)', () => {
+    // Original document when parsed (Task B was at line 3)
+    // Now user types 2 new lines at the top of the file:
+    const shiftedDoc = `# Project Notes
+New line 1
+New line 2
+- [ ] Task A: Prepare schema
+- [ ] Task B: Migrate database
+- [ ] Task C: Verify output
+`;
+
+    // Stale parsedDoc said Task B was at approx line 3, but in shiftedDoc it is at line 5.
+    // Content-aware toggle must locate Task B and toggle Task B, NOT Task A!
+    const toggled = toggleTaskAtLine(shiftedDoc, 3, 'Task B: Migrate database');
+    expect(toggled).toContain('- [ ] Task A: Prepare schema');
+    expect(toggled).toContain('- [x] Task B: Migrate database');
+    expect(toggled).toContain('- [ ] Task C: Verify output');
+  });
+
+  it('preserves CRLF Windows line endings across task mutations (P2-2 / F-027 Regression)', () => {
+    const crlfDoc = '# Windows CRLF Doc\r\n- [ ] Task CRLF 1\r\n- [ ] Task CRLF 2\r\n';
+    expect(crlfDoc).toContain('\r\n');
+
+    const updated = toggleTaskAtLine(crlfDoc, 2, 'Task CRLF 1');
+    expect(updated).toContain('\r\n');
+    expect(updated).not.toMatch(/[^\r]\n/); // No orphaned LF
+    expect(updated).toContain('- [x] Task CRLF 1');
+  });
+
   it('builds nested outline tree from heading hierarchy', () => {
     const headings: ParsedHeading[] = [
       { level: 1, text: 'H1 Title', slug: 'h1-title', line: 1 },

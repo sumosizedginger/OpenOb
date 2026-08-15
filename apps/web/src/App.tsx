@@ -97,10 +97,10 @@ export const App: React.FC = () => {
         setViewMode((prev) => (prev === 'split' ? 'editor' : prev === 'editor' ? 'preview' : 'split'));
       }
 
-      // Ctrl/Cmd+W: Close active tab
+      // Ctrl/Cmd+W: Close active tab (unconditional preventDefault P2-4)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
         if (activeTabPath) {
-          e.preventDefault();
           closeTab(activeTabPath);
         }
       }
@@ -128,12 +128,17 @@ export const App: React.FC = () => {
     }
   };
 
-  // Jump to heading in preview / document
+  // Jump to heading in preview / document (P2-3 fix)
   const handleSelectHeading = (heading: ParsedHeading) => {
-    const headingElem = document.getElementById(`heading-${heading.line}`);
-    if (headingElem) {
-      headingElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (viewMode === 'editor') {
+      setViewMode('split');
     }
+    setTimeout(() => {
+      const headingElem = document.getElementById(`heading-${heading.line}`);
+      if (headingElem) {
+        headingElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 50);
   };
 
   return (
