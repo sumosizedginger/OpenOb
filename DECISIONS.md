@@ -58,3 +58,16 @@ Record product and architecture decisions here until they become large enough fo
 
 **Reason:** Prevents `F-001` (silent data overwrite) and `F-002` (partial corrupt write) in multi-tab, external editor, and rapid autosave workflows.
 
+## D-012 Content-Aware Checkbox Mutation & EOL Preservation
+
+**Decision:** In-place Markdown task mutations must locate targets by content match rather than trusting raw line numbers from debounced snapshots, and must preserve the file's dominant CRLF / LF line endings.
+
+**Reason:** Prevents `F-026` (stale preview line offset mutation) and `F-027` (CRLF-to-LF file churn).
+
+## D-013 DocumentIndex Extends SearchEngine Contract Unification
+
+**Decision:** `DocumentIndex` formally extends the `SearchEngine` interface so every index implementation (in-memory, SQLite+FTS5) provides query capabilities directly.
+
+**Reason:** Eliminates ad-hoc typecasting between index and search subsystems, keeps derived search and relational lookups coupled to the same rebuild lifecycle, and guarantees seamless interchangeability across adapters.
+
+

@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@okw/core": "*",
-    "@okw/markdown": "*"
+    "@okw/markdown": "*",
+    "@types/sql.js": "^1.4.11",
+    "sql.js": "^1.14.2"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
