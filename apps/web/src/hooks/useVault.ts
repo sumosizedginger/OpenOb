@@ -327,22 +327,48 @@ export function useVault() {
     await refreshVault();
   };
 
-  // Rename a note safely with automatic incoming link refactoring (F-010 / F-011)
+  // Rename a note safely with automatic incoming link refactoring (F-010 / F-011, P4-1, P4-5, P4-7)
   const renameNote = async (from: VaultPath, to: VaultPath) => {
     const normTo = to.endsWith('.md') ? to : `${to}.md`;
     try {
+      // 1. Save any dirty open tabs first to avoid data loss (P4-5)
+      for (const tab of openTabs) {
+        if (tab.isDirty) {
+          const res = await safeWriter.safeSave(tab.path, tab.content, {
+            expectedVersion: tab.initialSnapshot?.version,
+          });
+          tab.isDirty = false;
+          tab.initialSnapshot = res.snapshot;
+        }
+      }
+
+      // 2. Perform safe rename refactoring
       const res = await renameDocument(storage, index, parser, from, normTo, { updateLinks: true });
-      
-      // Update tab paths and reload content for tabs that had links refactored
+
+      // 3. Update tab paths and refresh snapshots to avoid phantom conflicts (P4-7)
       const updatedOpenTabs = await Promise.all(
         openTabs.map(async (tab) => {
           if (tab.path === from) {
-            const content = await storage.readText(normTo);
-            return { ...tab, path: normTo, title: normTo.replace(/\.md$/, ''), content };
+            const snap = await storage.read(normTo);
+            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+            return {
+              ...tab,
+              path: normTo,
+              title: normTo.replace(/\.md$/, ''),
+              content,
+              isDirty: false,
+              initialSnapshot: snap,
+            };
           }
           if (res.updatedFiles.includes(tab.path)) {
-            const content = await storage.readText(tab.path);
-            return { ...tab, content };
+            const snap = await storage.read(tab.path);
+            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
+            return {
+              ...tab,
+              content,
+              isDirty: false,
+              initialSnapshot: snap,
+            };
           }
           return tab;
         })

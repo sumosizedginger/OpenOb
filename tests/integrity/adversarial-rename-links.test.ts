@@ -135,4 +135,157 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
     expect(cBacklinks.length).toBe(1);
     expect(cBacklinks[0].sourcePath).toBe('NodeB_Prime.md');
   });
+
+  it('proves code blocks and inline code are immune to wikilink rewriting (P4-4 / F-010)', async () => {
+    const storage = new MemoryVaultStorage();
+    const parser = new DefaultDocumentParser();
+    const index = new MemoryDocumentIndex();
+
+    const targetDoc = '# Target Note\nContent';
+    const sampleDoc = `---
+title: Code Sample Document
+---
+
+Real reference: [[Target Note]]
+
+\`\`\`markdown
+Here is a sample wikilink that must not be changed: [[Target Note]]
+\`\`\`
+
+Here is inline code: \`[[Target Note]]\` which also stays untouched.
+
+Another real reference: [[Target Note|Custom Display]]
+`;
+
+    await storage.write('Target Note.md', undefined, targetDoc);
+    await storage.write('Sample.md', undefined, sampleDoc);
+
+    await index.upsert(await parser.parse('Target Note.md', targetDoc));
+    await index.upsert(await parser.parse('Sample.md', sampleDoc));
+
+    // Rename target
+    await renameDocument(storage, index, parser, 'Target Note.md', 'New Target.md');
+
+    const updatedSample = await storage.readText('Sample.md');
+
+    // Real links are rewritten
+    expect(updatedSample).toContain('Real reference: [[New Target]]');
+    expect(updatedSample).toContain('Another real reference: [[New Target|Custom Display]]');
+
+    // Code blocks and inline spans are untouched!
+    expect(updatedSample).toContain('```markdown\nHere is a sample wikilink that must not be changed: [[Target Note]]\n```');
+    expect(updatedSample).toContain('`[[Target Note]]`');
+  });
+
+  it('prevents silent overwrite on concurrent external modification and rolls back (P4-1 / P4-2 / F-001)', async () => {
+    const storage = new MemoryVaultStorage();
+    const parser = new DefaultDocumentParser();
+    const index = new MemoryDocumentIndex();
+
+    const docA = '# Note A\nContent';
+    const docB = '# Note B\nLinks to [[Note A]]';
+
+    await storage.write('Note A.md', undefined, docA);
+    await storage.write('Note B.md', undefined, docB);
+
+    await index.upsert(await parser.parse('Note A.md', docA));
+    await index.upsert(await parser.parse('Note B.md', docB));
+
+    // Intercept storage.write to simulate concurrent external modification of Note B
+    const originalWrite = storage.write.bind(storage);
+    let injectedConflict = false;
+
+    storage.write = async (path, expectedVersion, content) => {
+      if (path === 'Note B.md' && !injectedConflict) {
+        injectedConflict = true;
+        // External process writes to Note B right before rename reaches it
+        await originalWrite('Note B.md', undefined, '# Note B\nEXTERNAL EDIT while renaming!');
+      }
+      return originalWrite(path, expectedVersion, content);
+    };
+
+    // Attempting rename should detect version conflict and abort
+    await expect(
+      renameDocument(storage, index, parser, 'Note A.md', 'Note A Renamed.md')
+    ).rejects.toThrow();
+
+    // Verify external edit was NOT overwritten
+    const finalB = await storage.readText('Note B.md');
+    expect(finalB).toBe('# Note B\nEXTERNAL EDIT while renaming!');
+
+    // Verify rollback restored Note A
+    expect(await storage.exists('Note A.md')).toBe(true);
+    expect(await storage.exists('Note A Renamed.md')).toBe(false);
+  });
+
+  it('proves incremental SQLite vs Memory index link re-resolution parity (P4-3)', async () => {
+    const memory = new MemoryDocumentIndex();
+    const sqlite = await SqliteDocumentIndex.create();
+    const parser = new DefaultDocumentParser();
+
+    // Document 1 references [[c]]
+    const doc1 = await parser.parse('a/b.md', '# Note B\nLinks [[c]]');
+    await memory.upsert(doc1);
+    await sqlite.upsert(doc1);
+
+    // Document 2 is root c.md
+    const doc2 = await parser.parse('c.md', '# Root C\nContent');
+    await memory.upsert(doc2);
+    await sqlite.upsert(doc2);
+
+    // Both should agree that c.md has backlink from a/b.md
+    let memBacklinks = await memory.getBacklinks('c.md');
+    let sqlBacklinks = await sqlite.getBacklinks('c.md');
+    expect(sqlBacklinks).toEqual(memBacklinks);
+    expect(sqlBacklinks.length).toBe(1);
+
+    // Now insert Document 3: a/c.md (relative path priority over root c.md)
+    const doc3 = await parser.parse('a/c.md', '# Relative C\nContent');
+    await memory.upsert(doc3);
+    await sqlite.upsert(doc3);
+
+    // Due to relative priority, a/b.md now targets a/c.md instead of root c.md
+    const memRel = await memory.getBacklinks('a/c.md');
+    const sqlRel = await sqlite.getBacklinks('a/c.md');
+    expect(sqlRel).toEqual(memRel);
+    expect(sqlRel.length).toBe(1);
+
+    // Root c.md should now have 0 backlinks in both
+    const memRoot = await memory.getBacklinks('c.md');
+    const sqlRoot = await sqlite.getBacklinks('c.md');
+    expect(sqlRoot).toEqual(memRoot);
+    expect(sqlRoot.length).toBe(0);
+
+    sqlite.close();
+  });
+
+  it('handles Unicode normalization and non-ASCII character targets cleanly', async () => {
+    const storage = new MemoryVaultStorage();
+    const parser = new DefaultDocumentParser();
+    const index = new MemoryDocumentIndex();
+
+    const cafeNFC = 'Café.md'.normalize('NFC');
+    const cafeDoc = '# Café Guide\nFrench coffee culture.';
+    const refDoc = `# Travel\nVisit the [[${cafeNFC.replace('.md', '')}]] today.`;
+
+    await storage.write(cafeNFC, undefined, cafeDoc);
+    await storage.write('Travel.md', undefined, refDoc);
+
+    await index.upsert(await parser.parse(cafeNFC, cafeDoc));
+    await index.upsert(await parser.parse('Travel.md', refDoc));
+
+    // Verify initial backlink
+    const bl = await index.getBacklinks(cafeNFC);
+    expect(bl.length).toBe(1);
+
+    // Rename to another Unicode name
+    const newNameNFC = 'Bistrô.md'.normalize('NFC');
+    await renameDocument(storage, index, parser, cafeNFC, newNameNFC);
+
+    const updatedTravel = await storage.readText('Travel.md');
+    expect(updatedTravel).toContain('[[Bistrô]]');
+
+    const newBl = await index.getBacklinks(newNameNFC);
+    expect(newBl.length).toBe(1);
+  });
 });

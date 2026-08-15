@@ -1,7 +1,6 @@
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import {
   Backlink,
-  basenameVaultPath,
   dirnameVaultPath,
   DocumentIndex,
   joinVaultPath,
@@ -134,6 +133,23 @@ export class SqliteDocumentIndex implements DocumentIndex {
     this.db.run(sql, safeParams);
   }
 
+  private refreshLinkTargets(allDocs: ParsedDocument[]): void {
+    const resolver = new DefaultLinkResolver(() => allDocs);
+    const updateStmt = this.db.prepare('UPDATE links SET target_path = ? WHERE id = ?');
+    const linkRows = this.db.exec('SELECT id, source_path, target_name FROM links');
+    if (linkRows.length > 0) {
+      for (const val of linkRows[0].values) {
+        const linkId = val[0] as number;
+        const sourcePath = val[1] as string;
+        const targetName = val[2] as string;
+        const res = resolver.resolve(sourcePath, targetName);
+        const targetPath = res.resolved && res.targetPath ? res.targetPath : null;
+        updateStmt.run([targetPath, linkId]);
+      }
+    }
+    updateStmt.free();
+  }
+
   async upsert(doc: ParsedDocument): Promise<void> {
     const hash = doc.sourceHash || (doc as any).hash || '';
     const modifiedAt = (doc as any).modifiedAt ?? 0;
@@ -197,12 +213,10 @@ export class SqliteDocumentIndex implements DocumentIndex {
         }
       }
 
-      // 6. Insert links with authoritative target resolution (P3-6A)
+      // 6. Insert links
       for (const link of doc.links) {
         const targetName = link.target || (link as any).rawTarget || link.raw;
         const raw = link.raw || `[[${targetName}]]`;
-        const res = this.resolveLink(doc.path, targetName);
-        const targetPath = res.resolved && res.targetPath ? res.targetPath : null;
 
         this.safeRun(
           `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed)
@@ -210,7 +224,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
           [
             doc.id,
             doc.path,
-            targetPath,
+            null,
             targetName,
             raw,
             link.displayText ?? null,
@@ -221,19 +235,9 @@ export class SqliteDocumentIndex implements DocumentIndex {
         );
       }
 
-      // 7. Update previously unresolved links across vault that now resolve to this new document
-      const docBasename = basenameVaultPath(doc.path, '.md');
-      this.safeRun(
-        `UPDATE links
-         SET target_path = ?
-         WHERE target_path IS NULL
-           AND (
-             LOWER(target_name) = LOWER(?)
-             OR LOWER(target_name) = LOWER(?)
-             OR LOWER(target_name || '.md') = LOWER(?)
-           )`,
-        [doc.path, doc.path, docBasename, doc.path]
-      );
+      // 7. Authoritative link re-resolution across whole vault (P4-3)
+      const allDocs = await this.getAll();
+      this.refreshLinkTargets(allDocs);
 
       this.db.run('COMMIT');
     } catch (err) {
@@ -251,6 +255,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
       this.safeRun('DELETE FROM properties WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM aliases WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM documents WHERE id = ? OR path = ?', [documentId, documentId]);
+
+      // Re-resolve remaining link targets across vault (P4-3)
+      const allDocs = await this.getAll();
+      this.refreshLinkTargets(allDocs);
+
       this.db.run('COMMIT');
     } catch (err) {
       this.db.run('ROLLBACK');

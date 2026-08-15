@@ -3,6 +3,7 @@ import {
   dirnameVaultPath,
   DocumentIndex,
   DocumentParser,
+  FileSnapshot,
   normalizeVaultPath,
   VaultPath,
   VaultStorage,
@@ -29,7 +30,7 @@ export function rewriteWikilinkTarget(
 ): string {
   const isEmbed = rawLink.startsWith('!');
   const inner = isEmbed ? rawLink.slice(3, -2) : rawLink.slice(2, -2);
-  
+
   const hashIdx = inner.indexOf('#');
   const pipeIdx = inner.indexOf('|');
 
@@ -52,8 +53,51 @@ export function rewriteWikilinkTarget(
 }
 
 /**
+ * Block-aware wikilink rewriting (P4-4).
+ * Protects YAML frontmatter, fenced code blocks (``` / ~~~), and inline code (`...`).
+ */
+export function rewriteNoteWikilinks(
+  content: string,
+  resolver: (targetName: string) => { match: boolean; newTarget: string }
+): { content: string; rewrittenCount: number } {
+  let rewrittenCount = 0;
+
+  // Protect frontmatter, fenced code blocks, and inline code spans
+  const protectedPattern = /^(---[\s\S]*?\n---)|(```[\s\S]*?```)|(~~~[\s\S]*?~~~)|(`[^`\n]+`)/gm;
+
+  let lastIndex = 0;
+  let result = '';
+  let match: RegExpExecArray | null;
+
+  const rewriteSegment = (seg: string): string => {
+    const linkRegex = /!?\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]/g;
+    return seg.replace(linkRegex, (m, targetName) => {
+      const decision = resolver(targetName.trim());
+      if (decision.match) {
+        rewrittenCount++;
+        return rewriteWikilinkTarget(m, decision.newTarget);
+      }
+      return m;
+    });
+  };
+
+  while ((match = protectedPattern.exec(content)) !== null) {
+    const textBefore = content.slice(lastIndex, match.index);
+    result += rewriteSegment(textBefore);
+    result += match[0];
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    result += rewriteSegment(content.slice(lastIndex));
+  }
+
+  return { content: result, rewrittenCount };
+}
+
+/**
  * Safely renames a markdown note and refactors all incoming wikilinks across the vault.
- * Preserves subpaths, custom display text/aliases, and original CRLF/LF line endings (F-010, F-011, D-012).
+ * Hardened against F-001 silent overwrites, partial write failures, and code block corruptions (P4-1, P4-2, P4-4).
  */
 export async function renameDocument(
   storage: VaultStorage,
@@ -75,9 +119,9 @@ export async function renameDocument(
     };
   }
 
-  // 1. Verify old file exists and new file does not collide
-  const oldExists = await storage.exists(normOldPath);
-  if (!oldExists) {
+  // 1. Dry run & Snapshot capture (P4-1 & P4-2)
+  const oldSnapshot = await storage.read(normOldPath);
+  if (!oldSnapshot) {
     throw new Error(`Cannot rename non-existent note: ${normOldPath}`);
   }
 
@@ -86,89 +130,109 @@ export async function renameDocument(
     throw new Error(`Target path already exists: ${normNewPath}`);
   }
 
-  const oldContent = await storage.readText(normOldPath);
-
-  const updatedFiles: VaultPath[] = [];
-  let rewrittenLinkCount = 0;
+  const oldText = typeof oldSnapshot.content === 'string'
+    ? oldSnapshot.content
+    : new TextDecoder().decode(oldSnapshot.content);
 
   const newBasename = basenameVaultPath(normNewPath, '.md');
+  const updatedFiles: VaultPath[] = [];
+  let totalRewrittenCount = 0;
 
-  // 2. Identify incoming backlinks to oldPath
+  // 2. Prepare self-references rewrite in renamed document
+  let renamedNoteContent = oldText;
+  if (options.updateLinks) {
+    const selfRewrite = rewriteNoteWikilinks(oldText, (targetName) => {
+      const res = index.resolveLink(normOldPath, targetName);
+      if (res.resolved && res.targetPath === normOldPath) {
+        return { match: true, newTarget: newBasename };
+      }
+      return { match: false, newTarget: '' };
+    });
+    renamedNoteContent = selfRewrite.content;
+    totalRewrittenCount += selfRewrite.rewrittenCount;
+  }
+
+  // 3. Move target file on disk first (P4-2 ordering)
+  // Concurrency check: expectedVersion null prevents overwriting an unexpected file
+  await storage.write(normNewPath, null, renamedNoteContent);
+  await storage.remove(normOldPath);
+
+  // 4. Concurrency-checked reference refactoring with rollback journal (P4-1, P4-2)
   if (options.updateLinks) {
     const backlinks = await index.getBacklinks(normOldPath);
-    const referencingPaths = new Set(backlinks.map((b) => b.sourcePath));
+    const referencingPaths = Array.from(new Set(backlinks.map((b) => b.sourcePath))).filter(
+      (p) => p !== normOldPath
+    );
 
-    for (const sourcePath of referencingPaths) {
-      if (sourcePath === normOldPath) continue; // Self-links handled separately
+    const rollbackList: Array<{ path: VaultPath; originalSnapshot: FileSnapshot }> = [];
 
-      const content = await storage.readText(sourcePath);
-      let fileModified = false;
+    try {
+      for (const sourcePath of referencingPaths) {
+        const sourceSnapshot = await storage.read(sourcePath);
+        const sourceText = typeof sourceSnapshot.content === 'string'
+          ? sourceSnapshot.content
+          : new TextDecoder().decode(sourceSnapshot.content);
 
-      // Match wikilinks [[Target#Subpath|Alias]]
-      const linkRegex = /!?\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]/g;
-
-      const newContent = content.replace(linkRegex, (match, targetName) => {
-        const trimmedTarget = targetName.trim();
-        const res = index.resolveLink(sourcePath, trimmedTarget);
-
-        if (res.resolved && res.targetPath === normOldPath) {
-          fileModified = true;
-          rewrittenLinkCount++;
-
-          // Choose target string format: if target was relative or path-qualified, retain appropriate relative/clean path
-          let replacementTarget = newBasename;
-          if (trimmedTarget.includes('/')) {
-            // Target was path-qualified, use new relative or normalized path
-            const sourceDir = dirnameVaultPath(sourcePath);
-            if (trimmedTarget.startsWith(sourceDir ? `${sourceDir}/` : '')) {
-              replacementTarget = newBasename;
-            } else {
-              replacementTarget = normNewPath.replace(/\.md$/, '');
+        const { content: rewrittenText, rewrittenCount } = rewriteNoteWikilinks(
+          sourceText,
+          (targetName) => {
+            const res = index.resolveLink(sourcePath, targetName);
+            if (res.resolved && res.targetPath === normOldPath) {
+              let replacementTarget = newBasename;
+              if (targetName.includes('/')) {
+                const sourceDir = dirnameVaultPath(sourcePath);
+                if (targetName.startsWith(sourceDir ? `${sourceDir}/` : '')) {
+                  replacementTarget = newBasename;
+                } else {
+                  replacementTarget = normNewPath.replace(/\.md$/, '');
+                }
+              }
+              return { match: true, newTarget: replacementTarget };
             }
+            return { match: false, newTarget: '' };
           }
+        );
 
-          return rewriteWikilinkTarget(match, replacementTarget);
+        if (rewrittenCount > 0) {
+          // P4-1 CRITICAL FIX: Use sourceSnapshot.version to prevent silent concurrent overwrites!
+          await storage.write(sourcePath, sourceSnapshot.version, rewrittenText);
+          rollbackList.push({ path: sourcePath, originalSnapshot: sourceSnapshot });
+          const parsed = await parser.parse(sourcePath, rewrittenText);
+          await index.upsert(parsed);
+          updatedFiles.push(sourcePath);
+          totalRewrittenCount += rewrittenCount;
         }
-        return match;
-      });
-
-      if (fileModified) {
-        await storage.write(sourcePath, undefined, newContent);
-        const parsed = await parser.parse(sourcePath, newContent);
-        await index.upsert(parsed);
-        updatedFiles.push(sourcePath);
       }
+    } catch (err) {
+      // Rollback modified referencing files to original snapshot states
+      for (const rb of rollbackList) {
+        try {
+          const originalText = typeof rb.originalSnapshot.content === 'string'
+            ? rb.originalSnapshot.content
+            : new TextDecoder().decode(rb.originalSnapshot.content);
+          await storage.write(rb.path, undefined, originalText);
+          const parsed = await parser.parse(rb.path, originalText);
+          await index.upsert(parsed);
+        } catch {}
+      }
+      // Rollback moved file
+      try {
+        await storage.write(normOldPath, undefined, oldText);
+        await storage.remove(normNewPath);
+      } catch {}
+      throw err;
     }
   }
 
-  // 3. Handle self-references inside the document being renamed
-  let noteContent = oldContent;
-  if (options.updateLinks) {
-    const linkRegex = /!?\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]/g;
-    noteContent = noteContent.replace(linkRegex, (match, targetName) => {
-      const trimmedTarget = targetName.trim();
-      const res = index.resolveLink(normOldPath, trimmedTarget);
-      if (res.resolved && res.targetPath === normOldPath) {
-        rewrittenLinkCount++;
-        return rewriteWikilinkTarget(match, newBasename);
-      }
-      return match;
-    });
-  }
-
-  // 4. Move file in storage
-  await storage.write(normNewPath, undefined, noteContent);
-  await storage.remove(normOldPath);
-
-  // 5. Update index
+  // 5. Update index state for renamed note
   await index.remove(normOldPath);
-  const newParsedDoc = await parser.parse(normNewPath, noteContent);
+  const newParsedDoc = await parser.parse(normNewPath, renamedNoteContent);
   await index.upsert(newParsedDoc);
 
   return {
     oldPath: normOldPath,
     newPath: normNewPath,
     updatedFiles,
-    rewrittenLinkCount,
+    rewrittenLinkCount: totalRewrittenCount,
   };
 }
