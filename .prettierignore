@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+.vitest/
+*.tsbuildinfo
+*.log
+*.tmp
+tests/_reaudit-tmp/

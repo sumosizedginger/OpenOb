@@ -334,13 +334,9 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
     );
 
     // Undeclared search capability fails closed
-    await expect(pluginApi!.search.query('Secret')).rejects.toThrow(
-      PermissionDeniedError
-    );
+    await expect(pluginApi!.search.query('Secret')).rejects.toThrow(PermissionDeniedError);
 
     // Undeclared AI capability fails closed
-    await expect(pluginApi!.ai.chat('test')).rejects.toThrow(
-      PermissionDeniedError
-    );
+    await expect(pluginApi!.ai.chat('test')).rejects.toThrow(PermissionDeniedError);
   });
 });

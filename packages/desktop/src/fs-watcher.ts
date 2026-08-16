@@ -39,14 +39,10 @@ export class NativeVaultWatcher implements VaultWatcher {
     }
 
     try {
-      this.watcher = fs.watch(
-        this.rootPath,
-        { recursive: true },
-        (eventType, filename) => {
-          if (!filename) return;
-          this.handleFsEvent(eventType, filename);
-        }
-      );
+      this.watcher = fs.watch(this.rootPath, { recursive: true }, (eventType, filename) => {
+        if (!filename) return;
+        this.handleFsEvent(eventType, filename);
+      });
     } catch (err) {
       console.warn(
         '[NativeVaultWatcher] Recursive filesystem watching not supported on this platform; falling back to top-level directory watch.'

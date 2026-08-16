@@ -36,20 +36,25 @@ export class DefaultDocumentParser implements DocumentParser {
     const fmTags: string[] = Array.isArray(fmTagsRaw)
       ? fmTagsRaw.map(String)
       : typeof fmTagsRaw === 'string'
-      ? [fmTagsRaw]
-      : [];
+        ? [fmTagsRaw]
+        : [];
     const allTags = Array.from(new Set([...bodyTags, ...fmTags]));
 
     // 5. Title & Aliases
     const baseName = basenameVaultPath(path, '.md');
-    const title = typeof properties.title === 'string' && properties.title.trim() ? properties.title.trim() : (headings[0]?.level === 1 ? headings[0].text : baseName);
+    const title =
+      typeof properties.title === 'string' && properties.title.trim()
+        ? properties.title.trim()
+        : headings[0]?.level === 1
+          ? headings[0].text
+          : baseName;
 
     const aliasesRaw = properties.aliases || properties.alias;
     const aliases: string[] = Array.isArray(aliasesRaw)
       ? aliasesRaw.map(String)
       : typeof aliasesRaw === 'string'
-      ? [aliasesRaw]
-      : [];
+        ? [aliasesRaw]
+        : [];
 
     // 6. Metrics
     const lines = text.split(/\r?\n/);

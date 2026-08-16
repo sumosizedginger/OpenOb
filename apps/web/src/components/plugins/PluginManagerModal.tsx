@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 import { PluginHost, PluginInstance, PluginPermission } from '@okw/plugin';
-import {
-  Boxes,
-  X,
-  Shield,
-  AlertTriangle,
-  RotateCw,
-  Power,
-} from 'lucide-react';
+import { Boxes, X, Shield, AlertTriangle, RotateCw, Power } from 'lucide-react';
 
 interface PluginManagerModalProps {
   isOpen: boolean;
@@ -118,8 +111,8 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
                         inst.status === 'enabled'
                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                           : inst.status === 'error'
-                          ? 'bg-rose-950 text-rose-300 border border-rose-800'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                            ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                       }`}
                     >
                       <Power className="w-3.5 h-3.5" />
@@ -127,8 +120,8 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
                         {inst.status === 'enabled'
                           ? 'Enabled'
                           : inst.status === 'error'
-                          ? 'Error'
-                          : 'Disabled'}
+                            ? 'Error'
+                            : 'Disabled'}
                       </span>
                     </button>
                   </div>

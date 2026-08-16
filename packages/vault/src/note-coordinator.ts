@@ -1,8 +1,4 @@
-import {
-  FileSnapshot,
-  VaultPath,
-  VaultStorage,
-} from '@okw/core';
+import { FileSnapshot, VaultPath, VaultStorage } from '@okw/core';
 import { updateDocumentFrontmatter } from '@okw/markdown';
 import { SafeWriter } from './safe-writer.js';
 
@@ -15,10 +11,17 @@ export interface NoteState {
   conflictData: { path: VaultPath; diskContent?: string } | null;
 }
 
+interface Waiter {
+  targetGeneration: number;
+  resolve: (s: FileSnapshot | null) => void;
+  reject: (err: any) => void;
+}
+
 interface NoteInternalState extends NoteState {
   isWriting: boolean;
+  isDiscarded: boolean;
   pendingForce: boolean;
-  waiters: Array<{ resolve: (s: FileSnapshot | null) => void; reject: (err: any) => void }>;
+  waiters: Waiter[];
 }
 
 export type NoteStateListener = (state: NoteState) => void;
@@ -26,7 +29,7 @@ export type NoteStateListener = (state: NoteState) => void;
 /**
  * NoteWriteCoordinator manages deterministic serialized persistence and authoritative
  * version chaining per note, fully decoupled from React render and state flush timing.
- * (Solves G1, G2 / F1, F3).
+ * (Solves G1, G2, C1, C2, C5).
  */
 export class NoteWriteCoordinator {
   private storage: VaultStorage;
@@ -82,7 +85,9 @@ export class NoteWriteCoordinator {
   }
 
   initNote(path: VaultPath, snapshot: FileSnapshot, content: string): NoteState {
-    const diskText = snapshot.textContent ?? new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
+    const diskText =
+      snapshot.textContent ??
+      new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
     const isDirty = diskText !== content;
     const state: NoteInternalState = {
       path,
@@ -92,6 +97,7 @@ export class NoteWriteCoordinator {
       saveStatus: isDirty ? 'modified' : 'saved',
       conflictData: null,
       isWriting: false,
+      isDiscarded: false,
       pendingForce: false,
       waiters: [],
     };
@@ -111,6 +117,7 @@ export class NoteWriteCoordinator {
         saveStatus: 'modified',
         conflictData: null,
         isWriting: false,
+        isDiscarded: false,
         pendingForce: false,
         waiters: [],
       };
@@ -128,8 +135,22 @@ export class NoteWriteCoordinator {
     return state;
   }
 
-  removeNote(path: VaultPath): void {
-    this.notes.delete(path);
+  /**
+   * Remove note from active tabs.
+   * If discard is true, marks note as discarded so in-flight/subsequent writes do not commit.
+   */
+  removeNote(path: VaultPath, discard = false): void {
+    const state = this.notes.get(path);
+    if (state) {
+      if (discard) {
+        state.isDiscarded = true;
+        const pending = state.waiters.splice(0, state.waiters.length);
+        for (const w of pending) {
+          w.resolve(null);
+        }
+      }
+      this.notes.delete(path);
+    }
   }
 
   renameNote(oldPath: VaultPath, newPath: VaultPath): void {
@@ -138,13 +159,24 @@ export class NoteWriteCoordinator {
       this.notes.delete(oldPath);
       state.path = newPath;
       this.notes.set(newPath, state);
+      this.notify(state);
     }
   }
 
   /**
-   * Serialized save for a note with authoritative version chaining.
-   * If user types during the save, the queue pump loop automatically saves
-   * the latest buffer using the newly committed disk snapshot version.
+   * Waits for any active in-flight save write to finish before performing an atomic operation (e.g. rename).
+   */
+  async waitForIdle(path: VaultPath): Promise<void> {
+    while (true) {
+      const state = this.notes.get(path);
+      if (!state || !state.isWriting) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+
+  /**
+   * Serialized save for a note with authoritative version chaining and truthful waiter semantics.
+   * (Solves C1: resolves only when the requested generation is durably committed on disk).
    */
   save(path: VaultPath, force = false): Promise<FileSnapshot | null> {
     const state = this.notes.get(path);
@@ -154,8 +186,10 @@ export class NoteWriteCoordinator {
       state.pendingForce = true;
     }
 
+    const targetGeneration = state.bufferGeneration;
+
     const promise = new Promise<FileSnapshot | null>((resolve, reject) => {
-      state.waiters.push({ resolve, reject });
+      state.waiters.push({ targetGeneration, resolve, reject });
     });
 
     if (!state.isWriting) {
@@ -173,14 +207,14 @@ export class NoteWriteCoordinator {
 
     while (true) {
       const current = this.notes.get(path);
-      if (!current) break;
+      if (!current || current.isDiscarded) break;
 
+      const targetPath = current.path;
       const contentToSave = current.bufferContent;
+      const generationBeingSaved = current.bufferGeneration;
       const force = current.pendingForce;
       current.pendingForce = false;
-      const expectedVersion = force
-        ? undefined
-        : current.committedSnapshot?.version || null;
+      const expectedVersion = force ? undefined : current.committedSnapshot?.version || null;
 
       current.saveStatus = 'saving';
       this.notify(current);
@@ -189,7 +223,7 @@ export class NoteWriteCoordinator {
       let error: any = null;
 
       try {
-        const res = await this.safeWriter.safeSave(path, contentToSave, {
+        const res = await this.safeWriter.safeSave(targetPath, contentToSave, {
           expectedVersion,
           force,
         });
@@ -211,21 +245,31 @@ export class NoteWriteCoordinator {
         if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
           current.saveStatus = 'conflict';
           try {
-            const diskText = await this.storage.readText(path);
-            current.conflictData = { path, diskContent: diskText };
+            const diskText = await this.storage.readText(targetPath);
+            current.conflictData = { path: targetPath, diskContent: diskText };
           } catch {
-            current.conflictData = { path };
+            current.conflictData = { path: targetPath };
           }
         } else {
-          console.error(`[NoteWriteCoordinator] Save error for "${path}":`, err);
+          console.error(`[NoteWriteCoordinator] Save error for "${targetPath}":`, err);
           current.saveStatus = 'modified';
         }
         this.notify(current);
       }
 
-      // Drain all waiters that queued prior to this save completion
-      const waitersToDrain = current.waiters.splice(0, current.waiters.length);
-      for (const w of waitersToDrain) {
+      // C1: Drain ONLY waiters whose requested generation has been durably written
+      const readyWaiters: Waiter[] = [];
+      const remainingWaiters: Waiter[] = [];
+      for (const w of current.waiters) {
+        if (w.targetGeneration <= generationBeingSaved) {
+          readyWaiters.push(w);
+        } else {
+          remainingWaiters.push(w);
+        }
+      }
+      current.waiters = remainingWaiters;
+
+      for (const w of readyWaiters) {
         if (error) {
           w.reject(error);
         } else {
@@ -233,7 +277,7 @@ export class NoteWriteCoordinator {
         }
       }
 
-      if (error) {
+      if (error || current.isDiscarded) {
         break;
       }
 
@@ -263,7 +307,7 @@ export class NoteWriteCoordinator {
     parser: { parse: (p: string, c: string) => Promise<any> }
   ): Promise<void> {
     const state = this.notes.get(path);
-    let content = state ? state.bufferContent : await this.storage.readText(path);
+    const content = state ? state.bufferContent : await this.storage.readText(path);
 
     const parsed = await parser.parse(path, content);
     const currentProps = parsed.properties || {};
@@ -300,9 +344,11 @@ export class NoteWriteCoordinator {
   /**
    * Serialized AI proposed edit application with human-precedence divergence protection.
    */
-  async applyAI(
-    proposal: { path: VaultPath; originalContent: string; proposedContent: string }
-  ): Promise<{ success: boolean; error?: string }> {
+  async applyAI(proposal: {
+    path: VaultPath;
+    originalContent: string;
+    proposedContent: string;
+  }): Promise<{ success: boolean; error?: string }> {
     const path = proposal.path;
     const state = this.notes.get(path);
 

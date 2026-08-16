@@ -20,10 +20,7 @@ export class AIManager {
   private ollamaEndpoint: string;
   private lmStudioEndpoint: string;
 
-  constructor(
-    config: Partial<AIManagerConfig> = {},
-    secretStore?: SecretStore
-  ) {
+  constructor(config: Partial<AIManagerConfig> = {}, secretStore?: SecretStore) {
     this.activeProviderId = config.activeProviderId || 'ollama';
     this.ollamaEndpoint = config.ollamaEndpoint || 'http://localhost:11434/v1';
     this.lmStudioEndpoint = config.lmStudioEndpoint || 'http://localhost:1234/v1';

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { SecurityError } from '../errors.js';
-import { basenameVaultPath, dirnameVaultPath, extnameVaultPath, joinVaultPath, normalizeVaultPath } from '../path.js';
+import {
+  basenameVaultPath,
+  dirnameVaultPath,
+  extnameVaultPath,
+  joinVaultPath,
+  normalizeVaultPath,
+} from '../path.js';
 
 describe('normalizeVaultPath', () => {
   it('normalizes standard relative paths', () => {

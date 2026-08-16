@@ -7,10 +7,7 @@ interface OutlinePanelProps {
   onSelectHeading: (heading: ParsedHeading) => void;
 }
 
-export const OutlinePanel: React.FC<OutlinePanelProps> = ({
-  headings,
-  onSelectHeading,
-}) => {
+export const OutlinePanel: React.FC<OutlinePanelProps> = ({ headings, onSelectHeading }) => {
   return (
     <div
       style={{
@@ -24,14 +21,24 @@ export const OutlinePanel: React.FC<OutlinePanelProps> = ({
       }}
     >
       <div className="sidebar-header">
-        <span className="sidebar-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span
+          className="sidebar-title"
+          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
           <ListTree size={13} /> Outline ({headings.length})
         </span>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 4px' }}>
         {headings.length === 0 ? (
-          <div style={{ padding: '16px 8px', color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center' }}>
+          <div
+            style={{
+              padding: '16px 8px',
+              color: 'var(--text-muted)',
+              fontSize: '12px',
+              textAlign: 'center',
+            }}
+          >
             No headings in document
           </div>
         ) : (

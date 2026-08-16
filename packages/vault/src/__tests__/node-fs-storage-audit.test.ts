@@ -30,7 +30,13 @@ describe('Promoted Audit Probes: NodeFsVaultStorage + SafeWriter Hostile Scenari
   it('2. unicode + hostile filenames round-trip', async () => {
     const dir = tmpVault();
     const s = new NodeFsVaultStorage(dir, 'v');
-    const names = ['日本語ノート.md', 'emoji 🎉 note.md', "apostrophe's note.md", 'space note.md', 'UPPER.md'];
+    const names = [
+      '日本語ノート.md',
+      'emoji 🎉 note.md',
+      "apostrophe's note.md",
+      'space note.md',
+      'UPPER.md',
+    ];
     for (const n of names) {
       await s.write(n, null, `content for ${n}`);
       const back = await s.read(n);
@@ -59,7 +65,7 @@ describe('Promoted Audit Probes: NodeFsVaultStorage + SafeWriter Hostile Scenari
     const bom = '\uFEFF# Title';
     await s.write('bom.md', null, bom);
     const bomBytes = fs.readFileSync(path.join(dir, 'bom.md'));
-    expect([...bomBytes.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF]); // BOM preserved at byte level
+    expect([...bomBytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]); // BOM preserved at byte level
   });
 
   it('5. empty file + nested folders + large file', async () => {

@@ -17,7 +17,11 @@ export class OpenRouterProvider implements AIProvider {
 
   async listModels(): Promise<AIModel[]> {
     return [
-      { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet (via OpenRouter)', isDefault: true },
+      {
+        id: 'anthropic/claude-3.5-sonnet',
+        name: 'Claude 3.5 Sonnet (via OpenRouter)',
+        isDefault: true,
+      },
       { id: 'openai/gpt-4o', name: 'GPT-4o (via OpenRouter)' },
       { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B (via OpenRouter)' },
       { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (via OpenRouter)' },
@@ -64,15 +68,19 @@ export class OpenRouterProvider implements AIProvider {
         yield { content: '', isDone: true, finishReason: 'abort' };
         return;
       }
-      throw new Error(redactSecrets(`OpenRouter request failed: ${err.message}`, [this.options.apiKey]));
+      throw new Error(
+        redactSecrets(`OpenRouter request failed: ${err.message}`, [this.options.apiKey]),
+        { cause: err }
+      );
     }
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => '');
       throw new Error(
-        redactSecrets(`OpenRouter error HTTP ${response.status}: ${errBody || response.statusText}`, [
-          this.options.apiKey,
-        ])
+        redactSecrets(
+          `OpenRouter error HTTP ${response.status}: ${errBody || response.statusText}`,
+          [this.options.apiKey]
+        )
       );
     }
 

@@ -94,7 +94,6 @@ It is complete when:
 - it does not endanger user data,
 - and it performs acceptably at realistic scale.
 
-
 ## Active Coding Models
 
 This repository currently assumes exactly two quota-bearing coding systems:

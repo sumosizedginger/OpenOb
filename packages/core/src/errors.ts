@@ -1,14 +1,20 @@
 import { FileVersion, VaultPath } from './types.js';
 
 export class VaultError extends Error {
-  constructor(message: string, public readonly code: string = 'VAULT_ERROR') {
+  constructor(
+    message: string,
+    public readonly code: string = 'VAULT_ERROR'
+  ) {
     super(message);
     this.name = 'VaultError';
   }
 }
 
 export class NotFoundError extends VaultError {
-  constructor(public readonly path: VaultPath, message?: string) {
+  constructor(
+    public readonly path: VaultPath,
+    message?: string
+  ) {
     super(message || `Path not found: "${path}"`, 'NOT_FOUND');
     this.name = 'NotFoundError';
   }
@@ -39,7 +45,10 @@ export class SecurityError extends VaultError {
 }
 
 export class StorageError extends VaultError {
-  constructor(message: string, public readonly causeError?: unknown) {
+  constructor(
+    message: string,
+    public readonly causeError?: unknown
+  ) {
     super(message, 'STORAGE_ERROR');
     this.name = 'StorageError';
   }

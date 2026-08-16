@@ -6,6 +6,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 ---
 
 ## Task G1 — F1: pending-save stale-version false conflict (silent edit loss)
+
 - **Task ID:** G1
 - **Severity:** P1
 - **Scope:** WEB
@@ -28,6 +29,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do NOT fix with arbitrary `setTimeout` delays; do NOT disable `expectedVersion` checks; do NOT ignore `ConflictError`; do NOT start a pending save synchronously from `finally` if doing so requires React to have flushed first; do NOT re-test with a duplicated standalone save loop; do NOT remove the version check or widen the conflict window; do NOT silence the conflict.
 
 ## Task G2 — F3: dead `diverged` commit-point (silent property loss)
+
 - **Task ID:** G2
 - **Severity:** P1
 - **Scope:** WEB
@@ -46,6 +48,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do NOT use the `diverged`-inside-updater pattern in any form; do NOT remove the divergence detection; do NOT make the human buffer lose; do NOT add a UI that shows a conflict that autosave then silently resolves; do NOT build a second, AI-specific save mechanism.
 
 ## Task G3 — F9: real browser regression coverage + CI browser smoke job
+
 - **Task ID:** G3
 - **Severity:** P2 — **RELEASE-GATE: YES.** The missing browser coverage is NOT itself the production data-loss bug (the silent-edit-loss defects are P1 and live in G1/G2); however, real production-hook browser coverage remains a REQUIRED feature-unfreeze condition. Do not unfreeze until it exists. This is a classification change only — it does not reduce the importance of the unfreeze gate.
 - **Scope:** WEB / SHARED
@@ -61,6 +64,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do not rename the existing file and call it browser coverage; do not describe `browser-concurrency-probes.test.ts` as browser concurrency coverage in any doc or comment; do not add jsdom-with-fake-timers logic duplicates as the only coverage; do not install Playwright without running it in CI; do not skip the browser job for speed.
 
 ## Task G4 — F5: truthful background-verification state (`degraded` reachable)
+
 - **Task ID:** G4
 - **Severity:** P1 (desktop-runtime scope; not web-blocking)
 - **Scope:** SHARED (desktop-runtime library) / DESKTOP-DEFERRED for delivery
@@ -76,6 +80,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do not retry forever silently; do not report `verified` with outstanding failures; do not remove the background-verification design; do not treat a legitimately-deleted file as a verification failure; do not leave any empty catch in the verification path.
 
 ## Task G5 — F5: verifier/watcher stale-write ordering guard
+
 - **Task ID:** G5
 - **Severity:** P2
 - **Scope:** SHARED (desktop-runtime library)
@@ -91,6 +96,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do not drop the verification; do not make the watcher wait for the whole background pass (that regresses startup); do not rely on native `fs.watch` timing in tests; do not serialize the entire index globally as the default mechanism.
 
 ## Task G6 — F4: secret-store queue poison + stale rollback
+
 - **Task ID:** G6
 - **Severity:** P1 (desktop scope; blocks future Electron, not web)
 - **Scope:** DESKTOP-DEFERRED
@@ -132,6 +138,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do not swallow the error; do not drop the write queue entirely; do not use `.then(op).catch(err => Promise.reject(err))` (leaves the tail rejected — the exact poison being fixed); do not capture `previousValue` outside the serialized operation; do not claim "secret persistence fully recovered" until scenarios (1)-(5) pass.
 
 ## Task G7 — F7: user-visible degraded-atomicity warning
+
 - **Task ID:** G7
 - **Severity:** P2 (web-relevant for non-Chromium browsers)
 - **Scope:** WEB / SHARED
@@ -146,6 +153,7 @@ This file lists ONLY outstanding findings from the post-Gemini re-audit. Already
 - **What not to do:** Do not confuse a console warning with a user-visible warning; do not block saving entirely.
 
 ## Task G8 — P2 cleanups (bundled)
+
 - **Task ID:** G8
 - **Severity:** P2/P3
 - **Scope:** WEB / SHARED

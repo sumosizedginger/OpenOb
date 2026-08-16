@@ -139,7 +139,11 @@ export class MemoryVaultStorage implements VaultStorage {
       modifiedAt: file.modifiedAt,
       size: file.content.byteLength,
     };
-    const hasBom = file.content.byteLength >= 3 && file.content[0] === 0xEF && file.content[1] === 0xBB && file.content[2] === 0xBF;
+    const hasBom =
+      file.content.byteLength >= 3 &&
+      file.content[0] === 0xef &&
+      file.content[1] === 0xbb &&
+      file.content[2] === 0xbf;
     return {
       path: file.path,
       version,
@@ -164,7 +168,8 @@ export class MemoryVaultStorage implements VaultStorage {
     const path = normalizeVaultPath(rawPath);
     const existing = this.files.get(path);
     const now = Date.now();
-    const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+    const bytes =
+      typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const newHash = computeContentHash(bytes);
 
     let previousVersion: FileVersion | null = null;
@@ -301,7 +306,13 @@ export class MemoryVaultStorage implements VaultStorage {
     // Check if it is a directory move
     if (this.directories.has(from)) {
       if (this.directories.has(to) && !overwrite) {
-        throw new ConflictError(to, null, null, undefined, `Destination folder "${to}" already exists.`);
+        throw new ConflictError(
+          to,
+          null,
+          null,
+          undefined,
+          `Destination folder "${to}" already exists.`
+        );
       }
       this.directories.delete(from);
       this.directories.add(to);
@@ -344,7 +355,13 @@ export class MemoryVaultStorage implements VaultStorage {
     }
 
     if (this.files.has(to) && !overwrite) {
-      throw new ConflictError(to, null, null, undefined, `Destination file "${to}" already exists.`);
+      throw new ConflictError(
+        to,
+        null,
+        null,
+        undefined,
+        `Destination file "${to}" already exists.`
+      );
     }
 
     const parent = dirnameVaultPath(to);

@@ -10,12 +10,7 @@ interface TabBarProps {
   onClose: (path: VaultPath) => void;
 }
 
-export const TabBar: React.FC<TabBarProps> = ({
-  tabs,
-  activePath,
-  onSelect,
-  onClose,
-}) => {
+export const TabBar: React.FC<TabBarProps> = ({ tabs, activePath, onSelect, onClose }) => {
   return (
     <div className="tab-bar">
       {tabs.map((tab) => {

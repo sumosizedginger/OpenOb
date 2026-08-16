@@ -19,8 +19,12 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
 
   it('1. constructing with missing or empty masterSecret throws', () => {
     expect(() => new DesktopSecretStore({} as any)).toThrow(/requires a non-empty masterSecret/);
-    expect(() => new DesktopSecretStore({ masterSecret: '' })).toThrow(/requires a non-empty masterSecret/);
-    expect(() => new DesktopSecretStore({ masterSecret: '   ' })).toThrow(/requires a non-empty masterSecret/);
+    expect(() => new DesktopSecretStore({ masterSecret: '' })).toThrow(
+      /requires a non-empty masterSecret/
+    );
+    expect(() => new DesktopSecretStore({ masterSecret: '   ' })).toThrow(
+      /requires a non-empty masterSecret/
+    );
   });
 
   it('2. round-trip with passphrase persists and decrypts across new store instance', async () => {

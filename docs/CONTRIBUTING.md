@@ -22,16 +22,16 @@ Every proposed capability must be classified:
 
 Examples:
 
-| Feature | Classification |
-|---|---|
-| Safe file write | CORE |
-| Link resolver | CORE |
-| Search index | CORE |
-| Plugin API | PLATFORM |
-| Character Bible | PLUGIN |
-| Calendar | PLUGIN |
-| Sync | LATER |
-| Real-time cursors | LATER |
+| Feature           | Classification |
+| ----------------- | -------------- |
+| Safe file write   | CORE           |
+| Link resolver     | CORE           |
+| Search index      | CORE           |
+| Plugin API        | PLATFORM       |
+| Character Bible   | PLUGIN         |
+| Calendar          | PLUGIN         |
+| Sync              | LATER          |
+| Real-time cursors | LATER          |
 
 ## Required PR Description
 
@@ -90,7 +90,6 @@ A feature is done when:
 - architecture boundaries remain intact
 - no known integrity regression exists
 - performance is acceptable
-
 
 ## Two-Model Review Requirement
 

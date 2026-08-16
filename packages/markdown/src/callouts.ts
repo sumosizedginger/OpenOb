@@ -1,4 +1,5 @@
-export type CalloutType = 'note' | 'tip' | 'important' | 'warning' | 'caution' | 'info' | 'quote' | 'todo';
+export type CalloutType =
+  'note' | 'tip' | 'important' | 'warning' | 'caution' | 'info' | 'quote' | 'todo';
 
 export interface ParsedCallout {
   readonly type: CalloutType;
@@ -21,7 +22,9 @@ export function matchCalloutHeader(line: string): { type: CalloutType; title: st
   const title = match[2].trim();
 
   let type: CalloutType = 'note';
-  if (['note', 'tip', 'important', 'warning', 'caution', 'info', 'quote', 'todo'].includes(rawType)) {
+  if (
+    ['note', 'tip', 'important', 'warning', 'caution', 'info', 'quote', 'todo'].includes(rawType)
+  ) {
     type = rawType as CalloutType;
   }
 

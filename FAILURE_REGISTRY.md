@@ -202,7 +202,7 @@ Mitigation: Strict divergence check on proposal application comparing `proposal.
 
 ### F-029 Model Path Injection Target Redirect
 
-Scenario: Prompt-injection content in a note induces the model to emit a proposal header with an unvetted arbitrary path (e.g. ```` ```proposal:Secrets/Passwords.md ````). The user accepts the proposal believing it applies to their active note, overwriting an unrelated sensitive file.
+Scenario: Prompt-injection content in a note induces the model to emit a proposal header with an unvetted arbitrary path (e.g. ` ```proposal:Secrets/Passwords.md `). The user accepts the proposal believing it applies to their active note, overwriting an unrelated sensitive file.
 
 Mitigation: Proposal parser strictly binds `proposal.path` to the verified `targetPath` of the active note, completely ignoring model-emitted destination paths.
 
@@ -259,4 +259,3 @@ Mitigation: Implement two-stage reconciliation: Stage A performs fast synchronou
 Scenario: Failures in writing or renaming the encrypted desktop secrets file are swallowed or logged to console without rejecting, leaving API secrets in ephemeral memory while failing to persist to disk.
 
 Mitigation: Force `persistToDisk()` to throw on filesystem errors, roll back memory cache on persistence failure, and ensure `setSecret()` and `clearSecret()` promises reject with durable error context.
-

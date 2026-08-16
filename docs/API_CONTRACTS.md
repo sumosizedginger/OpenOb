@@ -78,7 +78,7 @@ export interface SearchResult {
   title: string;
   excerpt?: string;
   score: number;
-  source: "navigation" | "fts" | "semantic" | "property" | "link";
+  source: 'navigation' | 'fts' | 'semantic' | 'property' | 'link';
 }
 
 export interface SearchEngine {

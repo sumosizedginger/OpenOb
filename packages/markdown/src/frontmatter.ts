@@ -120,7 +120,7 @@ export function parseFrontmatter(text: string): FrontmatterResult {
     if (colonIdx === -1) continue;
 
     const key = line.slice(0, colonIdx).trim();
-    let valStr = line.slice(colonIdx + 1).trim();
+    const valStr = line.slice(colonIdx + 1).trim();
 
     if (!key) continue;
 

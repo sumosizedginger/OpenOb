@@ -1,4 +1,11 @@
-import { AICapabilities, AIChunk, AIModel, AIProvider, ChatRequest, LocalAIConfig } from './types.js';
+import {
+  AICapabilities,
+  AIChunk,
+  AIModel,
+  AIProvider,
+  ChatRequest,
+  LocalAIConfig,
+} from './types.js';
 
 export class OpenAICompatibleProvider implements AIProvider {
   public readonly id = 'openai-compatible';
@@ -89,12 +96,14 @@ export class OpenAICompatibleProvider implements AIProvider {
         yield { content: '', isDone: true, finishReason: 'abort' };
         return;
       }
-      throw new Error(`AI Provider network failure at ${url}: ${err.message}`);
+      throw new Error(`AI Provider network failure at ${url}: ${err.message}`, { cause: err });
     }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      throw new Error(`AI Provider error HTTP ${response.status}: ${errorText || response.statusText}`);
+      throw new Error(
+        `AI Provider error HTTP ${response.status}: ${errorText || response.statusText}`
+      );
     }
 
     if (!response.body) {

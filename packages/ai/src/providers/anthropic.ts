@@ -91,15 +91,19 @@ export class AnthropicProvider implements AIProvider {
         yield { content: '', isDone: true, finishReason: 'abort' };
         return;
       }
-      throw new Error(redactSecrets(`Anthropic request failed: ${err.message}`, [this.options.apiKey]));
+      throw new Error(
+        redactSecrets(`Anthropic request failed: ${err.message}`, [this.options.apiKey]),
+        { cause: err }
+      );
     }
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => '');
       throw new Error(
-        redactSecrets(`Anthropic error HTTP ${response.status}: ${errBody || response.statusText}`, [
-          this.options.apiKey,
-        ])
+        redactSecrets(
+          `Anthropic error HTTP ${response.status}: ${errBody || response.statusText}`,
+          [this.options.apiKey]
+        )
       );
     }
 

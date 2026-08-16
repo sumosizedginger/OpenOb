@@ -23,7 +23,10 @@ describe('Index Rebuilder (Constitution Law 2 & D-002: Disposable Index)', () =>
 
     const backlinksToIndex = await index.getBacklinks('index.md');
     expect(backlinksToIndex).toHaveLength(2); // From Guide.md and Research/AI.md
-    expect(backlinksToIndex.map((b) => b.sourcePath).sort()).toEqual(['Guide.md', 'Research/AI.md']);
+    expect(backlinksToIndex.map((b) => b.sourcePath).sort()).toEqual([
+      'Guide.md',
+      'Research/AI.md',
+    ]);
 
     // 2. DISPOSABLE REBUILD TEST: Destroy the index completely
     await index.rebuild([]);
@@ -39,6 +42,9 @@ describe('Index Rebuilder (Constitution Law 2 & D-002: Disposable Index)', () =>
 
     const rebuiltBacklinks = await index.getBacklinks('index.md');
     expect(rebuiltBacklinks).toHaveLength(2);
-    expect(rebuiltBacklinks.map((b) => b.sourcePath).sort()).toEqual(['Guide.md', 'Research/AI.md']);
+    expect(rebuiltBacklinks.map((b) => b.sourcePath).sort()).toEqual([
+      'Guide.md',
+      'Research/AI.md',
+    ]);
   });
 });

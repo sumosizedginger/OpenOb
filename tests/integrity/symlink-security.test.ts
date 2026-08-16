@@ -61,7 +61,9 @@ describe('Symlink Security & Boundary Isolation (SEC-02)', () => {
       await expect(vault.read('escape/leak.md')).rejects.toThrow(SecurityError);
 
       // 2. Writing through prefix-sharing link MUST throw SecurityError
-      await expect(vault.write('escape/attack.md', null, 'MALICIOUS_CONTENT')).rejects.toThrow(SecurityError);
+      await expect(vault.write('escape/attack.md', null, 'MALICIOUS_CONTENT')).rejects.toThrow(
+        SecurityError
+      );
 
       // 3. Stat through prefix-sharing link MUST throw SecurityError
       await expect(vault.stat('escape/leak.md')).rejects.toThrow(SecurityError);
@@ -70,7 +72,12 @@ describe('Symlink Security & Boundary Isolation (SEC-02)', () => {
       await expect(vault.exists('escape/leak.md')).rejects.toThrow(SecurityError);
 
       // Verify external file was never written
-      expect(await fs.access(path.join(siblingEvilDir, 'attack.md')).then(() => true).catch(() => false)).toBe(false);
+      expect(
+        await fs
+          .access(path.join(siblingEvilDir, 'attack.md'))
+          .then(() => true)
+          .catch(() => false)
+      ).toBe(false);
     } finally {
       try {
         await fs.rm(siblingEvilDir, { recursive: true, force: true });

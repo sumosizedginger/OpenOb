@@ -8,9 +8,15 @@ export default defineConfig({
     include: [
       'packages/**/*.{test,spec}.ts',
       'apps/**/*.{test,spec}.{ts,tsx}',
-      'tests/**/*.{test,spec}.ts'
+      'tests/**/*.{test,spec}.ts',
     ],
-    exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
+    exclude: ['tests/e2e/**', 'tests/_reaudit-tmp/**', 'node_modules/**', 'dist/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
+      exclude: ['**/*.d.ts', '**/__tests__/**', '**/node-fs-storage-browser-stub.ts'],
+    },
   },
   resolve: {
     alias: {

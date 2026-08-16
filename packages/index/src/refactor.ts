@@ -25,10 +25,7 @@ export interface RenameOptions {
  * Rewrites a single raw wikilink target while preserving subpath and alias.
  * Example: rewriteWikilinkTarget("[[OldNote#Heading|Alias]]", "NewNote") -> "[[NewNote#Heading|Alias]]"
  */
-export function rewriteWikilinkTarget(
-  rawLink: string,
-  newTarget: string
-): string {
+export function rewriteWikilinkTarget(rawLink: string, newTarget: string): string {
   const isEmbed = rawLink.startsWith('!');
   const inner = isEmbed ? rawLink.slice(3, -2) : rawLink.slice(2, -2);
 
@@ -141,9 +138,10 @@ export async function renameDocument(
     throw new Error(`Target path already exists: ${normNewPath}`);
   }
 
-  const oldText = typeof oldSnapshot.content === 'string'
-    ? oldSnapshot.content
-    : new TextDecoder().decode(oldSnapshot.content);
+  const oldText =
+    typeof oldSnapshot.content === 'string'
+      ? oldSnapshot.content
+      : new TextDecoder().decode(oldSnapshot.content);
 
   const newBasename = basenameVaultPath(normNewPath, '.md');
   const updatedFiles: VaultPath[] = [];
@@ -197,9 +195,10 @@ export async function renameDocument(
     try {
       for (const sourcePath of referencingPaths) {
         const sourceSnapshot = await storage.read(sourcePath);
-        const sourceText = typeof sourceSnapshot.content === 'string'
-          ? sourceSnapshot.content
-          : new TextDecoder().decode(sourceSnapshot.content);
+        const sourceText =
+          typeof sourceSnapshot.content === 'string'
+            ? sourceSnapshot.content
+            : new TextDecoder().decode(sourceSnapshot.content);
 
         const { content: rewrittenText, rewrittenCount } = rewriteNoteWikilinks(
           sourceText,
@@ -235,9 +234,10 @@ export async function renameDocument(
       // Rollback modified referencing files to original snapshot states
       for (const rb of rollbackList) {
         try {
-          const originalText = typeof rb.originalSnapshot.content === 'string'
-            ? rb.originalSnapshot.content
-            : new TextDecoder().decode(rb.originalSnapshot.content);
+          const originalText =
+            typeof rb.originalSnapshot.content === 'string'
+              ? rb.originalSnapshot.content
+              : new TextDecoder().decode(rb.originalSnapshot.content);
           await storage.write(rb.path, undefined, originalText);
           const parsed = await parser.parse(rb.path, originalText);
           await index.upsert(parsed);

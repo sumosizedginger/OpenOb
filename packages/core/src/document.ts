@@ -39,5 +39,9 @@ export interface ParsedDocument {
 }
 
 export interface DocumentParser {
-  parse(path: VaultPath, content: string | Uint8Array, sourceHash?: string): Promise<ParsedDocument>;
+  parse(
+    path: VaultPath,
+    content: string | Uint8Array,
+    sourceHash?: string
+  ): Promise<ParsedDocument>;
 }

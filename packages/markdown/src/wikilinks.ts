@@ -32,7 +32,7 @@ export function extractWikilinks(markdown: string): ParsedLink[] {
 
       // Check for alias separator '|'
       const pipeIndex = inner.indexOf('|');
-      let targetWithSubpath = pipeIndex !== -1 ? inner.slice(0, pipeIndex).trim() : inner;
+      const targetWithSubpath = pipeIndex !== -1 ? inner.slice(0, pipeIndex).trim() : inner;
       const displayText = pipeIndex !== -1 ? inner.slice(pipeIndex + 1).trim() : undefined;
 
       // Check for subpath separator '#' or '^'

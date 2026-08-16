@@ -139,7 +139,8 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const hash = computeContentHash(bytes);
-    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    const hasBom =
+      bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
     const version: FileVersion = {
       token: createVersionToken(hash, file.lastModified, file.size),
       hash,
@@ -219,11 +220,17 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       }
     }
 
-    const { parent: parentDirHandle, name: filename } = await this.getHandleForPath(norm, true, false);
+    const { parent: parentDirHandle, name: filename } = await this.getHandleForPath(
+      norm,
+      true,
+      false
+    );
 
-    const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+    const bytes =
+      typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const newHash = computeContentHash(bytes);
-    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    const hasBom =
+      bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
 
     // Atomic write strategy: write to temporary file then move/swap over target if supported
     const tempName = `${filename}.okw.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
@@ -270,7 +277,10 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       path: norm,
       version: newVersion,
       content: bytes,
-      textContent: typeof content === 'string' ? content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+      textContent:
+        typeof content === 'string'
+          ? content
+          : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
       hasBom,
       modifiedAt: updatedFile.lastModified,
       size: updatedFile.size,

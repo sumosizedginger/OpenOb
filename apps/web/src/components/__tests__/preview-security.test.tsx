@@ -31,10 +31,7 @@ describe('PreviewPane Renderer Security & Hostile HTML Text Escaping', () => {
     };
 
     const markup = renderToStaticMarkup(
-      <PreviewPane
-        document={doc}
-        onNavigateWikilink={() => {}}
-      />
+      <PreviewPane document={doc} onNavigateWikilink={() => {}} />
     );
 
     // 1. Ensure HTML tags are escaped and never rendered as live HTML DOM tags
@@ -51,8 +48,12 @@ describe('PreviewPane Renderer Security & Hostile HTML Text Escaping', () => {
     expect(markup).toContain('&lt;img src=&quot;x&quot; on&amp;#101;rror=alert(1)&gt;');
     expect(markup).toContain('&lt;div style=&quot;background:url(javascript:alert(1))&quot;&gt;');
     expect(markup).toContain('&lt;scr&lt;script&gt;ipt&gt;alert(1)&lt;/scr&lt;script&gt;ipt&gt;');
-    expect(markup).toContain('&lt;svg&gt;&lt;a xlink:href=&quot;javascript:alert(1)&quot;&gt;x&lt;/a&gt;&lt;/svg&gt;');
-    expect(markup).toContain('&lt;iframe srcdoc=&quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot;&gt;&lt;/iframe&gt;');
+    expect(markup).toContain(
+      '&lt;svg&gt;&lt;a xlink:href=&quot;javascript:alert(1)&quot;&gt;x&lt;/a&gt;&lt;/svg&gt;'
+    );
+    expect(markup).toContain(
+      '&lt;iframe srcdoc=&quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot;&gt;&lt;/iframe&gt;'
+    );
     expect(markup).toContain('&lt;a href=&quot;javascript:alert(1)&quot;&gt;x&lt;/a&gt;');
   });
 
@@ -64,7 +65,13 @@ describe('PreviewPane Renderer Security & Hostile HTML Text Escaping', () => {
       let results: string[] = [];
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git' || entry.name === '__tests__') continue;
+        if (
+          entry.name === 'node_modules' ||
+          entry.name === 'dist' ||
+          entry.name === '.git' ||
+          entry.name === '__tests__'
+        )
+          continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           results = results.concat(scanDir(full));

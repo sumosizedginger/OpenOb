@@ -170,7 +170,9 @@ Updated with veteran lore.`;
     expect(notices.some((n) => n.includes('Manuscript Progress'))).toBe(true);
 
     // Index newly created template note into live index
-    const templateDocContent = new TextDecoder().decode((await storage.read(navigatedPath!)).content);
+    const templateDocContent = new TextDecoder().decode(
+      (await storage.read(navigatedPath!)).content
+    );
     await index.upsert(await parser.parse(navigatedPath!, templateDocContent));
 
     // -------------------------------------------------------------------------

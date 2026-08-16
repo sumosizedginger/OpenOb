@@ -303,7 +303,6 @@ Early success means:
 - architecture remaining understandable
 - plugin boundaries surviving first-party use
 
-
 ## 9. Current Engineering Execution Model
 
 The current build process assumes:

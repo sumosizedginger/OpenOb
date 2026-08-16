@@ -26,11 +26,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <HardDrive size={12} color="var(--accent-primary)" />
           {vaultName}
         </span>
-        {activePath && (
-          <span style={{ color: 'var(--text-secondary)' }}>
-            {activePath}
-          </span>
-        )}
+        {activePath && <span style={{ color: 'var(--text-secondary)' }}>{activePath}</span>}
       </div>
 
       <div className="status-right">

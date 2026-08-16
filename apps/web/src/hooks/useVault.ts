@@ -9,7 +9,13 @@ import {
 } from '@okw/core';
 import { DefaultDocumentParser, toggleTaskAtLine, updateDocumentFrontmatter } from '@okw/markdown';
 import { MemoryDocumentIndex, rebuildVaultIndex, renameDocument } from '@okw/index';
-import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage, NoteWriteCoordinator, NoteState } from '@okw/vault';
+import {
+  MemoryVaultStorage,
+  SafeWriter,
+  BrowserFSAVaultStorage,
+  NoteWriteCoordinator,
+  NoteState,
+} from '@okw/vault';
 
 export interface OpenTab {
   path: VaultPath;
@@ -186,20 +192,29 @@ tags: [meeting, notes]
 };
 
 export function useVault() {
-  const [storage, setStorage] = useState<VaultStorage>(() => new MemoryVaultStorage('Open Knowledge Workspace'));
+  const [storage, setStorage] = useState<VaultStorage>(
+    () => new MemoryVaultStorage('Open Knowledge Workspace')
+  );
   const [safeWriter, setSafeWriter] = useState<SafeWriter>(() => new SafeWriter(storage));
   const [index] = useState<MemoryDocumentIndex>(() => new MemoryDocumentIndex());
   const [parser] = useState<DefaultDocumentParser>(() => new DefaultDocumentParser());
 
-  const coordinatorRef = useRef<NoteWriteCoordinator>(new NoteWriteCoordinator(storage, safeWriter));
+  const coordinatorRef = useRef<NoteWriteCoordinator>(
+    new NoteWriteCoordinator(storage, safeWriter)
+  );
 
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabPath, setActiveTabPath] = useState<VaultPath | null>(null);
   const [parsedDoc, setParsedDoc] = useState<ParsedDocument | null>(null);
   const [backlinks, setBacklinks] = useState<any[]>([]);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>('saved');
-  const [conflictData, setConflictData] = useState<{ path: VaultPath; diskContent?: string } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>(
+    'saved'
+  );
+  const [conflictData, setConflictData] = useState<{
+    path: VaultPath;
+    diskContent?: string;
+  } | null>(null);
 
   const parseDebounceTimerRef = useRef<any>(null);
   const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
@@ -208,6 +223,26 @@ export function useVault() {
   openTabsRef.current = openTabs;
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
+
+  // Expose test and introspection hooks on window for deterministic Playwright verification (C7)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__vaultStorage = storage;
+      (window as any).__coordinator = coordinatorRef.current;
+      (window as any).__readStorage = async (p: string) => {
+        return storage.readText(p);
+      };
+      (window as any).__setStorageWriteDelay = (delayMs: number) => {
+        const origWrite = storage.write.bind(storage);
+        storage.write = async (...args: any[]) => {
+          if (delayMs > 0) {
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+          return (origWrite as any)(...args);
+        };
+      };
+    }
+  }, [storage]);
 
   // Listen to authoritative coordinator state updates and reflect in React state (G1, G2)
   useEffect(() => {
@@ -235,19 +270,22 @@ export function useVault() {
   }, []);
 
   // Refresh directory list & derived index
-  const refreshVault = useCallback(async (currentStorage: VaultStorage = storage) => {
-    try {
-      const list = await currentStorage.list('', true);
-      setEntries(list);
-      await rebuildVaultIndex(currentStorage, index, parser);
-      if (activeTabPath) {
-        const bl = await index.getBacklinks(activeTabPath);
-        setBacklinks(bl);
+  const refreshVault = useCallback(
+    async (currentStorage: VaultStorage = storage) => {
+      try {
+        const list = await currentStorage.list('', true);
+        setEntries(list);
+        await rebuildVaultIndex(currentStorage, index, parser);
+        if (activeTabPath) {
+          const bl = await index.getBacklinks(activeTabPath);
+          setBacklinks(bl);
+        }
+      } catch (err) {
+        console.error('Error refreshing vault:', err);
       }
-    } catch (err) {
-      console.error('Error refreshing vault:', err);
-    }
-  }, [storage, index, parser, activeTabPath]);
+    },
+    [storage, index, parser, activeTabPath]
+  );
 
   // Seed default vault on mount
   useEffect(() => {
@@ -292,7 +330,9 @@ export function useVault() {
 
     try {
       const snapshot = await storage.read(path);
-      const content = snapshot.textContent || new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
+      const content =
+        snapshot.textContent ||
+        new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
       const parsed = await parser.parse(path, content, snapshot.version.hash);
       coordinatorRef.current.initNote(path, snapshot, content);
 
@@ -321,13 +361,15 @@ export function useVault() {
 
   const closeTab = (path: VaultPath, force = false) => {
     const tabToClose = openTabs.find((t) => t.path === path);
+    let discarded = false;
     if (tabToClose?.isDirty && !force) {
       if (!confirm(`"${tabToClose.title || path}" has unsaved changes. Discard and close?`)) {
         return;
       }
+      discarded = true;
     }
 
-    coordinatorRef.current.removeNote(path);
+    coordinatorRef.current.removeNote(path, discarded);
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t.path !== path);
       if (activeTabPath === path) {
@@ -343,7 +385,9 @@ export function useVault() {
       prev.map((tab) => {
         if (tab.path === targetPath) {
           const state = coordinatorRef.current.getNoteState(targetPath);
-          const isDirty = state ? (state.committedSnapshot?.textContent ?? '') !== newContent : true;
+          const isDirty = state
+            ? (state.committedSnapshot?.textContent ?? '') !== newContent
+            : true;
           return { ...tab, content: newContent, isDirty };
         }
         return tab;
@@ -367,9 +411,10 @@ export function useVault() {
     try {
       const snapshot = await coordinatorRef.current.save(currentPath, force);
       if (snapshot) {
-        const state = coordinatorRef.current.getNoteState(currentPath);
-        const content = state ? state.bufferContent : '';
-        const parsed = await parser.parse(currentPath, content, snapshot.version.hash);
+        const savedText =
+          snapshot.textContent ??
+          new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
+        const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
         await index.upsert(parsed);
         if (activeTabPathRef.current === currentPath) {
           setParsedDoc(parsed);
@@ -379,8 +424,7 @@ export function useVault() {
           }
         }
       }
-    } catch (err: any) {
-    }
+    } catch (err: any) {}
   };
 
   const createNote = async (nameOrFolder: string = '') => {
@@ -462,6 +506,7 @@ export function useVault() {
 
   const renameNote = async (oldPath: VaultPath, newPath: VaultPath) => {
     try {
+      await coordinatorRef.current.waitForIdle(oldPath);
       await renameDocument(storage, index, parser, oldPath, newPath);
       coordinatorRef.current.renameNote(oldPath, newPath);
 
@@ -483,8 +528,9 @@ export function useVault() {
       }
 
       await refreshVault();
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to rename "${oldPath}" to "${newPath}":`, err);
+      alert(`Rename failed: ${err.message || String(err)}`);
     }
   };
 
@@ -552,7 +598,11 @@ export function useVault() {
       await coordinatorRef.current.updateProperty(path, key, value, parser);
       const state = coordinatorRef.current.getNoteState(path);
       if (state && state.committedSnapshot) {
-        const parsed = await parser.parse(path, state.bufferContent, state.committedSnapshot.version.hash);
+        const parsed = await parser.parse(
+          path,
+          state.bufferContent,
+          state.committedSnapshot.version.hash
+        );
         await index.upsert(parsed);
         if (activeTabPathRef.current === path) {
           setParsedDoc(parsed);
@@ -580,12 +630,18 @@ export function useVault() {
     await openNote(targetPath);
   };
 
-  const applyAIProposedEdit = async (proposal: any): Promise<{ success: boolean; error?: string }> => {
+  const applyAIProposedEdit = async (
+    proposal: any
+  ): Promise<{ success: boolean; error?: string }> => {
     const res = await coordinatorRef.current.applyAI(proposal);
     if (res.success) {
       const state = coordinatorRef.current.getNoteState(proposal.path);
       if (state && state.committedSnapshot) {
-        const parsed = await parser.parse(proposal.path, state.bufferContent, state.committedSnapshot.version.hash);
+        const parsed = await parser.parse(
+          proposal.path,
+          state.bufferContent,
+          state.committedSnapshot.version.hash
+        );
         await index.upsert(parsed);
         if (activeTabPathRef.current === proposal.path) {
           setParsedDoc(parsed);

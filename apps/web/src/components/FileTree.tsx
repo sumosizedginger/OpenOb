@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { VaultEntry, VaultPath } from '@okw/core';
-import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Trash2, Edit2, Plus } from 'lucide-react';
+import {
+  Folder,
+  FolderOpen,
+  FileText,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  Edit2,
+  Plus,
+} from 'lucide-react';
 
 interface FileTreeProps {
   entries: VaultEntry[];
@@ -101,7 +110,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </span>
             <span className="tree-icon">
-              {isExpanded ? <FolderOpen size={15} color="#fbbf24" /> : <Folder size={15} color="#fbbf24" />}
+              {isExpanded ? (
+                <FolderOpen size={15} color="#fbbf24" />
+              ) : (
+                <Folder size={15} color="#fbbf24" />
+              )}
             </span>
             <span className="tree-label">{node.name}</span>
             <div className="tree-item-actions" onClick={(e) => e.stopPropagation()}>
@@ -162,11 +175,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           >
             <Edit2 size={12} />
           </button>
-          <button
-            className="btn-icon"
-            title="Delete Note"
-            onClick={() => onDelete(node.path)}
-          >
+          <button className="btn-icon" title="Delete Note" onClick={() => onDelete(node.path)}>
             <Trash2 size={12} />
           </button>
         </div>
@@ -177,7 +186,14 @@ export const FileTree: React.FC<FileTreeProps> = ({
   return (
     <div className="file-tree">
       {tree.length === 0 ? (
-        <div style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center' }}>
+        <div
+          style={{
+            padding: '16px',
+            color: 'var(--text-muted)',
+            fontSize: '12px',
+            textAlign: 'center',
+          }}
+        >
           Vault is empty
         </div>
       ) : (

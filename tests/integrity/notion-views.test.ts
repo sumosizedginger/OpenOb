@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryVaultStorage, SafeWriter } from '@okw/vault';
 import { DefaultDocumentParser, updateDocumentFrontmatter } from '@okw/markdown';
-import { MemoryDocumentIndex, executePropertyQuery, groupDocumentsByProperty, discoverVaultProperties, rebuildVaultIndex } from '@okw/index';
+import {
+  MemoryDocumentIndex,
+  executePropertyQuery,
+  groupDocumentsByProperty,
+  discoverVaultProperties,
+  rebuildVaultIndex,
+} from '@okw/index';
 import { ViewConfig } from '@okw/core';
 
 describe('Phase 6 Exit Gate: Notion-Like Views & Property Queries (Constitution Law 21)', () => {

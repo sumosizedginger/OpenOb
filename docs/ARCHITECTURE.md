@@ -61,7 +61,11 @@ Every derived subsystem must have a rebuild path.
 export interface VaultStorage {
   list(path: string): Promise<VaultEntry[]>;
   read(path: string): Promise<FileSnapshot>;
-  write(path: string, expectedVersion: FileVersion, data: Uint8Array | string): Promise<WriteResult>;
+  write(
+    path: string,
+    expectedVersion: FileVersion,
+    data: Uint8Array | string
+  ): Promise<WriteResult>;
   stat(path: string): Promise<FileStat>;
   move(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;

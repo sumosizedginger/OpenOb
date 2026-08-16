@@ -20,7 +20,12 @@ export class GeminiProvider implements AIProvider {
 
   async listModels(): Promise<AIModel[]> {
     return [
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Next-Gen)', contextWindow: 1048576, isDefault: true },
+      {
+        id: 'gemini-2.0-flash',
+        name: 'Gemini 2.0 Flash (Next-Gen)',
+        contextWindow: 1048576,
+        isDefault: true,
+      },
       { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', contextWindow: 2097152 },
       { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', contextWindow: 1048576 },
     ];
@@ -82,7 +87,10 @@ export class GeminiProvider implements AIProvider {
         yield { content: '', isDone: true, finishReason: 'abort' };
         return;
       }
-      throw new Error(redactSecrets(`Gemini request failed: ${err.message}`, [this.options.apiKey]));
+      throw new Error(
+        redactSecrets(`Gemini request failed: ${err.message}`, [this.options.apiKey]),
+        { cause: err }
+      );
     }
 
     if (!response.ok) {

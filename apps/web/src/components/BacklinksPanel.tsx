@@ -20,7 +20,12 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
   const [tab, setTab] = useState<'backlinks' | 'outgoing'>('backlinks');
 
   // Compute outgoing links and unresolved targets from active document
-  const outgoingLinks: Array<{ raw: string; target: string; resolved: boolean; targetPath?: string }> = [];
+  const outgoingLinks: Array<{
+    raw: string;
+    target: string;
+    resolved: boolean;
+    targetPath?: string;
+  }> = [];
   const seenTargets = new Set<string>();
 
   if (parsedDoc && index) {
@@ -53,7 +58,10 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
         userSelect: 'none',
       }}
     >
-      <div className="sidebar-header" style={{ padding: '4px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
+      <div
+        className="sidebar-header"
+        style={{ padding: '4px 8px', borderBottom: '1px solid var(--border-subtle)' }}
+      >
         <div style={{ display: 'flex', gap: '4px', width: '100%' }}>
           <button
             className="btn"
@@ -103,7 +111,14 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
         {tab === 'backlinks' ? (
           backlinks.length === 0 ? (
-            <div style={{ padding: '24px 8px', color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center' }}>
+            <div
+              style={{
+                padding: '24px 8px',
+                color: 'var(--text-muted)',
+                fontSize: '12px',
+                textAlign: 'center',
+              }}
+            >
               No incoming links to this note
             </div>
           ) : (
@@ -162,7 +177,14 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
         ) : (
           <div>
             {/* Resolved Outgoing Links */}
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: 'var(--text-muted)',
+                marginBottom: '6px',
+              }}
+            >
               Connected Notes ({resolvedOutgoing.length})
             </div>
             {resolvedOutgoing.length === 0 ? (
@@ -196,7 +218,14 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
             {/* Unresolved / Dangling Links */}
             {unresolvedOutgoing.length > 0 && (
               <div style={{ marginTop: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--status-warning, #eab308)', marginBottom: '6px' }}>
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'var(--status-warning, #eab308)',
+                    marginBottom: '6px',
+                  }}
+                >
                   Unresolved Links ({unresolvedOutgoing.length})
                 </div>
                 {unresolvedOutgoing.map((l, i) => (
@@ -212,7 +241,13 @@ export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
                       marginBottom: '4px',
                     }}
                   >
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
                       [[{l.target}]]
                     </span>
                     {onCreateNote && (

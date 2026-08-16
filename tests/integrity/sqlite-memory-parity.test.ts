@@ -19,8 +19,21 @@ describe('SQLite vs Memory DocumentIndex Parity Test (P3-1..P3-6)', () => {
       { level: 2, text: 'Quantum States', slug: 'quantum-states', line: 5 },
     ],
     links: [
-      { raw: '[[Math#Calculus|Advanced Calculus]]', target: 'Math', displayText: 'Advanced Calculus', subpath: '#Calculus', line: 3, isEmbed: false },
-      { raw: '[[Notes/Physics#Quantum States]]', target: 'Notes/Physics', subpath: '#Quantum States', line: 6, isEmbed: false }, // Self-link
+      {
+        raw: '[[Math#Calculus|Advanced Calculus]]',
+        target: 'Math',
+        displayText: 'Advanced Calculus',
+        subpath: '#Calculus',
+        line: 3,
+        isEmbed: false,
+      },
+      {
+        raw: '[[Notes/Physics#Quantum States]]',
+        target: 'Notes/Physics',
+        subpath: '#Quantum States',
+        line: 6,
+        isEmbed: false,
+      }, // Self-link
     ],
     textContent: `# Physics Overview
 See [[Math#Calculus|Advanced Calculus]] for prerequisites.
@@ -42,9 +55,7 @@ Self-referencing [[Notes/Physics#Quantum States]] here.`,
       { level: 1, text: 'Mathematics Core', slug: 'mathematics-core', line: 1 },
       { level: 2, text: 'Calculus', slug: 'calculus', line: 4 },
     ],
-    links: [
-      { raw: '[[Modern Physics]]', target: 'Modern Physics', line: 2, isEmbed: false },
-    ],
+    links: [{ raw: '[[Modern Physics]]', target: 'Modern Physics', line: 2, isEmbed: false }],
     textContent: `# Mathematics Core
 Applied in [[Modern Physics]].
 ## Calculus

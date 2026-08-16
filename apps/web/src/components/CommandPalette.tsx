@@ -33,11 +33,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   if (!isOpen) return null;
 
-  const notes = entries.filter((e) => !e.isDirectory && (e.path.endsWith('.md') || e.path.endsWith('.markdown')));
+  const notes = entries.filter(
+    (e) => !e.isDirectory && (e.path.endsWith('.md') || e.path.endsWith('.markdown'))
+  );
 
-  const filteredNotes = notes.filter((n) =>
-    n.path.toLowerCase().includes(query.toLowerCase()) ||
-    n.name.toLowerCase().includes(query.toLowerCase())
+  const filteredNotes = notes.filter(
+    (n) =>
+      n.path.toLowerCase().includes(query.toLowerCase()) ||
+      n.name.toLowerCase().includes(query.toLowerCase())
   );
 
   const actions = [
@@ -112,7 +115,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         <div className="command-list">
           {filteredNotes.length > 0 && (
             <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', padding: '6px 12px' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: 'var(--text-muted)',
+                  padding: '6px 12px',
+                }}
+              >
                 NOTES ({filteredNotes.length})
               </div>
               {filteredNotes.map((note, index) => (
@@ -139,7 +149,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
           {filteredActions.length > 0 && (
             <div style={{ marginTop: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', padding: '6px 12px' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: 'var(--text-muted)',
+                  padding: '6px 12px',
+                }}
+              >
                 ACTIONS
               </div>
               {filteredActions.map((act) => (

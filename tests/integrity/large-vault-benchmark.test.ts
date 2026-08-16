@@ -26,8 +26,15 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
           { level: 2, text: `Section ${i}.1`, slug: `section-${i}-1`, line: 4 },
         ],
         links: [
-          { raw: `[[Note_${(i % 50) + 1}]]`, target: `Note_${(i % 50) + 1}`, line: 3, isEmbed: false },
-          ...(prev ? [{ raw: `[[Note_${i - 1}]]`, target: `Note_${i - 1}`, line: 5, isEmbed: false }] : []),
+          {
+            raw: `[[Note_${(i % 50) + 1}]]`,
+            target: `Note_${(i % 50) + 1}`,
+            line: 3,
+            isEmbed: false,
+          },
+          ...(prev
+            ? [{ raw: `[[Note_${i - 1}]]`, target: `Note_${i - 1}`, line: 5, isEmbed: false }]
+            : []),
         ],
         textContent: `# Main Heading ${i}\nContext for note ${i} linking to ${target}.\n## Section ${i}.1\nData content.`,
       });

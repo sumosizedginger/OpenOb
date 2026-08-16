@@ -53,7 +53,9 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     return (localStorage.getItem('okw_ai_provider') as AIProviderId) || 'ollama';
   });
 
-  const [aiManager] = useState<AIManager>(() => new AIManager({ activeProviderId: providerId }, secretStore));
+  const [aiManager] = useState<AIManager>(
+    () => new AIManager({ activeProviderId: providerId }, secretStore)
+  );
   const [models, setModels] = useState<AIModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [scopeType, setScopeType] = useState<RetrievalScopeType>('current_note');
@@ -299,7 +301,10 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         <div className="p-3 bg-slate-900/95 border-b border-slate-800 text-xs space-y-2.5 animate-in slide-in-from-top-1">
           <div className="font-semibold text-slate-200 flex items-center justify-between">
             <span>AI Provider & BYOK Keys</span>
-            <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-200">
+            <button
+              onClick={() => setShowSettings(false)}
+              className="text-slate-400 hover:text-slate-200"
+            >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -324,7 +329,9 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
             <div className="space-y-1">
               <label className="text-[11px] text-slate-400 flex items-center justify-between">
                 <span>API Key:</span>
-                {maskedKey && <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>}
+                {maskedKey && (
+                  <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>
+                )}
               </label>
               <div className="flex items-center gap-1.5">
                 <input
@@ -350,7 +357,9 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
                   </button>
                 )}
               </div>
-              {keySavedMessage && <div className="text-[10px] text-emerald-400">✓ Key securely saved</div>}
+              {keySavedMessage && (
+                <div className="text-[10px] text-emerald-400">✓ Key securely saved</div>
+              )}
             </div>
           )}
         </div>
@@ -403,9 +412,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         {messages.map((msg, idx) => (
           <div
             key={idx}
-            className={`flex flex-col gap-1.5 ${
-              msg.role === 'user' ? 'items-end' : 'items-start'
-            }`}
+            className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
             <div
               className={`p-2.5 rounded-xl text-xs max-w-[90%] leading-relaxed ${

@@ -1,43 +1,56 @@
 # Architectural Decisions (ADR)
 
 ## D-001 Storage Model
+
 Single authoritative storage interface (`VaultStorage`) with two implementations:
+
 - `NodeFsVaultStorage` (Desktop / Node CLI)
 - `BrowserFSAVaultStorage` (Web / Origin Private File System / File System Access API)
 - `MemoryVaultStorage` (In-Memory for testing)
 
 ## D-002 Disposable SQLite Index
+
 SQLite is strictly a disposable read-cache and index for search, backlinks, and graph queries. Canonical source of truth is always the Markdown files on disk. If SQLite is wiped, it must be 100% rebuildable from disk with zero data loss.
 
 ## D-003 Concurrency & Safe Save
+
 Atomic write model using `SafeWriter`. Every write checks expected vs actual content hash. If modified externally, a `ConflictError` is raised.
 
 ## D-004 Wikilink Resolution Contract
+
 Strict 4-level resolution priority:
+
 1. Exact relative path
 2. Subfolder path
 3. Unique basename (shortest path wins)
 4. Explicit aliases
 
 ## D-005 Plugin Permission Model & Capability Gating
+
 First-party plugins execute through a capability-gated API facade (`PluginAPI`). All permissions (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) are explicitly declared and verified against immutable permission sets (`F-006`, `F-030`). Full execution isolation (Web Worker / iframe boundary) is planned for third-party plugin support (`F-032`).
 
 ## D-006 AI Provider Abstraction
+
 AI features interact with an abstract `AIProvider` contract. No hardcoded OpenAI/Anthropic SDKs in core. Local models (Ollama, LM Studio) and cloud models implement the same interface.
 
 ## D-007 Markdown AST & Frontmatter
+
 Markdown parsing uses unified/remark AST pipeline. Frontmatter is parsed to structured metadata.
 
 ## D-008 Single-Writer Sync Protocol
+
 Local changes are written to disk first. Remote sync is an external replicator that merges via version vectors / CRDTs, never bypassing `VaultStorage`.
 
 ## D-009 Multi-Tab Workspace Concurrency Token
+
 Every open tab must retain its immutable `initialSnapshot` (content + version token). When saving, `SafeWriter` validates that the disk state still matches `initialSnapshot.version.token`. If modified elsewhere or on disk, a concurrency conflict is triggered and resolved without data loss.
 
 ## D-010 Atomic Temporary File Renaming
+
 On Node.js environments, writes must write to an isolated temporary file (`.tmp.timestamp.random`) and atomically rename over the target path via `fs.rename` to prevent half-written files on crash.
 
 ## D-011 Explicit Version Token / Stat Tracking on Node FS
+
 `NodeFsVaultStorage` returns structured `FileVersion` containing exact content hash, size, and modified timestamp to guarantee atomic optimistic locking.
 
 **Reason:** Prevents `F-001` (silent data overwrite) and `F-002` (partial corrupt write) in multi-tab, external editor, and rapid autosave workflows.

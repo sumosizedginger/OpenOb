@@ -1,17 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { DocumentIndex, GraphData, GraphEdge, GraphNode, VaultPath } from '@okw/core';
 import { buildGraphData } from '@okw/index';
-import {
-  Search,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  Filter,
-  Tag,
-  Share2,
-  X,
-  Sparkles,
-} from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Maximize2, Filter, Tag, Share2, X, Sparkles } from 'lucide-react';
 
 interface GraphViewProps {
   index: DocumentIndex;
@@ -119,7 +109,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [index, activeNotePath, refreshKey, includeTags, hideOrphans, searchQuery, localMode, maxDepth]);
+  }, [
+    index,
+    activeNotePath,
+    refreshKey,
+    includeTags,
+    hideOrphans,
+    searchQuery,
+    localMode,
+    maxDepth,
+  ]);
 
   // Handle ResizeObserver for crisp Retina / dynamic DPR canvas rendering (P5-5)
   useEffect(() => {
@@ -349,7 +348,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         // Label
         const showLabel = scale > 0.8 || isHovered || isActive || node.val > 3;
         if (showLabel) {
-          ctx.font = isHovered || isActive ? 'bold 12px Inter, sans-serif' : '11px Inter, sans-serif';
+          ctx.font =
+            isHovered || isActive ? 'bold 12px Inter, sans-serif' : '11px Inter, sans-serif';
           ctx.fillStyle = isDimmed ? '#94a3b850' : '#f1f5f9';
           ctx.textAlign = 'center';
           ctx.fillText(node.title, node.x, node.y + node.radius + 14);
@@ -395,7 +395,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
       draggedNodeRef.current = hitNode;
     } else {
       isDraggingRef.current = true;
-      dragStartRef.current = { x: clickX - transformRef.current.x, y: clickY - transformRef.current.y };
+      dragStartRef.current = {
+        x: clickX - transformRef.current.x,
+        y: clickY - transformRef.current.y,
+      };
     }
   };
 
@@ -406,7 +409,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const world = screenToWorld(clickX, clickY);
 
     if (draggedNodeRef.current) {
-      dragDistanceRef.current += Math.abs(world.x - draggedNodeRef.current.x) + Math.abs(world.y - draggedNodeRef.current.y);
+      dragDistanceRef.current +=
+        Math.abs(world.x - draggedNodeRef.current.x) + Math.abs(world.y - draggedNodeRef.current.y);
       draggedNodeRef.current.x = world.x;
       draggedNodeRef.current.y = world.y;
       draggedNodeRef.current.vx = 0;
@@ -417,7 +421,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (isDraggingRef.current) {
       const newX = clickX - dragStartRef.current.x;
       const newY = clickY - dragStartRef.current.y;
-      dragDistanceRef.current += Math.abs(newX - transformRef.current.x) + Math.abs(newY - transformRef.current.y);
+      dragDistanceRef.current +=
+        Math.abs(newX - transformRef.current.x) + Math.abs(newY - transformRef.current.y);
       transformRef.current.x = newX;
       transformRef.current.y = newY;
       return;

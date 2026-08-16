@@ -20,7 +20,8 @@ export function createPluginAPI(
   registeredCommands: PluginCommand[],
   registeredViews: PluginView[]
 ): PluginAPI {
-  const getContext = typeof contextAccessor === 'function' ? contextAccessor : () => contextAccessor;
+  const getContext =
+    typeof contextAccessor === 'function' ? contextAccessor : () => contextAccessor;
 
   // P9-2 (F-030): Snapshot granted permissions immutably at bridge creation time.
   // The gatekeeper evaluates this immutable Set, never relying on a mutable object property.

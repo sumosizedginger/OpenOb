@@ -1,10 +1,4 @@
-import {
-  DocumentIndex,
-  GraphData,
-  GraphEdge,
-  GraphFilterOptions,
-  GraphNode,
-} from '@okw/core';
+import { DocumentIndex, GraphData, GraphEdge, GraphFilterOptions, GraphNode } from '@okw/core';
 import { DefaultLinkResolver } from './link-resolver.js';
 
 /**

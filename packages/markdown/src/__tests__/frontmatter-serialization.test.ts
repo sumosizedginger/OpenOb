@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DefaultDocumentParser, updateDocumentFrontmatter, serializeYamlValue, parseFrontmatter } from '../index.js';
+import {
+  DefaultDocumentParser,
+  updateDocumentFrontmatter,
+  serializeYamlValue,
+  parseFrontmatter,
+} from '../index.js';
 
 describe('Phase 6 Frontmatter Serializer & YAML 1.2 Compliance', () => {
   it('correctly serializes YAML values and safely quotes ambiguous strings and padded values', () => {

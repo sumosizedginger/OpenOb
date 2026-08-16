@@ -57,13 +57,21 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="command-palette" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
+      <div
+        className="command-palette"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '640px' }}
+      >
         <div className="command-input-wrapper">
           <Search size={18} color="var(--text-muted)" />
           <input
             type="text"
             className="command-input"
-            placeholder={selectedTag ? `Searching in #${selectedTag}...` : "Search all notes (FTS, headings, tags)..."}
+            placeholder={
+              selectedTag
+                ? `Searching in #${selectedTag}...`
+                : 'Search all notes (FTS, headings, tags)...'
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -84,7 +92,19 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             }}
           />
           {selectedTag && (
-            <div className="tag-pill" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--accent-glow)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px' }}>
+            <div
+              className="tag-pill"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'var(--accent-glow)',
+                color: 'var(--accent)',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+              }}
+            >
               <Tag size={12} />
               <span>#{selectedTag}</span>
               <X size={12} style={{ cursor: 'pointer' }} onClick={() => setSelectedTag(null)} />
@@ -98,7 +118,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         <div className="command-list" style={{ maxHeight: '380px' }}>
           {results.length === 0 ? (
             <div className="empty-state">
-              {query || selectedTag ? 'No matching documents found' : 'Type to search across whole vault...'}
+              {query || selectedTag
+                ? 'No matching documents found'
+                : 'Type to search across whole vault...'}
             </div>
           ) : (
             results.map((result, idx) => (
@@ -110,15 +132,32 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   onClose();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px', padding: '8px 12px' }}
+                style={{
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '4px',
+                  padding: '8px 12px',
+                }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <FileText size={14} color="var(--accent)" />
                     <span style={{ fontWeight: 500 }}>{result.title}</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{result.path}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {result.path}
+                    </span>
                   </div>
-                  <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.8 }}>
+                  <span
+                    className="badge"
+                    style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.8 }}
+                  >
                     {result.source}
                   </span>
                 </div>

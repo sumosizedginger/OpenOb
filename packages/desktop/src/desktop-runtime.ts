@@ -160,11 +160,7 @@ export class DesktopVaultRuntime {
       if (!dbMap.has(diskPath)) {
         try {
           const snapshot = await this.storage.read(diskPath);
-          const parsed = await this.parser.parse(
-            diskPath,
-            snapshot.content,
-            snapshot.version.hash
-          );
+          const parsed = await this.parser.parse(diskPath, snapshot.content, snapshot.version.hash);
           await this.index.upsert(parsed, {
             modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
             size: snapshot.size ?? snapshot.version.size ?? 0,
@@ -172,7 +168,10 @@ export class DesktopVaultRuntime {
           changed = true;
         } catch (err: any) {
           this.verificationErrors.push({ path: diskPath, error: err?.message || String(err) });
-          console.warn(`[DesktopVaultRuntime] Failed to index offline added file "${diskPath}":`, err);
+          console.warn(
+            `[DesktopVaultRuntime] Failed to index offline added file "${diskPath}":`,
+            err
+          );
         }
       }
     }
@@ -185,7 +184,10 @@ export class DesktopVaultRuntime {
           changed = true;
         } catch (err: any) {
           this.verificationErrors.push({ path: dbPath, error: err?.message || String(err) });
-          console.warn(`[DesktopVaultRuntime] Failed to remove offline deleted file "${dbPath}":`, err);
+          console.warn(
+            `[DesktopVaultRuntime] Failed to remove offline deleted file "${dbPath}":`,
+            err
+          );
         }
       }
     }
@@ -215,7 +217,10 @@ export class DesktopVaultRuntime {
             }
           } catch (err: any) {
             this.verificationErrors.push({ path: pathKey, error: err?.message || String(err) });
-            console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
+            console.warn(
+              `[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`,
+              err
+            );
           }
         } else {
           // Stat matches => candidate for Stage B background hash verification
@@ -233,7 +238,8 @@ export class DesktopVaultRuntime {
     // Start Stage B background integrity verification without blocking interactive startup
     if (candidatesForVerification.length > 0) {
       this._reconciliationState = 'verifying';
-      this.backgroundVerificationPromise = this.runBackgroundVerification(candidatesForVerification);
+      this.backgroundVerificationPromise =
+        this.runBackgroundVerification(candidatesForVerification);
     } else {
       this._reconciliationState = this.verificationErrors.length > 0 ? 'degraded' : 'verified';
     }
@@ -282,7 +288,9 @@ export class DesktopVaultRuntime {
       }
     };
 
-    const workers = Array.from({ length: Math.min(concurrency, candidates.length) }, () => worker());
+    const workers = Array.from({ length: Math.min(concurrency, candidates.length) }, () =>
+      worker()
+    );
     await Promise.all(workers);
 
     if (backgroundChanged && this.databasePath) {
@@ -296,11 +304,10 @@ export class DesktopVaultRuntime {
       return;
     }
 
-    this.pathWriteTimestamps.set(event.path, Date.now());
-
     try {
       if (event.type === 'deleted') {
         await this.index.remove(event.path);
+        this.pathWriteTimestamps.set(event.path, Date.now());
         this.scheduleCheckpoint();
       } else {
         let snapshot: FileSnapshot | null = null;
@@ -329,6 +336,7 @@ export class DesktopVaultRuntime {
             modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
             size: snapshot.size ?? snapshot.version.size ?? 0,
           });
+          this.pathWriteTimestamps.set(event.path, Date.now());
           this.scheduleCheckpoint();
         }
       }

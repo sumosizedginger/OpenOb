@@ -4,8 +4,9 @@ import { DefaultDocumentParser } from '../parser.js';
 
 describe('UTF-8 BOM Frontmatter Torture Test (M-03)', () => {
   it('correctly parses frontmatter when file begins with UTF-8 BOM (\\uFEFF)', async () => {
-    const rawWithBOM = '\uFEFF---\ntitle: BOM Notes\ntags: [windows, unicode]\n---\n# BOM Notes\nBody text.';
-    
+    const rawWithBOM =
+      '\uFEFF---\ntitle: BOM Notes\ntags: [windows, unicode]\n---\n# BOM Notes\nBody text.';
+
     const fm = parseFrontmatter(rawWithBOM);
     expect(fm.hasFrontmatter).toBe(true);
     expect(fm.properties.title).toBe('BOM Notes');

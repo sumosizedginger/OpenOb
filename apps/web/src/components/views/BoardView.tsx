@@ -34,16 +34,16 @@ export const BoardView: React.FC<BoardViewProps> = ({
             {/* Column Header */}
             <div className="flex items-center justify-between px-3 py-2.5 bg-slate-800/60 border-b border-slate-700/60">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-200 capitalize">
-                  {groupName}
-                </span>
+                <span className="text-xs font-semibold text-slate-200 capitalize">{groupName}</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-700 text-slate-300 font-medium">
                   {groupDocs.length}
                 </span>
               </div>
               {onCreateNoteInGroup && (
                 <button
-                  onClick={() => onCreateNoteInGroup(groupName === `No ${groupBy}` ? '' : groupName)}
+                  onClick={() =>
+                    onCreateNoteInGroup(groupName === `No ${groupBy}` ? '' : groupName)
+                  }
                   className="p-1 rounded text-slate-400 hover:text-sky-400 hover:bg-slate-700/60"
                   title={`New note in ${groupName}`}
                 >
@@ -97,7 +97,8 @@ export const BoardView: React.FC<BoardViewProps> = ({
                       <select
                         value={groupName}
                         onChange={(e) => {
-                          const targetVal = e.target.value === `No ${groupBy}` ? null : e.target.value;
+                          const targetVal =
+                            e.target.value === `No ${groupBy}` ? null : e.target.value;
                           onUpdateProperty(doc.path, groupBy, targetVal);
                         }}
                         className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] text-slate-300 focus:outline-none focus:border-sky-500"

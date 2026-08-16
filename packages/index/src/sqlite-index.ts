@@ -199,7 +199,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
     return list;
   }
 
-  private refreshAffectedLinks(affected: { path: string; title?: string; aliases?: string[] }): void {
+  private refreshAffectedLinks(affected: {
+    path: string;
+    title?: string;
+    aliases?: string[];
+  }): void {
     const projection = this.getResolverProjection();
     const resolver = new DefaultLinkResolver(() => projection as any);
 
@@ -370,7 +374,9 @@ export class SqliteDocumentIndex implements DocumentIndex {
       let removedTitle: string | undefined;
       const aliases: string[] = [];
 
-      const docStmt = this.db.prepare('SELECT id, path, title FROM documents WHERE id = ? OR path = ?');
+      const docStmt = this.db.prepare(
+        'SELECT id, path, title FROM documents WHERE id = ? OR path = ?'
+      );
       this.safeBind(docStmt, [documentId, documentId]);
       if (docStmt.step()) {
         const docRow = docStmt.getAsObject();
@@ -427,15 +433,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
       insertHeadingStmt = this.db.prepare(
         `INSERT INTO headings (doc_id, level, text, slug, line) VALUES (?, ?, ?, ?, ?)`
       );
-      insertTagStmt = this.db.prepare(
-        `INSERT INTO tags (doc_id, tag) VALUES (?, ?)`
-      );
+      insertTagStmt = this.db.prepare(`INSERT INTO tags (doc_id, tag) VALUES (?, ?)`);
       insertPropStmt = this.db.prepare(
         `INSERT OR REPLACE INTO properties (doc_id, key, value_json) VALUES (?, ?, ?)`
       );
-      insertAliasStmt = this.db.prepare(
-        `INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`
-      );
+      insertAliasStmt = this.db.prepare(`INSERT INTO aliases (doc_id, alias) VALUES (?, ?)`);
 
       const allParsed: ParsedDocument[] = [];
 
@@ -460,13 +462,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
         ]);
 
         for (const heading of doc.headings) {
-          insertHeadingStmt.run([
-            doc.id,
-            heading.level,
-            heading.text,
-            heading.slug,
-            heading.line,
-          ]);
+          insertHeadingStmt.run([doc.id, heading.level, heading.text, heading.slug, heading.line]);
         }
 
         for (const tag of doc.tags) {

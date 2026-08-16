@@ -33,6 +33,14 @@ jobs:
           ! grep -rn --include="*.ts" --include="*.tsx" "@okw/[a-z-]*/src" packages/ apps/
           echo "Checking for forbidden dangerouslySetInnerHTML usages in production code..."
           ! grep -rn --include="*.ts" --include="*.tsx" --exclude-dir="__tests__" "dangerouslySetInnerHTML" apps/ packages/
+          echo "Scanning for accidental hardcoded secret keys..."
+          ! grep -rnE --include="*.ts" --include="*.tsx" --exclude-dir="__tests__" --exclude-dir="tests" "(BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,})" packages/ apps/
+
+      - name: Format Check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck

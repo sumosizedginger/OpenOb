@@ -86,7 +86,10 @@ export const TableView: React.FC<TableViewProps> = ({
                     autoFocus
                     className="px-2 py-0.5 text-[11px] bg-slate-950 border border-sky-500 rounded text-slate-200 focus:outline-none w-24"
                   />
-                  <button type="submit" className="text-[10px] px-1.5 py-0.5 bg-sky-600 rounded text-white font-medium">
+                  <button
+                    type="submit"
+                    className="text-[10px] px-1.5 py-0.5 bg-sky-600 rounded text-white font-medium"
+                  >
                     Add
                   </button>
                 </form>

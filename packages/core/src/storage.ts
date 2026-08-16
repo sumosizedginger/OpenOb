@@ -1,4 +1,11 @@
-import { FileSnapshot, FileStat, FileVersion, VaultEntry, VaultPath, WriteResult } from './types.js';
+import {
+  FileSnapshot,
+  FileStat,
+  FileVersion,
+  VaultEntry,
+  VaultPath,
+  WriteResult,
+} from './types.js';
 
 export type VaultChangeListener = (event: VaultChangeEvent) => void;
 

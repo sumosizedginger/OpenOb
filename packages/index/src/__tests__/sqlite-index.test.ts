@@ -17,9 +17,7 @@ describe('SqliteDocumentIndex & Relational Schema (Phase 3)', () => {
       { level: 1, text: 'Physics Overview', slug: 'physics-overview', line: 1 },
       { level: 2, text: 'Quantum Mechanics', slug: 'quantum-mechanics', line: 5 },
     ],
-    links: [
-      { raw: '[[Math]]', target: 'Math', line: 3, isEmbed: false },
-    ],
+    links: [{ raw: '[[Math]]', target: 'Math', line: 3, isEmbed: false }],
     textContent: '# Physics Overview\nRefer to [[Math]] for prerequisites.\n## Quantum Mechanics',
   };
 
@@ -34,9 +32,7 @@ describe('SqliteDocumentIndex & Relational Schema (Phase 3)', () => {
     aliases: ['Mathematics'],
     tags: ['math', 'stem'],
     headings: [{ level: 1, text: 'Math Overview', slug: 'math-overview', line: 1 }],
-    links: [
-      { raw: '[[Physics]]', target: 'Physics', line: 2, isEmbed: false },
-    ],
+    links: [{ raw: '[[Physics]]', target: 'Physics', line: 2, isEmbed: false }],
     textContent: '# Math Overview\nUsed extensively in [[Physics]].',
   };
 

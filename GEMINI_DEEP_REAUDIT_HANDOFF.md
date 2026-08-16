@@ -163,6 +163,7 @@ Do not begin new roadmap features until all P0/P1 findings pass independent re-a
 ```
 
 Execution order (coordinator-approved):
+
 1. **P1 set — T1 → T2 → T3 → T4 → T5.** T3 before T4 (T4 profiles/measures from the fixed index and shares T3's `getAll()` batch-load work — coordinate so hydration is fixed once). T11 waits for T5 (CI must be green first).
 2. **Correctness/data-integrity-adjacent P2s — T6 → T9 → T10** (reconciliation freshness, save-state races: silent edit loss concerns) — before remaining P2s.
 3. **Remaining P2s — T7 → T8 → T12 → T13** (secrets hardening, FSA flag, same-size test, doc claims; T12 pairs with T6's regression work).

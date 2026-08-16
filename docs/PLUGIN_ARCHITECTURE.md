@@ -23,10 +23,7 @@ Example:
   "name": "Character Bible",
   "version": "1.0.0",
   "apiVersion": "1.x",
-  "permissions": [
-    "vault.read",
-    "workspace.modify"
-  ],
+  "permissions": ["vault.read", "workspace.modify"],
   "contributes": {
     "commands": ["characterBible.create"],
     "views": ["characterBible.sidebar"]
@@ -39,15 +36,15 @@ Example:
 Potential namespaces:
 
 ```ts
-app.commands
-app.workspace
-app.editor
-app.vault
-app.search
-app.graph
-app.ai
-app.settings
-app.ui
+app.commands;
+app.workspace;
+app.editor;
+app.vault;
+app.search;
+app.graph;
+app.ai;
+app.settings;
+app.ui;
 ```
 
 Plugins must not import internal modules.
@@ -55,12 +52,14 @@ Plugins must not import internal modules.
 ## Isolation
 
 Current runtime model (First-Party Plugins):
+
 - First-party plugins execute in the same JavaScript realm against `PluginHost` and `PluginAPI`.
 - Capability permissions are validated fail-closed against an immutable snapshot of declared permissions (`F-006`, `F-030`).
 - Runtime crashes during plugin lifecycle (load, unload, command execution) are trapped and contained, preventing workspace failure (`F-007`).
 - Note: This is a permission facade, not an execution isolation boundary (`F-032`).
 
 Target model (Required before third-party plugin distribution):
+
 - Plugin logic in a dedicated Web Worker or isolated iframe.
 - Message-based capability proxy over `postMessage`.
 - Strict CSP and capability token isolation to prevent access to DOM or ambient storage (`sessionStorage`).

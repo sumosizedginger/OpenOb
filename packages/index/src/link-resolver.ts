@@ -72,7 +72,10 @@ export class DefaultLinkResolver implements LinkResolver {
 
     // 1. Exact relative path from source document's directory
     if (sourceDir) {
-      const relPathWithExt = joinVaultPath(sourceDir, cleanTarget.endsWith('.md') ? cleanTarget : `${cleanTarget}.md`);
+      const relPathWithExt = joinVaultPath(
+        sourceDir,
+        cleanTarget.endsWith('.md') ? cleanTarget : `${cleanTarget}.md`
+      );
       const match = this.pathMap!.get(relPathWithExt);
       if (match) {
         return { resolved: true, targetPath: match.path };
@@ -80,7 +83,9 @@ export class DefaultLinkResolver implements LinkResolver {
     }
 
     // 2. Exact path from vault root
-    const rootPathWithExt = normalizeVaultPath(cleanTarget.endsWith('.md') ? cleanTarget : `${cleanTarget}.md`);
+    const rootPathWithExt = normalizeVaultPath(
+      cleanTarget.endsWith('.md') ? cleanTarget : `${cleanTarget}.md`
+    );
     const rootMatch = this.pathMap!.get(rootPathWithExt);
     if (rootMatch) {
       return { resolved: true, targetPath: rootMatch.path };

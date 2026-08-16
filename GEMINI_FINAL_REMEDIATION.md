@@ -4,6 +4,7 @@ Source: `FINAL_CLOSURE_AUDIT.md` (HEAD `5ec3cd0`, audit pass read/test/analyze o
 This document contains ONLY unresolved findings from the closure audit, as a specific engineering order. Do not rediscover the problems; execute the tasks.
 
 **Handoff rules (mandatory):**
+
 - Electron is deferred. Do not add Electron as part of remediation (no IPC, preload, packaging, installers, or Electron dependencies).
 - Do not begin new roadmap features.
 - Do not perform unrelated refactors.
@@ -78,6 +79,7 @@ This document contains ONLY unresolved findings from the closure audit, as a spe
 **Required change — two-stage reconciliation model (do NOT make filesystem timestamps the ultimate correctness boundary):**
 
 **Stage A — Fast synchronous reconciliation (before the app becomes interactive):**
+
 1. enumerate canonical Markdown paths;
 2. detect added paths;
 3. detect deleted paths;
@@ -90,6 +92,7 @@ Persist filesystem metadata (size, mtime, ctime where available) and use it to i
 Target: `100k unchanged vault: time-to-interactive < 15 s` (prefer substantially lower). Do not weaken canonical-file authority to hit this target.
 
 **Stage B — Background integrity verification (after the app is interactive):**
+
 - bounded-concurrency hash verification of canonical files;
 - must not block the UI;
 - must not mutate canonical Markdown;
@@ -103,6 +106,7 @@ Target: `100k unchanged vault: time-to-interactive < 15 s` (prefer substantially
 **Required regression tests:** same-size+same-mtime hostile case PASS; offline add/delete/rename PASS; canonical-wins PASS; background verification completes correctly; index state exposed truthfully while verification is active; no canonical write performed by reconciliation.
 **New measurements (record separately, do not merge):** time-to-interactive AND time-to-complete-verification, at 10k / 50k / 100k, each with 0 changed / 1 changed / 100 changed. Do NOT require complete 100k hash verification itself to finish within the interactive-startup budget — those are separate metrics.
 **Acceptance criteria:**
+
 ```text
 same-size + same-mtime hostile case: PASS
 offline add/delete/rename: PASS
@@ -112,6 +116,7 @@ background verification completes correctly
 index state exposed truthfully while verification is active
 no canonical write performed by reconciliation
 ```
+
 **Dependencies:** none (orthogonal to F1-F4).
 **What not to do:** Do not revert to stat-only skip; do not drop hash verification for changed files; do not make ctime the sole proof of equality; do not claim the index is verified while Stage B is still running; do not block the UI on Stage B.
 
@@ -135,6 +140,7 @@ no canonical write performed by reconciliation
 **Exact evidence/reproduction:** browser probe: `FileSystemHandle.prototype.move` undefined, `FileSystemFileHandle.prototype.move` function, `storage.atomicWrites` false; fallback write works with `atomicWrites=false`.
 **Files involved:** `packages/vault/src/browser-fsa-storage.ts` (getter, fallback path :220-247).
 **Required change (in order):**
+
 1. fix capability detection (check `FileSystemFileHandle.prototype.move ?? FileSystemHandle.prototype.move`, or probe an instance);
 2. surface the non-atomic/degraded capability state to the user (banner/status, not console-only); consider gating saves behind explicit user acceptance on no-`move()` browsers;
 3. TEST fallback failure behavior: inject a failed/interrupted direct write on a no-`move()` browser (or an equivalent simulation) and inspect whether canonical content is damaged;
@@ -189,6 +195,7 @@ Classification rule: if canonical truncation/corruption is empirically reproduce
 Wave A — Browser state integrity
 F1 + F2 + F3
 ```
+
 Land F1+F2+F3 together (one change set in `useVault.ts`) WITH their permanent overlapping-operation regression tests (real slow-storage overlap — a mock that does not actually overlap operations is not acceptable). Then **STOP**. Re-run probes A, B, D, E — they must ALL pass.
 
 ```text
@@ -213,6 +220,7 @@ F10
 Wave E — Permanent verification infrastructure
 F9
 ```
+
 F9 must incorporate the FINAL F1-F3 behavior (it proves the fixed implementation, not the old one).
 
 ## Re-audit gate

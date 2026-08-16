@@ -21,16 +21,16 @@ What is not real (as claimed): persistent desktop SQLite indexing, a desktop app
 
 ## 2. What is genuinely working (verified by execution)
 
-| Area | Evidence |
-|---|---|
-| Node canonical-file safety | 14/14 hostile probes passed: write→close→reopen exact round-trip; Unicode/emoji/space/apostrophe filenames; CRLF and LF byte-exact; BOM preserved at byte level (`efbbbf` on disk); empty/nested/5MB files; stale-version write → `ConflictError`, disk unchanged; delete-then-write → `ConflictError`; 100 rapid sequential saves consistent; file+folder move; read-only-dir failure is a clean `StorageError`; 200-char filename; **no hostile path escaped the vault root** (forward-slash and dot-dot forms throw `SecurityError`; Windows forms land inside as mangled names) |
-| Atomic write implementation | `NodeFsVaultStorage.write`: temp file + `fsync` + `fs.rename` + parent-dir `fsync` (POSIX), temp cleanup on failure (F-002, H-03) |
-| Conflict detection | `SafeWriter` + storage-level token/hash version enforcement (F-001) |
-| Markdown parser | 5/5 hostile corpus: malformed/unclosed/duplicate-key/huge frontmatter, links inside code fences correctly excluded, CRLF line numbers exact, Unicode headings, empty notes, 2MB note parsed in 154ms |
-| Index correctness | Phase 11 exact-parity rebuild test: doc-by-doc `versionHash`/tags/headings/links/properties equality after `index.close()` + full rebuild from disk; backlink + property-query parity |
-| AI mutation safety | F-028 divergence abort (proposal apply rejected when file/buffer changed after generation); F-029 model-supplied path binding; Law 17 secret redaction in all provider error paths; Law 18 failure isolation |
-| Plugin permission gatekeeper | P9-2 immutable `grantedPermissions` snapshot + deep-frozen manifest projection (self-escalation provably blocked) |
-| Gates | 114/114 tests (37 suites), `tsc --build` 0 errors, clean `vite build` |
+| Area                         | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node canonical-file safety   | 14/14 hostile probes passed: write→close→reopen exact round-trip; Unicode/emoji/space/apostrophe filenames; CRLF and LF byte-exact; BOM preserved at byte level (`efbbbf` on disk); empty/nested/5MB files; stale-version write → `ConflictError`, disk unchanged; delete-then-write → `ConflictError`; 100 rapid sequential saves consistent; file+folder move; read-only-dir failure is a clean `StorageError`; 200-char filename; **no hostile path escaped the vault root** (forward-slash and dot-dot forms throw `SecurityError`; Windows forms land inside as mangled names) |
+| Atomic write implementation  | `NodeFsVaultStorage.write`: temp file + `fsync` + `fs.rename` + parent-dir `fsync` (POSIX), temp cleanup on failure (F-002, H-03)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Conflict detection           | `SafeWriter` + storage-level token/hash version enforcement (F-001)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Markdown parser              | 5/5 hostile corpus: malformed/unclosed/duplicate-key/huge frontmatter, links inside code fences correctly excluded, CRLF line numbers exact, Unicode headings, empty notes, 2MB note parsed in 154ms                                                                                                                                                                                                                                                                                                                                                                                |
+| Index correctness            | Phase 11 exact-parity rebuild test: doc-by-doc `versionHash`/tags/headings/links/properties equality after `index.close()` + full rebuild from disk; backlink + property-query parity                                                                                                                                                                                                                                                                                                                                                                                               |
+| AI mutation safety           | F-028 divergence abort (proposal apply rejected when file/buffer changed after generation); F-029 model-supplied path binding; Law 17 secret redaction in all provider error paths; Law 18 failure isolation                                                                                                                                                                                                                                                                                                                                                                        |
+| Plugin permission gatekeeper | P9-2 immutable `grantedPermissions` snapshot + deep-frozen manifest projection (self-escalation provably blocked)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Gates                        | 114/114 tests (37 suites), `tsc --build` 0 errors, clean `vite build`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## 3. What is partially working
 
@@ -43,7 +43,7 @@ What is not real (as claimed): persistent desktop SQLite indexing, a desktop app
 
 1. **D-022**: "fulfilling the D-021 obligation for **100,000+ note vaults**" — no benchmark exists for the full system; the only in-repo gate (F-025) is 10,000 synthetic documents (no parser, no disk). The engine was measured at 100k by this audit (engine-only, synthetic); the full pipeline was not, and extrapolation is unfavorable (see §14).
 2. **D-022**: "**persistent** desktop indexing" / "SQLite … wired directly into the desktop backend … **native**" — `SqliteDocumentIndex` is in-memory WASM `sql.js`; `databasePath` is declared and **never used**; nothing is serialized after mutation; `close()` discards; every launch rebuilds from Markdown. `export()` exists but has zero callers.
-3. **D-022**: "**machine-bound** key derivation" — the default (and only in-repo usage) PBKDF2 secret is the hardcoded literal `'okw-device-bound-secret'` with a fixed public salt. Anyone with the source can decrypt the persisted secrets file. AES-256-GCM is correctly used; the *key management* is not machine-bound.
+3. **D-022**: "**machine-bound** key derivation" — the default (and only in-repo usage) PBKDF2 secret is the hardcoded literal `'okw-device-bound-secret'` with a fixed public salt. Anyone with the source can decrypt the persisted secrets file. AES-256-GCM is correctly used; the _key management_ is not machine-bound.
 4. **D-022**: "IPC interactions between the **native shell** and renderer" — there is no shell. `@okw/desktop` is a Node library; no Electron/Tauri/Neutralino/NW.js dependency or entry point exists. The commit message "deliver Desktop Wrapper" and ROADMAP's Phase 12 "Electron shell" describe different things.
 5. **Phase 12 commit message**: "SQLite Desktop Scaling and Authenticated Secret Store" — scaling not demonstrated, secret store not authenticated in the security sense (see 3).
 6. **`sanitizeHtml` docstring** ("removes inline event handlers", "blocks … pseudo-protocol injections") — false for entity-encoded handler names and `style`-attribute `url(javascript:)` (see §13).
@@ -51,19 +51,19 @@ What is not real (as claimed): persistent desktop SQLite indexing, a desktop app
 
 ## 5. Phase-by-phase verification matrix
 
-| Phase | Claimed | Actual | Status | Risk |
-|---|---|---|---|---|
-| 0–1 Foundation, vault, safe save | Contracts, safe atomic save, F-001/F-002 mitigation | Node path fully verified (14/14 probes); browser path lacks atomic guarantee | MOSTLY VERIFIED | MEDIUM |
-| 2 Workspace (outline, callouts, tasks, search, panes) | Verified in prior reviews; 48→50 tests | Code matches claims | VERIFIED | LOW |
-| 3 Index & SQLite derived state | SQLite index, FTS, rebuild (D-013) | Real `sql.js` engine, correct, parity-proven; **in-memory only, no persistence**; app still uses `MemoryDocumentIndex` | MOSTLY VERIFIED | MEDIUM |
-| 4 Graph | 2D graph with provenance edges | Present, tested; graph construction super-linear at 10k (9.2s) | MOSTLY VERIFIED | MEDIUM |
-| 5-6 Views + properties | Notion-like views, YAML 1.2 serializer | Present, tested (P6 cycle) | VERIFIED | LOW |
-| 7 AI local + retrieval | Scoped retrieval, proposals, F-028/F-029 | Verified after P7 fix cycle (divergence abort, path binding) | VERIFIED | LOW |
-| 8 BYOK + gateway | Secret isolation, 4 providers, Law 17/18 | Verified (headers-only keys, redaction everywhere, exit gate genuine) | VERIFIED | LOW |
-| 9 Plugin SDK | Permission gatekeeper, crash containment, F-006/F-007 | Gatekeeper solid after P9 fix; **not a sandbox** (no worker/iframe) | PARTIAL | MEDIUM |
-| 10 First-party pack | 5 plugins via public API, zero private imports | Verified (P10 hygiene items outstanding) | VERIFIED | LOW |
-| 11 Alpha consolidation | Full-system suite, starter vault, exact-parity rebuild | Verified after P11 fix cycle (parity now doc-by-doc) | VERIFIED | LOW |
-| 12 Desktop wrapper | "Desktop Wrapper, Native Vault Watcher, SQLite Desktop Scaling, Authenticated Secret Store" | Node library only; SQLite not persistent; secret store not machine-bound; no shell; watcher functional with caveats | MISLEADING CLAIM | HIGH |
+| Phase                                                 | Claimed                                                                                     | Actual                                                                                                                 | Status           | Risk   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------- | ------ |
+| 0–1 Foundation, vault, safe save                      | Contracts, safe atomic save, F-001/F-002 mitigation                                         | Node path fully verified (14/14 probes); browser path lacks atomic guarantee                                           | MOSTLY VERIFIED  | MEDIUM |
+| 2 Workspace (outline, callouts, tasks, search, panes) | Verified in prior reviews; 48→50 tests                                                      | Code matches claims                                                                                                    | VERIFIED         | LOW    |
+| 3 Index & SQLite derived state                        | SQLite index, FTS, rebuild (D-013)                                                          | Real `sql.js` engine, correct, parity-proven; **in-memory only, no persistence**; app still uses `MemoryDocumentIndex` | MOSTLY VERIFIED  | MEDIUM |
+| 4 Graph                                               | 2D graph with provenance edges                                                              | Present, tested; graph construction super-linear at 10k (9.2s)                                                         | MOSTLY VERIFIED  | MEDIUM |
+| 5-6 Views + properties                                | Notion-like views, YAML 1.2 serializer                                                      | Present, tested (P6 cycle)                                                                                             | VERIFIED         | LOW    |
+| 7 AI local + retrieval                                | Scoped retrieval, proposals, F-028/F-029                                                    | Verified after P7 fix cycle (divergence abort, path binding)                                                           | VERIFIED         | LOW    |
+| 8 BYOK + gateway                                      | Secret isolation, 4 providers, Law 17/18                                                    | Verified (headers-only keys, redaction everywhere, exit gate genuine)                                                  | VERIFIED         | LOW    |
+| 9 Plugin SDK                                          | Permission gatekeeper, crash containment, F-006/F-007                                       | Gatekeeper solid after P9 fix; **not a sandbox** (no worker/iframe)                                                    | PARTIAL          | MEDIUM |
+| 10 First-party pack                                   | 5 plugins via public API, zero private imports                                              | Verified (P10 hygiene items outstanding)                                                                               | VERIFIED         | LOW    |
+| 11 Alpha consolidation                                | Full-system suite, starter vault, exact-parity rebuild                                      | Verified after P11 fix cycle (parity now doc-by-doc)                                                                   | VERIFIED         | LOW    |
+| 12 Desktop wrapper                                    | "Desktop Wrapper, Native Vault Watcher, SQLite Desktop Scaling, Authenticated Secret Store" | Node library only; SQLite not persistent; secret store not machine-bound; no shell; watcher functional with caveats    | MISLEADING CLAIM | HIGH   |
 
 ## 6. Data-loss findings
 
@@ -131,22 +131,22 @@ Not exploitable today only because every plugin is first-party code in the repo.
 
 Real pipeline (real files → parser → `rebuildVaultIndex` → SQLite):
 
-| | 1,000 | 10,000 |
-|---|---|---|
-| file seeding | 1.9s | 23.6s |
-| index rebuild | 0.54s | 4.5s |
-| search (limit 10) | 14ms | 66ms |
-| backlinks | 1ms | <1ms |
-| graph build | 0.23s | **9.2s** |
+|                   | 1,000 | 10,000   |
+| ----------------- | ----- | -------- |
+| file seeding      | 1.9s  | 23.6s    |
+| index rebuild     | 0.54s | 4.5s     |
+| search (limit 10) | 14ms  | 66ms     |
+| backlinks         | 1ms   | <1ms     |
+| graph build       | 0.23s | **9.2s** |
 
 Engine-only (synthetic docs):
 
-| | 10k | 50k | 100k |
-|---|---|---|---|
-| SQLite rebuild | 0.41s | 2.1s | 4.5s |
-| SQLite search | 88ms | 413ms | 813ms |
-| Memory rebuild | 4ms | 18ms | not run (memory bound) |
-| Memory search | 14ms | 46ms | — |
+|                | 10k   | 50k   | 100k                   |
+| -------------- | ----- | ----- | ---------------------- |
+| SQLite rebuild | 0.41s | 2.1s  | 4.5s                   |
+| SQLite search  | 88ms  | 413ms | 813ms                  |
+| Memory rebuild | 4ms   | 18ms  | not run (memory bound) |
+| Memory search  | 14ms  | 46ms  | —                      |
 
 **Interpretation (clearly separated):** measured — engine handles 100k; full pipeline measured only to 10k. **Extrapolation (not measurement):** 100k cold start ≈ 45–90s rebuild + minutes of graph, recomputed on every launch because the DB is not persisted. 100k support is an engine fact, not a product fact.
 
@@ -166,22 +166,22 @@ Engine-only (synthetic docs):
 
 ## 17. Remediation priorities
 
-| ID | Severity | Finding |
-|---|---|---|
-| P0-CLAIM-001 | P0 | D-021/D-022/commit claim 100k, persistent SQLite, native desktop, machine-bound secrets — all false as delivered (claim-restoration rule) |
-| P0-REMEDIATION must: implement or restate (SQLite persistence, desktop scope, secret keying) | | |
-| P1-SQLITE-001 | P1 | Persist `SqliteDocumentIndex` to `databasePath` (checkpoint after mutation, load on create) or restate docs + remove dead `databasePath` option |
-| P1-SECRET-001 | P1 | Replace hardcoded PBKDF2 fallback with real passphrase/OS-keychain binding; fail closed if no key available |
-| P1-BROWSER-001 | P1 | Browser FSA write atomicity (temp+move swap) or explicit documented caveat + UI notice |
-| P1-SANITIZER-001 | P1 | Fix the 4 sanitizer bypasses or delete the sanitizer + its misleading tests (latent XSS trap) |
-| P1-PLUGIN-001 | P1 | Restate "isolated" claims; record that first-party-only today; design worker boundary before third-party plugins (PLUGIN_ARCHITECTURE already specifies it) |
-| P1-SCALE-001 | P1 | Add the real benchmark suite (parser+disk) at 10k/50k/100k before restoring 100k claims; bound graph construction |
-| P2-DL-002 | P2 | BOM preservation through read/write |
-| P2-DL-003 | P2 | Watcher: retry on transient read failure; add `fs.watch` error handler; log the non-recursive fallback |
-| P2-PATH-001 | P2 | Backslash path normalization (convert `\` to `/` instead of stripping) |
-| P2-TEST-001 | P2 | Promote audit probes (hostile FS, sanitizer corpus, BOM, traversal) into the permanent suite; add restart test |
-| P2-CI-001 | P2 | GitHub Actions: typecheck+tests+build on Node 20/22; browser smoke test |
-| P3 | | provider-switch abort; CSP headers; `'renamed'` event; dead code cleanup (`sanitizeHtml` or fix; unused `search.query` in character-bible manifest; ManuscriptTools folder/extension filtering) |
+| ID                                                                                           | Severity | Finding                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-CLAIM-001                                                                                 | P0       | D-021/D-022/commit claim 100k, persistent SQLite, native desktop, machine-bound secrets — all false as delivered (claim-restoration rule)                                                       |
+| P0-REMEDIATION must: implement or restate (SQLite persistence, desktop scope, secret keying) |          |                                                                                                                                                                                                 |
+| P1-SQLITE-001                                                                                | P1       | Persist `SqliteDocumentIndex` to `databasePath` (checkpoint after mutation, load on create) or restate docs + remove dead `databasePath` option                                                 |
+| P1-SECRET-001                                                                                | P1       | Replace hardcoded PBKDF2 fallback with real passphrase/OS-keychain binding; fail closed if no key available                                                                                     |
+| P1-BROWSER-001                                                                               | P1       | Browser FSA write atomicity (temp+move swap) or explicit documented caveat + UI notice                                                                                                          |
+| P1-SANITIZER-001                                                                             | P1       | Fix the 4 sanitizer bypasses or delete the sanitizer + its misleading tests (latent XSS trap)                                                                                                   |
+| P1-PLUGIN-001                                                                                | P1       | Restate "isolated" claims; record that first-party-only today; design worker boundary before third-party plugins (PLUGIN_ARCHITECTURE already specifies it)                                     |
+| P1-SCALE-001                                                                                 | P1       | Add the real benchmark suite (parser+disk) at 10k/50k/100k before restoring 100k claims; bound graph construction                                                                               |
+| P2-DL-002                                                                                    | P2       | BOM preservation through read/write                                                                                                                                                             |
+| P2-DL-003                                                                                    | P2       | Watcher: retry on transient read failure; add `fs.watch` error handler; log the non-recursive fallback                                                                                          |
+| P2-PATH-001                                                                                  | P2       | Backslash path normalization (convert `\` to `/` instead of stripping)                                                                                                                          |
+| P2-TEST-001                                                                                  | P2       | Promote audit probes (hostile FS, sanitizer corpus, BOM, traversal) into the permanent suite; add restart test                                                                                  |
+| P2-CI-001                                                                                    | P2       | GitHub Actions: typecheck+tests+build on Node 20/22; browser smoke test                                                                                                                         |
+| P3                                                                                           |          | provider-switch abort; CSP headers; `'renamed'` event; dead code cleanup (`sanitizeHtml` or fix; unused `search.query` in character-bible manifest; ManuscriptTools folder/extension filtering) |
 
 ## 18. Features that must remain frozen
 

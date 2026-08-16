@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
 import { ParsedDocument } from '@okw/core';
-import {
-  Tag,
-  Sliders,
-  Calendar,
-  Hash,
-  Type,
-  CheckSquare,
-  List,
-  Plus,
-  Trash2,
-} from 'lucide-react';
+import { Tag, Sliders, Calendar, Hash, Type, CheckSquare, List, Plus, Trash2 } from 'lucide-react';
 
 interface PropertiesPanelProps {
   parsedDoc: ParsedDocument | null;
@@ -104,8 +94,12 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   Document Metadata
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-slate-400">Words: <span className="text-slate-200 font-mono">{parsedDoc.wordCount}</span></div>
-                  <div className="text-slate-400">Lines: <span className="text-slate-200 font-mono">{parsedDoc.lineCount}</span></div>
+                  <div className="text-slate-400">
+                    Words: <span className="text-slate-200 font-mono">{parsedDoc.wordCount}</span>
+                  </div>
+                  <div className="text-slate-400">
+                    Lines: <span className="text-slate-200 font-mono">{parsedDoc.lineCount}</span>
+                  </div>
                   {parsedDoc.aliases && parsedDoc.aliases.length > 0 && (
                     <div className="col-span-2 text-slate-400">
                       Aliases: <span className="text-sky-300">{parsedDoc.aliases.join(', ')}</span>
@@ -171,7 +165,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
               {/* Rendered Properties */}
               {Object.keys(properties).length === 0 ? (
-                <div className="text-xs text-slate-500 italic py-2">No frontmatter properties defined</div>
+                <div className="text-xs text-slate-500 italic py-2">
+                  No frontmatter properties defined
+                </div>
               ) : (
                 <div className="space-y-1.5">
                   {Object.entries(properties).map(([key, val]) => (
@@ -208,7 +204,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           <div className="space-y-2">
             <div className="text-xs font-semibold text-slate-300">Vault Tags</div>
             {allTags.size === 0 ? (
-              <div className="text-xs text-slate-500 italic py-2">No tags found across vault notes</div>
+              <div className="text-xs text-slate-500 italic py-2">
+                No tags found across vault notes
+              </div>
             ) : (
               <div className="space-y-1">
                 {Array.from(allTags.entries()).map(([tag, count]) => (
@@ -218,8 +216,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-md bg-slate-950/40 border border-slate-800/80 hover:border-purple-500/40 hover:bg-purple-950/20 text-xs group transition-colors"
                   >
                     <div className="flex items-center gap-2 text-purple-300 font-medium">
-                      <Tag className="w-3.5 h-3.5 text-purple-400" />
-                      #{tag}
+                      <Tag className="w-3.5 h-3.5 text-purple-400" />#{tag}
                     </div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/40 text-purple-300 border border-purple-800/40">
                       {count}

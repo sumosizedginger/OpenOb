@@ -61,7 +61,10 @@ export class OpenAIProvider implements AIProvider {
         yield { content: '', isDone: true, finishReason: 'abort' };
         return;
       }
-      throw new Error(redactSecrets(`OpenAI request failed: ${err.message}`, [this.options.apiKey]));
+      throw new Error(
+        redactSecrets(`OpenAI request failed: ${err.message}`, [this.options.apiKey]),
+        { cause: err }
+      );
     }
 
     if (!response.ok) {

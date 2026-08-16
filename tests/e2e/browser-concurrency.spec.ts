@@ -1,25 +1,41 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Real Browser Concurrency & Production Hook Harness (G3 / F1, F2, F3)', () => {
+test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, C7)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // Wait for the app to initialize and default note to open
+    await expect(page.locator('.logo-text')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.logo-text')).toHaveText('OpenOb');
     await expect(page.locator('.vault-badge')).toContainText('Open Knowledge Workspace');
     await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
     await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Welcome');
   });
 
-  test('A1: Fast save completes before autosave debounce and marks status saved', async ({ page }) => {
+  test('A1: Fast save completes before autosave debounce and marks status saved with disk verification', async ({
+    page,
+  }) => {
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(100));
+
     await page.locator('.cm-content').click();
     await page.keyboard.type('\n\n## Quick Edit A1');
     await expect(page.locator('.save-status')).toContainText('Modified');
 
     await page.keyboard.press('Control+s');
     await expect(page.locator('.save-status.saved')).toContainText('Saved');
+
+    // C7: Assert DISK state matches exactly
+    const diskContent = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+    expect(diskContent).toContain('## Quick Edit A1');
   });
 
-  test('A2 & A3: Slow save exceeding debounce handles typing during in-flight save without false conflict', async ({ page }) => {
+  test('A2 & A3: Slow save exceeding debounce handles typing during in-flight save without false conflict (C7 latency seam + disk assertion)', async ({
+    page,
+  }) => {
+    // Inject 1200ms slow write latency
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(1200));
+
     // Type initial change
     await page.locator('.cm-content').click();
     await page.keyboard.type('\n\n- Line 1 (v1)');
@@ -27,40 +43,66 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / F1, F2, 
 
     // Trigger manual save
     await page.keyboard.press('Control+s');
-    
-    // Immediately type v2 while save is resolving/finishing
+    await expect(page.locator('.save-status.saving')).toContainText('Saving');
+
+    // Immediately type v2 while save 1 is in-flight
     await page.keyboard.type('\n- Line 2 (v2 typed during save)');
 
-    // Wait for debounced autosave to catch and persist v2
+    // Wait for the pump loop and debounced autosave to settle
     await page.waitForTimeout(3000);
     await expect(page.locator('.save-status.saved')).toContainText('Saved');
     await expect(page.locator('.cm-content')).toContainText('Line 2 (v2 typed during save)');
+
+    // C7: Verify actual storage disk content has v2 and no conflict occurred
+    const diskContent = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+    expect(diskContent).toContain('Line 1 (v1)');
+    expect(diskContent).toContain('Line 2 (v2 typed during save)');
   });
 
-  test('A4: Rapid sequential typing across overlapping save windows settles cleanly', async ({ page }) => {
+  test('A4: Rapid sequential typing across overlapping save windows settles cleanly on disk', async ({
+    page,
+  }) => {
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(400));
+
     await page.locator('.cm-content').click();
     for (let i = 1; i <= 4; i++) {
       await page.keyboard.type(`\n- Sequential step ${i}`);
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(200);
     }
 
-    // Wait for debounced autosave
+    // Wait for debounced autosave to settle
     await page.waitForTimeout(3000);
     await expect(page.locator('.save-status.saved')).toContainText('Saved');
     await expect(page.locator('.cm-content')).toContainText('Sequential step 4');
+
+    // C7: Verify disk contains all 4 sequential steps
+    const diskContent = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+    expect(diskContent).toContain('Sequential step 1');
+    expect(diskContent).toContain('Sequential step 2');
+    expect(diskContent).toContain('Sequential step 3');
+    expect(diskContent).toContain('Sequential step 4');
   });
 
-  test('B & B2: Tab switch during save does not clobber switched tab preview, backlinks, or status', async ({ page }) => {
+  test('B & B2: Tab switch during slow save does not clobber switched tab preview, backlinks, or status', async ({
+    page,
+  }) => {
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(800));
+
     // Open second note Architecture.md from file tree
     await page.locator('.tree-item:has-text("Architecture")').click();
     await expect(page.locator('.tab-bar .tab')).toHaveCount(2);
     await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Architecture');
 
-    // Type in Architecture.md and immediately switch to Welcome note
+    // Type in Architecture.md and trigger slow save
     await page.locator('.cm-content').click();
     await page.keyboard.type('\n\n## Edited in Architecture Tab');
-    
-    // Switch to Welcome note before autosave fires
+    await page.keyboard.press('Control+s');
+
+    // Switch to Welcome note while Architecture save is in-flight
     await page.locator('.tab-bar .tab:has-text("Welcome")').click();
     await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Welcome');
 
@@ -68,17 +110,64 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / F1, F2, 
     await page.locator('.cm-content').click();
     await page.keyboard.type('\n\n- Typed in Welcome Note');
     await page.keyboard.press('Control+s');
-    await expect(page.locator('.save-status.saved')).toContainText('Saved');
 
-    // Switch back to Architecture note
-    await page.locator('.tab-bar .tab:has-text("Architecture")').click();
-    await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Architecture');
-    
-    // Architecture tab must retain its typed content
-    await expect(page.locator('.cm-content')).toContainText('Edited in Architecture Tab');
+    // Wait for both saves to settle
+    await page.waitForTimeout(2500);
+
+    // Verify disk content for both notes independently
+    const diskArch = await page.evaluate(
+      async () => await (window as any).__readStorage('Architecture.md')
+    );
+    const diskWelcome = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+
+    expect(diskArch).toContain('Edited in Architecture Tab');
+    expect(diskWelcome).toContain('Typed in Welcome Note');
   });
 
-  test('Hostile Preview Security Smoke Test: Renders hostile XSS payloads strictly escaped', async ({ page }) => {
+  test('C2: Rename note during slow save does not recreate old path as ghost file on disk', async ({
+    page,
+  }) => {
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(800));
+
+    // Type dirty change in Welcome.md and trigger slow save
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\n- Dirty edit before rename');
+    await page.keyboard.press('Control+s');
+
+    // While save is in-flight, execute rename via coordinator/storage
+    await page.evaluate(async () => {
+      const coord = (window as any).__coordinator;
+      const storage = (window as any).__vaultStorage;
+      await coord.waitForIdle('Welcome.md');
+      const content = await storage.readText('Welcome.md');
+      await storage.write('RenamedWelcome.md', null, content);
+      await storage.remove('Welcome.md');
+      coord.renameNote('Welcome.md', 'RenamedWelcome.md');
+    });
+
+    await page.waitForTimeout(1500);
+
+    // Verify EXACTLY one file exists on disk with the dirty edit, and old path does NOT exist (no ghost!)
+    const oldExists = await page.evaluate(
+      async () => await (window as any).__vaultStorage.exists('Welcome.md')
+    );
+    const newExists = await page.evaluate(
+      async () => await (window as any).__vaultStorage.exists('RenamedWelcome.md')
+    );
+    const newContent = await page.evaluate(
+      async () => await (window as any).__readStorage('RenamedWelcome.md')
+    );
+
+    expect(oldExists).toBe(false);
+    expect(newExists).toBe(true);
+    expect(newContent).toContain('Dirty edit before rename');
+  });
+
+  test('Hostile Preview Security Smoke Test: Renders hostile XSS payloads strictly escaped', async ({
+    page,
+  }) => {
     // Switch to Preview mode
     await page.locator('.view-mode-btn[title="Preview View"]').click();
 

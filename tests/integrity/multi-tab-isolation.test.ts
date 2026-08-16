@@ -13,10 +13,10 @@ describe('Multi-Tab Isolation & Safe Buffer Management (C-01 & C-02 Regression)'
 
     // Simulate multi-tab buffer state
     let tabA_content = snapA.snapshot.textContent!;
-    let tabA_version = snapA.snapshot.version;
+    const tabA_version = snapA.snapshot.version;
 
     let tabB_content = snapB.snapshot.textContent!;
-    let tabB_version = snapB.snapshot.version;
+    const tabB_version = snapB.snapshot.version;
 
     // User switches to Tab B and types
     tabB_content = '# Note B Initial Content\n- User added line in Tab B';

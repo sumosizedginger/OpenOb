@@ -81,7 +81,8 @@ describe('Phase 8 Exit Gate: BYOK Cloud AI, Secret Isolation & Failure Resilienc
         model: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'Summarize note' }],
       });
-      for await (const _ of stream) {}
+      for await (const _ of stream) {
+      }
     } catch {
       aiFailed = true;
     }

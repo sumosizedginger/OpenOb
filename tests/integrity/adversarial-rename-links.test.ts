@@ -27,7 +27,9 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
     expect(initialBacklinks.length).toBe(4); // 3 from Beta (link + subpath + embed), 1 from Gamma
 
     // 2. Perform safe rename: Alpha.md -> Omega.md
-    const result = await renameDocument(storage, index, parser, 'Alpha.md', 'Omega.md', { updateLinks: true });
+    const result = await renameDocument(storage, index, parser, 'Alpha.md', 'Omega.md', {
+      updateLinks: true,
+    });
 
     expect(result.oldPath).toBe('Alpha.md');
     expect(result.newPath).toBe('Omega.md');
@@ -41,9 +43,7 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
     );
 
     const updatedGamma = await storage.readText('sub/Gamma.md');
-    expect(updatedGamma).toBe(
-      `# Sub Folder Note\r\n\r\nRelative link to [[Omega]] in root.`
-    );
+    expect(updatedGamma).toBe(`# Sub Folder Note\r\n\r\nRelative link to [[Omega]] in root.`);
 
     // 4. Verify renamed note self-reference was updated
     const updatedOmega = await storage.readText('Omega.md');
@@ -57,7 +57,12 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
 
     const newBacklinks = await index.getBacklinks('Omega.md');
     expect(newBacklinks.length).toBe(4);
-    expect(newBacklinks.map((b) => b.sourcePath)).toEqual(['Beta.md', 'Beta.md', 'Beta.md', 'sub/Gamma.md']);
+    expect(newBacklinks.map((b) => b.sourcePath)).toEqual([
+      'Beta.md',
+      'Beta.md',
+      'Beta.md',
+      'sub/Gamma.md',
+    ]);
   });
 
   it('safely renames note across directories in SqliteDocumentIndex with exact link target_path updates', async () => {
@@ -88,9 +93,7 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
 
     // Verify disk content
     const updatedResearch = await storage.readText('Research.md');
-    expect(updatedResearch).toBe(
-      `# Research\n\nStudy [[GraphAlgorithms]] before continuing.`
-    );
+    expect(updatedResearch).toBe(`# Research\n\nStudy [[GraphAlgorithms]] before continuing.`);
 
     // Verify SQLite index backlink accuracy
     const backlinks = await index.getBacklinks('computer_science/core/GraphAlgorithms.md');
@@ -107,9 +110,9 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
     const index = new MemoryDocumentIndex();
 
     // Cyclic graph: A -> B -> C -> A
-    const docA = "Line 1\r\nLine 2 [[NodeB#Part1|Second Node]]\r\nLine 3";
-    const docB = "Line 1\r\nLine 2 [[NodeC]]\r\nLine 3";
-    const docC = "Line 1\r\nLine 2 [[NodeA]]\r\nLine 3";
+    const docA = 'Line 1\r\nLine 2 [[NodeB#Part1|Second Node]]\r\nLine 3';
+    const docB = 'Line 1\r\nLine 2 [[NodeC]]\r\nLine 3';
+    const docC = 'Line 1\r\nLine 2 [[NodeA]]\r\nLine 3';
 
     await storage.write('NodeA.md', undefined, docA);
     await storage.write('NodeB.md', undefined, docB);
@@ -123,7 +126,7 @@ describe('Phase 4 Exit Gate: Adversarial Rename & Link Refactoring (F-010 / F-01
     await renameDocument(storage, index, parser, 'NodeB.md', 'NodeB_Prime.md');
 
     const updatedA = await storage.readText('NodeA.md');
-    expect(updatedA).toBe("Line 1\r\nLine 2 [[NodeB_Prime#Part1|Second Node]]\r\nLine 3");
+    expect(updatedA).toBe('Line 1\r\nLine 2 [[NodeB_Prime#Part1|Second Node]]\r\nLine 3');
     expect(updatedA.includes('\r\n')).toBe(true);
 
     // Verify cyclic backlinks
@@ -173,7 +176,9 @@ Another real reference: [[Target Note|Custom Display]]
     expect(updatedSample).toContain('Another real reference: [[New Target|Custom Display]]');
 
     // Code blocks and inline spans are untouched!
-    expect(updatedSample).toContain('```markdown\nHere is a sample wikilink that must not be changed: [[Target Note]]\n```');
+    expect(updatedSample).toContain(
+      '```markdown\nHere is a sample wikilink that must not be changed: [[Target Note]]\n```'
+    );
     expect(updatedSample).toContain('`[[Target Note]]`');
   });
 
@@ -234,8 +239,8 @@ Another real reference: [[Target Note|Custom Display]]
     await sqlite.upsert(doc2);
 
     // Both should agree that c.md has backlink from a/b.md
-    let memBacklinks = await memory.getBacklinks('c.md');
-    let sqlBacklinks = await sqlite.getBacklinks('c.md');
+    const memBacklinks = await memory.getBacklinks('c.md');
+    const sqlBacklinks = await sqlite.getBacklinks('c.md');
     expect(sqlBacklinks).toEqual(memBacklinks);
     expect(sqlBacklinks.length).toBe(1);
 

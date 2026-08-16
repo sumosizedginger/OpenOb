@@ -43,7 +43,9 @@ describe('Phase 5 Exit Gate: Graph, Metadata & Provenance-Aware Edges (Constitut
     expect(embedEdge?.target).toBe('Gamma.md');
     expect(embedEdge?.provenance?.isEmbed).toBe(true);
 
-    const wikilinkEdge = graph1.edges.find((e) => e.source === 'projects/Alpha.md' && e.target === 'projects/Beta.md');
+    const wikilinkEdge = graph1.edges.find(
+      (e) => e.source === 'projects/Alpha.md' && e.target === 'projects/Beta.md'
+    );
     expect(wikilinkEdge).toBeDefined();
     expect(wikilinkEdge?.kind).toBe('wikilink');
 

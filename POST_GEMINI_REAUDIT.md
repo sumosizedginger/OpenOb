@@ -22,18 +22,18 @@ Audit type: read / test / analyze only. **No production code modified.** Tempora
 
 ## 3. F1–F10 Verification Matrix
 
-| F-task | Verdict | Evidence summary |
-|---|---|---|
-| F1 Autosave / in-flight save | **PARTIAL** | A1 ✓, A4 ✓; **A2/A3 ✗ (P1 silent edit loss)** |
-| F2 Tab switch during save | **MOSTLY COMPLETE** | Clobber fixed ✓; A→B→A variant still produces false ConflictError + contradictory dirty:false |
-| F3 Property/AI commit point | **PARTIAL** | `diverged` commit-point is dead code; **D-silent ✗ (P1 silent property loss)**; E surfaces conflict only incidentally |
-| F4 Secret persistence | **PARTIAL** | Basic reject/rollback/atomicity ✓; **write queue permanently poisoned (P1, desktop)**; **stale rollback → memory/disk divergence (P1, desktop)** |
-| F5 Two-stage reconciliation | **PARTIAL** | Stage A/B structure ✓, close() awaits verification ✓; **`'verified'` lies (empty catch, `degraded` unreachable) (P1)**; verifier/watcher stale-write race (P2) |
-| F6 GitHub Pages | **VERIFIED COMPLETE** | Production build boots under `/OpenOb/` and `/fork-name/`: HTTP 200, zero asset 404s, zero console errors |
-| F7 FSA capability + fallback | **PARTIAL** | Capability getter fixed + verified; fallback failure-safety benign in Chromium; **user-visible warning MISSING (only console.warn)** |
-| F8 Typed source metadata | **MOSTLY COMPLETE** | Typed + populated in rebuild/reconcile/watcher; `(doc as any)` casts remain only in the direct-upsert fallback (sqlite-index.ts:445-447) |
-| F9 Test / CI infrastructure | **PARTIAL** (browser part FALSELY CLAIMED) | "browser-concurrency-probes" is a hand-written logic copy; **no Playwright installed; no browser CI job**; build gate + boundary greps genuinely fixed |
-| F10 BOM consistency | **VERIFIED COMPLETE** | read/readText/write.snapshot mutually consistent; byte-exact BOM round-trip (EF BB BF preserved) |
+| F-task                       | Verdict                                    | Evidence summary                                                                                                                                               |
+| ---------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 Autosave / in-flight save | **PARTIAL**                                | A1 ✓, A4 ✓; **A2/A3 ✗ (P1 silent edit loss)**                                                                                                                  |
+| F2 Tab switch during save    | **MOSTLY COMPLETE**                        | Clobber fixed ✓; A→B→A variant still produces false ConflictError + contradictory dirty:false                                                                  |
+| F3 Property/AI commit point  | **PARTIAL**                                | `diverged` commit-point is dead code; **D-silent ✗ (P1 silent property loss)**; E surfaces conflict only incidentally                                          |
+| F4 Secret persistence        | **PARTIAL**                                | Basic reject/rollback/atomicity ✓; **write queue permanently poisoned (P1, desktop)**; **stale rollback → memory/disk divergence (P1, desktop)**               |
+| F5 Two-stage reconciliation  | **PARTIAL**                                | Stage A/B structure ✓, close() awaits verification ✓; **`'verified'` lies (empty catch, `degraded` unreachable) (P1)**; verifier/watcher stale-write race (P2) |
+| F6 GitHub Pages              | **VERIFIED COMPLETE**                      | Production build boots under `/OpenOb/` and `/fork-name/`: HTTP 200, zero asset 404s, zero console errors                                                      |
+| F7 FSA capability + fallback | **PARTIAL**                                | Capability getter fixed + verified; fallback failure-safety benign in Chromium; **user-visible warning MISSING (only console.warn)**                           |
+| F8 Typed source metadata     | **MOSTLY COMPLETE**                        | Typed + populated in rebuild/reconcile/watcher; `(doc as any)` casts remain only in the direct-upsert fallback (sqlite-index.ts:445-447)                       |
+| F9 Test / CI infrastructure  | **PARTIAL** (browser part FALSELY CLAIMED) | "browser-concurrency-probes" is a hand-written logic copy; **no Playwright installed; no browser CI job**; build gate + boundary greps genuinely fixed         |
+| F10 BOM consistency          | **VERIFIED COMPLETE**                      | read/readText/write.snapshot mutually consistent; byte-exact BOM round-trip (EF BB BF preserved)                                                               |
 
 ## 4. Real React Concurrency Results (real hook, real browser, controlled slow storage)
 

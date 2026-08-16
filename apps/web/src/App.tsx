@@ -200,7 +200,9 @@ export const App: React.FC = () => {
       // Ctrl/Cmd+E: Cycle View Mode
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
         e.preventDefault();
-        setViewMode((prev) => (prev === 'split' ? 'editor' : prev === 'editor' ? 'preview' : 'split'));
+        setViewMode((prev) =>
+          prev === 'split' ? 'editor' : prev === 'editor' ? 'preview' : 'split'
+        );
       }
 
       // Ctrl/Cmd+W: Close active tab (unconditional preventDefault P2-4)
@@ -231,8 +233,7 @@ export const App: React.FC = () => {
     }
     setTimeout(() => {
       const headingEl =
-        document.getElementById(`heading-${heading.line}`) ||
-        document.getElementById(heading.slug);
+        document.getElementById(`heading-${heading.line}`) || document.getElementById(heading.slug);
       if (headingEl) {
         headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
@@ -370,9 +371,7 @@ export const App: React.FC = () => {
             <button
               className={`btn-icon ${showRightPanel === 'outline' ? 'active' : ''}`}
               title="Toggle Outline"
-              onClick={() =>
-                setShowRightPanel((prev) => (prev === 'outline' ? null : 'outline'))
-              }
+              onClick={() => setShowRightPanel((prev) => (prev === 'outline' ? null : 'outline'))}
             >
               <ListTree size={16} />
             </button>
@@ -388,9 +387,7 @@ export const App: React.FC = () => {
             <button
               className={`btn-icon ${showRightPanel === 'graph' ? 'active' : ''}`}
               title="Toggle Local Graph"
-              onClick={() =>
-                setShowRightPanel((prev) => (prev === 'graph' ? null : 'graph'))
-              }
+              onClick={() => setShowRightPanel((prev) => (prev === 'graph' ? null : 'graph'))}
             >
               <Share2 size={15} />
             </button>
@@ -406,9 +403,7 @@ export const App: React.FC = () => {
             <button
               className={`btn-icon ${showRightPanel === 'ai' ? 'active' : ''}`}
               title="Toggle Local AI Assistant"
-              onClick={() =>
-                setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))
-              }
+              onClick={() => setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))}
             >
               <Bot size={16} />
             </button>
@@ -432,7 +427,8 @@ export const App: React.FC = () => {
         >
           <AlertTriangle size={14} />
           <span>
-            Atomic replacement guarantee unavailable in this browser — saves will write directly to open file.
+            Atomic replacement guarantee unavailable in this browser — saves will write directly to
+            open file.
           </span>
         </div>
       )}
@@ -445,18 +441,10 @@ export const App: React.FC = () => {
             <div className="sidebar-header">
               <span className="sidebar-title">Files</span>
               <div className="sidebar-header-actions">
-                <button
-                  className="btn-icon"
-                  title="New Note (Ctrl+N)"
-                  onClick={() => createNote()}
-                >
+                <button className="btn-icon" title="New Note (Ctrl+N)" onClick={() => createNote()}>
                   <FilePlus size={14} />
                 </button>
-                <button
-                  className="btn-icon"
-                  title="New Folder"
-                  onClick={() => createFolder()}
-                >
+                <button className="btn-icon" title="New Folder" onClick={() => createFolder()}>
                   <FolderPlus size={14} />
                 </button>
                 <button
@@ -561,10 +549,7 @@ export const App: React.FC = () => {
 
         {/* Right Rail: Outline, Backlinks, Local Graph, Properties, or AI Assistant */}
         {showRightPanel === 'outline' && parsedDoc && (
-          <OutlinePanel
-            headings={parsedDoc.headings}
-            onSelectHeading={handleSelectHeading}
-          />
+          <OutlinePanel headings={parsedDoc.headings} onSelectHeading={handleSelectHeading} />
         )}
 
         {showRightPanel === 'backlinks' && activeTab && (
@@ -585,7 +570,10 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
-              refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
+              refreshKey={
+                activeTab?.initialSnapshot?.version.hash ||
+                activeTab?.initialSnapshot?.version.token
+              }
               isLocal={true}
               onNavigate={(path) => {
                 setMainMode('editor');
@@ -649,7 +637,10 @@ export const App: React.FC = () => {
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
-              refreshKey={activeTab?.initialSnapshot?.version.hash || activeTab?.initialSnapshot?.version.token}
+              refreshKey={
+                activeTab?.initialSnapshot?.version.hash ||
+                activeTab?.initialSnapshot?.version.token
+              }
               isLocal={false}
               onNavigate={(path) => {
                 setMainMode('editor');

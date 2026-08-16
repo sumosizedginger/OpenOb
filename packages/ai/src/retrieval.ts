@@ -79,9 +79,7 @@ export async function retrieveContext(
     try {
       const snap = await storage.read(scope.notePath);
       const text =
-        typeof snap.content === 'string'
-          ? snap.content
-          : new TextDecoder().decode(snap.content);
+        typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
       const noteTitle = scope.notePath.replace(/\.md$/, '').split('/').pop() || scope.notePath;
       const noteChunks = chunkDocumentByHeadings(scope.notePath, noteTitle, text);
       chunks.push(...noteChunks.slice(0, maxChunks));
@@ -96,9 +94,7 @@ export async function retrieveContext(
       try {
         const snap = await storage.read(p);
         const text =
-          typeof snap.content === 'string'
-            ? snap.content
-            : new TextDecoder().decode(snap.content);
+          typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
         const noteTitle = p.replace(/\.md$/, '').split('/').pop() || p;
         const noteChunks = chunkDocumentByHeadings(p, noteTitle, text);
         chunks.push(...noteChunks.slice(0, 2));
@@ -118,9 +114,7 @@ export async function retrieveContext(
       try {
         const snap = await storage.read(res.path);
         const text =
-          typeof snap.content === 'string'
-            ? snap.content
-            : new TextDecoder().decode(snap.content);
+          typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
         const noteChunks = chunkDocumentByHeadings(res.path, res.title, text);
         chunks.push(...noteChunks.slice(0, 2));
       } catch {}
@@ -138,9 +132,7 @@ export async function retrieveContext(
       try {
         const snap = await storage.read(res.path);
         const text =
-          typeof snap.content === 'string'
-            ? snap.content
-            : new TextDecoder().decode(snap.content);
+          typeof snap.content === 'string' ? snap.content : new TextDecoder().decode(snap.content);
         const noteChunks = chunkDocumentByHeadings(res.path, res.title, text);
         chunks.push(...noteChunks.slice(0, 2));
       } catch {}

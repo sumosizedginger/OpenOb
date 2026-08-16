@@ -59,11 +59,7 @@ export interface EmbeddingProvider {
 }
 
 export type RetrievalScopeType =
-  | 'selection'
-  | 'current_note'
-  | 'selected_notes'
-  | 'folder'
-  | 'vault';
+  'selection' | 'current_note' | 'selected_notes' | 'folder' | 'vault';
 
 export interface RetrievalScope {
   readonly type: RetrievalScopeType;

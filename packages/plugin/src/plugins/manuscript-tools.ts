@@ -26,7 +26,9 @@ export class ManuscriptToolsPlugin implements Plugin {
         }
 
         if (chapterPaths.length === 0) {
-          api.ui.showNotice('Manuscript Tools: No chapters found in Manuscript/ or Chapters/ folders.');
+          api.ui.showNotice(
+            'Manuscript Tools: No chapters found in Manuscript/ or Chapters/ folders.'
+          );
           return;
         }
 

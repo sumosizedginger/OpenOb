@@ -151,7 +151,8 @@ export class NodeFsVaultStorage implements VaultStorage {
       const [content, stats] = await Promise.all([fs.readFile(diskPath), fs.stat(diskPath)]);
       const bytes = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
       const hash = computeContentHash(bytes);
-      const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+      const hasBom =
+        bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
       const version: FileVersion = {
         token: createVersionToken(hash, stats.mtimeMs, stats.size),
         hash,
@@ -261,7 +262,8 @@ export class NodeFsVaultStorage implements VaultStorage {
       }
     }
 
-    const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+    const bytes =
+      typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const newHash = computeContentHash(bytes);
 
     // Atomic Temporary Write with FSYNC (H-03 & F-002 mitigation)
@@ -282,7 +284,9 @@ export class NodeFsVaultStorage implements VaultStorage {
       const realParent = await fs.realpath(parentDir);
       const realRoot = await fs.realpath(rootResolved);
       if (!isPathInside(realParent, realRoot)) {
-        throw new SecurityError(`Destination directory escaped vault root before rename: "${normPath}"`);
+        throw new SecurityError(
+          `Destination directory escaped vault root before rename: "${normPath}"`
+        );
       }
 
       // Atomic rename replaces target file safely
@@ -315,13 +319,17 @@ export class NodeFsVaultStorage implements VaultStorage {
       size: newStats.size,
     };
 
-    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    const hasBom =
+      bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
 
     const snapshot: FileSnapshot = {
       path: normPath,
       version: newVersion,
       content: bytes,
-      textContent: typeof content === 'string' ? content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+      textContent:
+        typeof content === 'string'
+          ? content
+          : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
       hasBom,
       modifiedAt: newStats.mtimeMs,
       size: newStats.size,

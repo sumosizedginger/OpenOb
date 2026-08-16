@@ -13,8 +13,8 @@ import { DefaultDocumentParser, updateDocumentFrontmatter } from '@okw/markdown'
 import { MemoryDocumentIndex } from '@okw/index';
 
 /**
- * SlowVaultStorage wraps MemoryVaultStorage to simulate real-world slow I/O
- * (e.g. 100ms write latency) to deterministically exercise async overlapping operations.
+ * SlowVaultStorage wraps MemoryVaultStorage to simulate slow I/O
+ * to deterministically exercise asynchronous overlapping operations.
  */
 class SlowVaultStorage implements VaultStorage {
   readonly name: string;
@@ -71,7 +71,7 @@ class SlowVaultStorage implements VaultStorage {
   }
 }
 
-describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
+describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
   it('Probe A: Typing during slow save does not drop edit; re-arms save and reaches disk', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
@@ -82,7 +82,7 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     const initialSnap = await safeWriter.safeSave('NoteA.md', '# Note A - Version 1');
 
     // Simulate tab state
-    let tab = {
+    const tab = {
       path: 'NoteA.md',
       content: '# Note A - Version 1',
       isDirty: false,
@@ -143,10 +143,6 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     await savePromise;
     await new Promise((r) => setTimeout(r, 150));
 
-    // Assert Probe A invariants:
-    // - Editor buffer equals disk content
-    // - isDirty is false once matching
-    // - saveStatus is truthfully 'saved'
     const diskText = await storage.readText('NoteA.md');
     expect(diskText).toBe('# Note A - Version 2 (Typed during save)');
     expect(tab.content).toBe(diskText);
@@ -165,8 +161,18 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     const snapB = await safeWriter.safeSave('Characters/Kaelen.md', '# Kaelen Note');
 
     let activeTabPath: VaultPath = 'Welcome.md';
-    let tabA = { path: 'Welcome.md', content: '# Welcome Note - Edited', isDirty: true, initialSnapshot: snapA.snapshot };
-    let tabB = { path: 'Characters/Kaelen.md', content: '# Kaelen Note - Typed in B', isDirty: true, initialSnapshot: snapB.snapshot };
+    const tabA = {
+      path: 'Welcome.md',
+      content: '# Welcome Note - Edited',
+      isDirty: true,
+      initialSnapshot: snapA.snapshot,
+    };
+    const tabB = {
+      path: 'Characters/Kaelen.md',
+      content: '# Kaelen Note - Typed in B',
+      isDirty: true,
+      initialSnapshot: snapB.snapshot,
+    };
 
     let parsedDoc: any = null;
     let backlinks: any[] = [];
@@ -213,10 +219,6 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     // 3. Await Note A save completion
     await savePromiseA;
 
-    // Assert Probe B invariants:
-    // - Active parsedDoc is still Kaelen.md (not clobbered by Welcome.md)
-    // - Backlinks for Kaelen.md intact
-    // - saveStatus is still 'modified' for dirty tab B
     expect(parsedDoc.path).toBe('Characters/Kaelen.md');
     expect(activeTabPath).toBe('Characters/Kaelen.md');
     expect(tabB.isDirty).toBe(true);
@@ -226,9 +228,12 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
   it('Probe D: Typing during property mutation preserves human text and surfaces conflict', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
-    const snap = await safeWriter.safeSave('NoteProps.md', '---\nstatus: draft\n---\n# Note Props\nInitial text.');
+    const snap = await safeWriter.safeSave(
+      'NoteProps.md',
+      '---\nstatus: draft\n---\n# Note Props\nInitial text.'
+    );
 
-    let tab = {
+    const tab = {
       path: 'NoteProps.md',
       content: '---\nstatus: draft\n---\n# Note Props\nInitial text.',
       isDirty: false,
@@ -239,15 +244,16 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     const mutateProperty = async (key: string, value: string) => {
       const preEditContent = tab.content;
       const parsed = { properties: { status: 'draft' } };
-      const updated = updateDocumentFrontmatter(preEditContent, { ...parsed.properties, [key]: value });
+      const updated = updateDocumentFrontmatter(preEditContent, {
+        ...parsed.properties,
+        [key]: value,
+      });
 
       const saveRes = await safeWriter.safeSave('NoteProps.md', updated, {
         expectedVersion: tab.initialSnapshot.version,
       });
 
-      // Post-await commit check (F3)
       if (tab.content !== preEditContent) {
-        // User typed while save was in-flight! Preserve human text, mark dirty, surface conflict
         tab.isDirty = true;
         tab.initialSnapshot = saveRes.snapshot;
         conflictData = { path: 'NoteProps.md', diskContent: updated };
@@ -259,21 +265,15 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
       tab.initialSnapshot = saveRes.snapshot;
     };
 
-    // 1. Start slow property mutation
     const propPromise = mutateProperty('status', 'published');
 
-    // 2. Human types into buffer at t=20ms
     await new Promise((r) => setTimeout(r, 20));
-    tab.content = '---\nstatus: draft\n---\n# Note Props\nInitial text.\nHuman typed this important paragraph!';
+    tab.content =
+      '---\nstatus: draft\n---\n# Note Props\nInitial text.\nHuman typed this important paragraph!';
     tab.isDirty = true;
 
-    // 3. Await property update completion
     await propPromise;
 
-    // Assert Probe D invariants:
-    // - Human typed text is NOT lost from buffer
-    // - Tab remains dirty
-    // - Conflict is surfaced with disk content
     expect(tab.content).toContain('Human typed this important paragraph!');
     expect(tab.isDirty).toBe(true);
     expect(conflictData).not.toBeNull();
@@ -286,7 +286,7 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
     const safeWriter = new SafeWriter(storage);
     const snap = await safeWriter.safeSave('AIProposal.md', '# Original AI Proposal Doc');
 
-    let tab = {
+    const tab = {
       path: 'AIProposal.md',
       content: '# Original AI Proposal Doc',
       isDirty: false,
@@ -305,9 +305,7 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
         expectedVersion: tab.initialSnapshot.version,
       });
 
-      // Post-await commit check (F3)
       if (tab.content !== preEditContent) {
-        // User typed while save was in-flight! Preserve human text
         tab.isDirty = true;
         tab.initialSnapshot = saveRes.snapshot;
         conflictData = { path: 'AIProposal.md', diskContent: proposal.proposedContent };
@@ -320,25 +318,18 @@ describe('Browser Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
       return { success: true };
     };
 
-    // 1. Start slow AI edit apply
     const aiPromise = applyAIEdit({
       originalContent: '# Original AI Proposal Doc',
       proposedContent: '# AI Enhanced Doc Title\n\nAI generated analysis.',
     });
 
-    // 2. Human types during AI save at t=20ms
     await new Promise((r) => setTimeout(r, 20));
-    tab.content = '# Original AI Proposal Doc\n\nHuman edits that should never be silently discarded.';
+    tab.content =
+      '# Original AI Proposal Doc\n\nHuman edits that should never be silently discarded.';
     tab.isDirty = true;
 
-    // 3. Await AI apply completion
     const result = await aiPromise;
 
-    // Assert Probe E invariants:
-    // - AI apply reports conflict / false
-    // - Human text survived intact in buffer
-    // - Tab remains dirty
-    // - Conflict is surfaced with AI proposed text on disk
     expect(result.success).toBe(false);
     expect(tab.content).toContain('Human edits that should never be silently discarded.');
     expect(tab.isDirty).toBe(true);

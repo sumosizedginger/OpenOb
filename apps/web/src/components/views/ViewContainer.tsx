@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { DocumentIndex, ParsedDocument, PropertyFilter, SavedView, VaultPath, ViewConfig, ViewType } from '@okw/core';
+import {
+  DocumentIndex,
+  ParsedDocument,
+  PropertyFilter,
+  SavedView,
+  VaultPath,
+  ViewConfig,
+  ViewType,
+} from '@okw/core';
 import { executePropertyQuery, discoverVaultProperties } from '@okw/index';
 import { TableView } from './TableView.js';
 import { BoardView } from './BoardView.js';
@@ -74,7 +82,9 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
     } catch {}
     return DEFAULT_SAVED_VIEWS;
   });
-  const [currentView, setCurrentView] = useState<ViewConfig>(() => savedViews[0] || DEFAULT_SAVED_VIEWS[0]);
+  const [currentView, setCurrentView] = useState<ViewConfig>(
+    () => savedViews[0] || DEFAULT_SAVED_VIEWS[0]
+  );
   const [documents, setDocuments] = useState<ParsedDocument[]>([]);
   const [availableProps, setAvailableProps] = useState<string[]>([]);
 
@@ -296,7 +306,9 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
-            <span>Filter {(currentView.filters?.length || 0) > 0 && `(${currentView.filters?.length})`}</span>
+            <span>
+              Filter {(currentView.filters?.length || 0) > 0 && `(${currentView.filters?.length})`}
+            </span>
           </button>
 
           {/* Board Group By Selector */}
@@ -341,7 +353,9 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             >
               <span className="text-slate-400 font-medium">{filter.field}</span>
               <span className="text-sky-400">{filter.operator}</span>
-              {filter.value && <span className="font-semibold text-slate-200">"{filter.value}"</span>}
+              {filter.value && (
+                <span className="font-semibold text-slate-200">"{filter.value}"</span>
+              )}
               <button
                 onClick={() => handleRemoveFilter(idx)}
                 className="hover:text-rose-400 ml-0.5"
@@ -428,9 +442,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             }
           />
         )}
-        {currentView.type === 'list' && (
-          <ListView documents={documents} onNavigate={onNavigate} />
-        )}
+        {currentView.type === 'list' && <ListView documents={documents} onNavigate={onNavigate} />}
       </div>
     </div>
   );

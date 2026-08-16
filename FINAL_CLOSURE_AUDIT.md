@@ -10,24 +10,24 @@ Audit pass: read/test/analyze only. No production code modified. Temporary probe
 
 ## 2. Baseline gates
 
-| Gate | Result |
-|---|---|
-| `npm ci` | PASS (0 vulnerabilities) |
-| `npm run typecheck` | PASS |
-| `npm test` | **41 files / 140 tests, all passing, 0 skipped** (21.3 s) |
-| `npm run build` | **PASS (exit 0)** — web bundle 873 kB (gzip 287 kB); >500 kB chunk warning remains |
+| Gate                 | Result                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `npm ci`             | PASS (0 vulnerabilities)                                                                |
+| `npm run typecheck`  | PASS                                                                                    |
+| `npm test`           | **41 files / 140 tests, all passing, 0 skipped** (21.3 s)                               |
+| `npm run build`      | **PASS (exit 0)** — web bundle 873 kB (gzip 287 kB); >500 kB chunk warning remains      |
 | CI steps run locally | npm ci, boundary grep, dangerouslySetInnerHTML grep, typecheck, test, build — all green |
-| CI gaps | NO browser-smoke step; NO scale-benchmark step (T11 not implemented) |
+| CI gaps              | NO browser-smoke step; NO scale-benchmark step (T11 not implemented)                    |
 
 ## 3. Previous P1 reverification
 
-| Prior P1 | Disposition at `5ec3cd0` | Evidence |
-|---|---|---|
-| P1-FS-001 filesystem escape (T1) | **VERIFIED FIXED** | Junction to `vault-evil`: read/write/move/remove/createFolder/stat/exists ALL throw `SecurityError`; sibling untouched; in-vault links still work; write() re-realpaths the parent immediately before rename (TOCTOU window closed for write). Residual: move()/remove() single-validation TOCTOU window (sub-microsecond, needs co-actor inside the vault) — documented, not exaggerated |
-| P1-IDX-001 O(N²) upsert (T3) | **VERIFIED FIXED** | Single upsert @10k: 9.3 s → **68 ms** (100k: 478 ms); batch-loaded child tables (N+1 removed); incremental `refreshAffectedLinks`; mid-transaction sync failure → ROLLBACK with clean recovery |
-| P1-GRAPH-001 graph (T4) | **VERIFIED FIXED** | Graph @10k: 46.3 s → **767 ms**; @100k: **6.9 s with the FULL 999,986-edge set** (no dropped nodes/edges, no sampling); Memory/SQLite parity holds under incremental resolution (PARITY_OK) |
-| P1-CI-001 build red (T5) | **VERIFIED FIXED** | Root `npm run build` now = web workspace build + passes on a fresh `npm ci`; honest build decision (source-only packages, per coordinator review) |
-| P1-UI-001 plugin context (T2) | **VERIFIED FIXED** | Enabled plugins observe live context via accessor (new storage/index/active-note after `updateContext`); permissions remain frozen (immutable snapshot); App.tsx:131-137 keeps context synced; host-level probe + app wiring confirmed |
+| Prior P1                         | Disposition at `5ec3cd0` | Evidence                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1-FS-001 filesystem escape (T1) | **VERIFIED FIXED**       | Junction to `vault-evil`: read/write/move/remove/createFolder/stat/exists ALL throw `SecurityError`; sibling untouched; in-vault links still work; write() re-realpaths the parent immediately before rename (TOCTOU window closed for write). Residual: move()/remove() single-validation TOCTOU window (sub-microsecond, needs co-actor inside the vault) — documented, not exaggerated |
+| P1-IDX-001 O(N²) upsert (T3)     | **VERIFIED FIXED**       | Single upsert @10k: 9.3 s → **68 ms** (100k: 478 ms); batch-loaded child tables (N+1 removed); incremental `refreshAffectedLinks`; mid-transaction sync failure → ROLLBACK with clean recovery                                                                                                                                                                                            |
+| P1-GRAPH-001 graph (T4)          | **VERIFIED FIXED**       | Graph @10k: 46.3 s → **767 ms**; @100k: **6.9 s with the FULL 999,986-edge set** (no dropped nodes/edges, no sampling); Memory/SQLite parity holds under incremental resolution (PARITY_OK)                                                                                                                                                                                               |
+| P1-CI-001 build red (T5)         | **VERIFIED FIXED**       | Root `npm run build` now = web workspace build + passes on a fresh `npm ci`; honest build decision (source-only packages, per coordinator review)                                                                                                                                                                                                                                         |
+| P1-UI-001 plugin context (T2)    | **VERIFIED FIXED**       | Enabled plugins observe live context via accessor (new storage/index/active-note after `updateContext`); permissions remain frozen (immutable snapshot); App.tsx:131-137 keeps context synced; host-level probe + app wiring confirmed                                                                                                                                                    |
 
 **Also reverified:** T6 reconcile correctness (same-size + same-mtime offline change now detected — hash verification), T7 secret crypto (random per-file salt, PBKDF2 600k, AES-GCM, serialized writes, atomic temp+rename, no plaintext leak on wrong passphrase/corrupt record), T8 FSA capability flag (getter added — but see new P3), T9/T10 useVault (partial — see new P1s), T12 same-size test (now genuinely same-size: `'created'→'altered'`, 42-byte assertion + mtime restore), T13 docs (D-005 restated to facade; F-019→F-035; "sandboxed" comments removed).
 
@@ -41,7 +41,7 @@ Three empirically proven silent-edit-loss races in `apps/web/src/hooks/useVault.
 
 ## 5. AI concurrency — FAIL (state level)
 
-- **Probe E (AI apply while typing):** divergence check (line 619) passes against the buffer; user types during the slow `safeSave`; completion unconditionally replaces the buffer with `proposedContent` and sets `isDirty:false`. Result: **human text lost from state AND never on disk, falsely marked clean, no conflict surfaced.** The expectedVersion protection only triggers a `ConflictError` when a *competing save* races — typing alone (2 s autosave debounce) does not. **There is no post-await commit point** in `applyAIProposedEdit` (631-647) or `updateNoteProperty` (555-564). Disk-level protection works when a competing writer exists (external change / autosave racing → conflict surfaced, disk protected — verified); the same-tab typing window is the unprotected hole.
+- **Probe E (AI apply while typing):** divergence check (line 619) passes against the buffer; user types during the slow `safeSave`; completion unconditionally replaces the buffer with `proposedContent` and sets `isDirty:false`. Result: **human text lost from state AND never on disk, falsely marked clean, no conflict surfaced.** The expectedVersion protection only triggers a `ConflictError` when a _competing save_ races — typing alone (2 s autosave debounce) does not. **There is no post-await commit point** in `applyAIProposedEdit` (631-647) or `updateNoteProperty` (555-564). Disk-level protection works when a competing writer exists (external change / autosave racing → conflict surfaced, disk protected — verified); the same-tab typing window is the unprotected hole.
 - Double-apply / rename / delete / external-change paths: protected by version checks + ConflictError catch (non-active and competing-writer paths).
 
 ## 6. Browser FSA — PASS (real browser)
@@ -59,19 +59,19 @@ All seven operations blocked through the vault-evil junction; direct traversal b
 
 ## 9. 1k/10k/50k/100k results
 
-| Metric | 1k | 10k | 50k | 100k |
-|---|---|---|---|---|
-| seed (files on disk) | 206 ms | 6.1 s | 38.2 s | 82.5 s |
-| cold create (scan+parse+rebuild+checkpoint) | 959 ms | 6.37 s | 29.6 s | 60.3 s |
-| search | 12 ms | 89 ms | 368 ms | 850 ms |
-| backlinks | 3 ms | 7 ms | 25 ms | 55 ms |
-| graph (FULL edges) | 53 ms / 6,080 | 767 ms / 97,784 | 3.2 s / 497,784 | 6.9 s / 999,986 |
-| single upsert | 30 ms | 68 ms | 217 ms | 478 ms |
-| shutdown | 4 ms | 22 ms | 120 ms | 311 ms |
-| warm start, 0 changed | 371 ms | 3.9 s | 18.2 s | **46.6 s** |
-| warm start, 1 changed | 354 ms | 3.7 s | 20.0 s | **50.7 s** |
-| warm start, 100 changed | 3.2 s | 11.2 s | 49.6 s | **104.6 s** |
-| heap / db | 23 MB / 3 MB | 132 MB / 30 MB | 131 MB / 152 MB | 181 MB / 307 MB |
+| Metric                                      | 1k            | 10k             | 50k             | 100k            |
+| ------------------------------------------- | ------------- | --------------- | --------------- | --------------- |
+| seed (files on disk)                        | 206 ms        | 6.1 s           | 38.2 s          | 82.5 s          |
+| cold create (scan+parse+rebuild+checkpoint) | 959 ms        | 6.37 s          | 29.6 s          | 60.3 s          |
+| search                                      | 12 ms         | 89 ms           | 368 ms          | 850 ms          |
+| backlinks                                   | 3 ms          | 7 ms            | 25 ms           | 55 ms           |
+| graph (FULL edges)                          | 53 ms / 6,080 | 767 ms / 97,784 | 3.2 s / 497,784 | 6.9 s / 999,986 |
+| single upsert                               | 30 ms         | 68 ms           | 217 ms          | 478 ms          |
+| shutdown                                    | 4 ms          | 22 ms           | 120 ms          | 311 ms          |
+| warm start, 0 changed                       | 371 ms        | 3.9 s           | 18.2 s          | **46.6 s**      |
+| warm start, 1 changed                       | 354 ms        | 3.7 s           | 20.0 s          | **50.7 s**      |
+| warm start, 100 changed                     | 3.2 s         | 11.2 s          | 49.6 s          | **104.6 s**     |
+| heap / db                                   | 23 MB / 3 MB  | 132 MB / 30 MB  | 131 MB / 152 MB | 181 MB / 307 MB |
 
 No catastrophic cliff at any scale. Graph and upsert no longer block large vaults.
 
@@ -80,6 +80,7 @@ No catastrophic cliff at any scale. Graph and upsert no longer block large vault
 Previous behavior (old reconcile): 100k persistent restart ≈ 4.8 s. At HEAD with T6 hash-verifying reconciliation: **46.6 s (0 changed), 50.7 s (1 changed), 104.6 s (100 changed)** — a ~10× warm-start regression, at every scale (10k: 451 ms → 3.9 s). The correctness gain is real (same-size+same-mtime offline changes now detected) and this is derived-state verification, not canonical corruption — but 46 s of startup blocking at 100k is an operational regression.
 
 **Safer optimizations that do NOT reintroduce stale state:**
+
 1. Add `ctime` (and `birthtime` where available) to the persisted stat tuple; skip a file only when (size, mtime, ctime) all match. Userland mtime-restore tools cannot restore ctime, closing the same-size hole without reading most files on NTFS/APFS/ext4 (FAT has no usable ctime — fall back to hash there).
 2. Run reconciliation in the background after the app becomes interactive ("indexing…" indicator) so startup latency is not perceived.
 3. Keep the current behavior as the correctness baseline; do NOT revert to the (size,mtime)-only fast path.
@@ -119,38 +120,47 @@ CI permanently covers typecheck, npm test (140), production build, and both secu
 ## 18. Newly discovered findings
 
 ### P1-CONC-001 — Autosave opportunity permanently consumed by an in-flight save (silent edit loss)
+
 - **Evidence/repro:** probe A — editor v2, disk v1, `saveStatus 'saved'`, isDirty true, no further autosave in 7 s.
 - **Root cause:** `saveActiveNote` early-return on `isSavingRef` (useVault.ts:333) + autosave effect deps `[content, isDirty]` (:528-536) don't re-arm after completion; `setSaveStatus('saved')` fires unconditionally.
 - **Fix:** after a save completes, if the tab is still dirty, re-arm the autosave (or make the early-return defer rather than consume the opportunity); set `saveStatus` only when the saved content matches the buffer.
 
 ### P1-CONC-002 — Tab-switch guard is a self-comparison no-op (falsely-claimed-fixed P2-UI-002)
+
 - **Evidence/repro:** probe B — B's preview/backlinks/status clobbered by A's save completion.
 - **Root cause:** `if (activeTabPath === savingPath)` (useVault.ts:363) — both closure values from the same render.
 - **Fix:** compare against a live ref (e.g., `activeTabPathRef` updated every render) or a per-save generation token.
 
 ### P1-CONC-003 — Property/AI updates unconditionally replace the buffer after the await (no commit point)
+
 - **Evidence/repro:** probes D/E — human keystrokes during the slow save lost from state, `isDirty:false`, no conflict.
 - **Root cause:** `updateNoteProperty` (:555-564) and `applyAIProposedEdit` (:631-647) run the divergence check before the await, then replace content unconditionally.
 - **Fix:** re-check the buffer still equals `originalContent`/the pre-edit content at completion; if it changed, surface a conflict instead of replacing; keep the disk-level expectedVersion protection.
 
 ### P1-SEC-001 — `setSecret` reports success on persistence failure; `getLoadError` never surfaced
+
 - **Evidence/repro:** injected writeFileSync/renameSync failures → setSecret resolves, memory-only secret, fresh store sees null.
 - **Fix:** propagate persistence failures (reject `setSecret` or expose a load/persist error the UI surfaces); surface `getLoadError()` in the settings UI so a corrupt file/wrong passphrase is not shown as "no saved keys".
 
 ### P2-WARM-001 — 100k warm start regressed to 46.6 s (correctness strategy, not a bug)
+
 - See section 10; recommended ctime-gated fast path + background reconciliation.
 
 ### P2-PAGES-001 — Missing vite `base` breaks GitHub Pages subpath deployment
+
 - `vite.config.ts` has no `base`; built assets are absolute. Use a PORTABLE base (relative `./`, or an env/config-driven base supplied at build time) — not a hardcoded `/OpenOb/` — and verify under both `/OpenOb/` and a differently-named subpath (e.g. `/fork-name/`).
 
 ### P3-FSA-001 — `atomicWrites` getter under-reports on Chromium; no UI notice for the non-atomic fallback
+
 - Checks `FileSystemHandle.prototype.move` (undefined in Chromium 1228; move lives on `FileSystemFileHandle.prototype`) → reports false on a fully capable browser (conservative direction; writes still atomic via the subclass method). The no-`move()` fallback direct-write provides NO atomic replacement guarantee. **Scope of the claim:** whether an interrupted/failed fallback write actually truncates canonical content was NOT empirically reproduced in this audit (the fallback is unreachable in Chromium 1228, where `move()` exists on the subclass) — the accurate description is "atomic replacement guarantee unavailable or unverified", not demonstrated corruption. The fallback also only emits a console.warn (no UI notice).
 
 ### P3-IDX-001 / P3-FS-002 — Carry-overs outside T1-T13 scope
+
 - `(doc as any).modifiedAt/size/hash` metadata contract (sqlite-index.ts:264-269, rebuilder.ts:41-42) — data correct in the desktop path, but untyped; plugin/parity callers store 0.
 - Node `write()` snapshot still omits `hasBom` (read() sets it).
 
 ### P3-TEST-001 / P3-CI-001 — No browser tests, no concurrency tests, harness not CI-wired
+
 - The three P1 concurrency races and the FSA flow have no permanent regression coverage; the scale harness and a browser smoke job are absent from CI.
 
 ## 19. Remaining alpha blockers
@@ -200,6 +210,7 @@ KEEP FEATURE FREEZE
 Four P1 findings remain. Scope split: **Web-Alpha P1 blockers** (P1-CONC-001 autosave opportunity consumed, P1-CONC-002 stale-tab state clobber via the no-op guard, P1-CONC-003 property/AI post-await state clobber) are proven browser-facing silent-edit-loss/state-integrity failures; **Deferred Desktop-Runtime P1** (P1-SEC-001 setSecret persistence-failure success) blocks future Electron delivery, not the browser-local Pages product — it must still be fixed in this pass but does not gate web unfreeze.
 
 **Web feature-unfreeze standard (rewritten):** web/local-first feature development may resume only when ALL of the following hold:
+
 - no web-scope P0 and no web-scope P1 exist;
 - P1-CONC-001, P1-CONC-002, P1-CONC-003 each pass independent re-probe (probes A/B/D/E);
 - browser local save passes a real integration test;

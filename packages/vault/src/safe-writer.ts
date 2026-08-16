@@ -44,7 +44,8 @@ export class SafeWriter {
     content: string | Uint8Array,
     options: SafeSaveOptions = {}
   ): Promise<WriteResult> {
-    const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+    const bytes =
+      typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
     const contentHash = computeContentHash(bytes);
 
     // If not forcing, check if content is actually different from current storage version

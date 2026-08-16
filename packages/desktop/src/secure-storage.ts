@@ -30,7 +30,11 @@ export class DesktopSecretStore implements SecretStore {
   private writeLock: Promise<void> = Promise.resolve();
 
   constructor(options: DesktopSecretStoreOptions) {
-    if (!options?.masterSecret || typeof options.masterSecret !== 'string' || options.masterSecret.trim().length === 0) {
+    if (
+      !options?.masterSecret ||
+      typeof options.masterSecret !== 'string' ||
+      options.masterSecret.trim().length === 0
+    ) {
       throw new Error('DesktopSecretStore requires a non-empty masterSecret passphrase');
     }
 
@@ -175,7 +179,9 @@ export class DesktopSecretStore implements SecretStore {
           const decrypted = this.decrypt(encrypted);
           this.memoryCache.set(k, decrypted);
         } catch (err: any) {
-          this.lastLoadError = new Error(`Failed to decrypt secret "${k}": invalid passphrase or corrupted record.`);
+          this.lastLoadError = new Error(
+            `Failed to decrypt secret "${k}": invalid passphrase or corrupted record.`
+          );
         }
       }
     } catch (err: any) {
@@ -211,7 +217,10 @@ export class DesktopSecretStore implements SecretStore {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       } catch {}
-      throw new Error(`Failed to persist secrets to disk at "${this.storagePath}": ${err.message}`);
+      throw new Error(
+        `Failed to persist secrets to disk at "${this.storagePath}": ${err.message}`,
+        { cause: err }
+      );
     }
   }
 }

@@ -38,13 +38,17 @@ export function matchPropertyFilter(doc: ParsedDocument, filter: PropertyFilter)
       if (Array.isArray(val)) {
         return val.some((v) => String(v).toLowerCase().includes(String(target).toLowerCase()));
       }
-      return String(val ?? '').toLowerCase().includes(String(target ?? '').toLowerCase());
+      return String(val ?? '')
+        .toLowerCase()
+        .includes(String(target ?? '').toLowerCase());
 
     case 'not_contains':
       if (Array.isArray(val)) {
         return !val.some((v) => String(v).toLowerCase().includes(String(target).toLowerCase()));
       }
-      return !String(val ?? '').toLowerCase().includes(String(target ?? '').toLowerCase());
+      return !String(val ?? '')
+        .toLowerCase()
+        .includes(String(target ?? '').toLowerCase());
 
     case 'greater_than': {
       if (typeof val === 'number' && typeof target === 'number') {

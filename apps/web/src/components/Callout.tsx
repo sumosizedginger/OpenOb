@@ -60,7 +60,16 @@ export const Callout: React.FC<CalloutProps> = ({ type, title, children }) => {
         margin: '14px 0',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontWeight: 600,
+          fontSize: '13px',
+          marginBottom: '6px',
+        }}
+      >
         {getIcon()}
         <span>{title}</span>
       </div>

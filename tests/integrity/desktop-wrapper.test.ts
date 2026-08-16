@@ -171,7 +171,11 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     const dbPath = path.join(testVaultDir, '.okw', 'index.db');
 
     // 1. Seed note and start runtime with databasePath
-    fs.writeFileSync(path.join(testVaultDir, 'Note1.md'), '# Note One\n\nFirst persistent note.', 'utf8');
+    fs.writeFileSync(
+      path.join(testVaultDir, 'Note1.md'),
+      '# Note One\n\nFirst persistent note.',
+      'utf8'
+    );
     const runtime1 = await DesktopVaultRuntime.create({
       vaultPath: testVaultDir,
       databasePath: dbPath,
@@ -230,7 +234,11 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
 
     // 1. Initial state: FileA and FileB
     fs.writeFileSync(path.join(testVaultDir, 'FileA.md'), '# File A\n\nInitial version A.', 'utf8');
-    fs.writeFileSync(path.join(testVaultDir, 'FileB.md'), '# File B\n\nUniqueKeywordForFileB.', 'utf8');
+    fs.writeFileSync(
+      path.join(testVaultDir, 'FileB.md'),
+      '# File B\n\nUniqueKeywordForFileB.',
+      'utf8'
+    );
 
     const runtime1 = await DesktopVaultRuntime.create({
       vaultPath: testVaultDir,
@@ -244,10 +252,18 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
 
     // 2. Perform offline modifications while app is closed:
     // (a) Modify FileA externally (content and size change)
-    fs.writeFileSync(path.join(testVaultDir, 'FileA.md'), '# File A Modified\n\nExternal offline edit with new content.', 'utf8');
+    fs.writeFileSync(
+      path.join(testVaultDir, 'FileA.md'),
+      '# File A Modified\n\nExternal offline edit with new content.',
+      'utf8'
+    );
 
     // (b) Add FileC externally (new file)
-    fs.writeFileSync(path.join(testVaultDir, 'FileC.md'), '# File C\n\nBrand new file created offline.', 'utf8');
+    fs.writeFileSync(
+      path.join(testVaultDir, 'FileC.md'),
+      '# File C\n\nBrand new file created offline.',
+      'utf8'
+    );
 
     // (c) Delete FileB externally (deleted file)
     fs.unlinkSync(path.join(testVaultDir, 'FileB.md'));
@@ -304,9 +320,11 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     expect(searchResAltered[0].path).toBe('FileC.md');
 
     // 5. Test mtime touch with same content hash (updates stat metadata only)
-    const snapBefore = (await runtime3.index.getSourceManifest()).find((m: any) => m.path === 'FileC.md')!;
+    const snapBefore = (await runtime3.index.getSourceManifest()).find(
+      (m: any) => m.path === 'FileC.md'
+    )!;
     await runtime3.close();
-    
+
     // Update mtime on disk without changing content
     const now = new Date(Date.now() + 5000);
     fs.utimesSync(path.join(testVaultDir, 'FileC.md'), now, now);
@@ -317,7 +335,9 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
       masterSecret: 'test-pass',
     });
 
-    const snapAfter = (await runtime4.index.getSourceManifest()).find((m: any) => m.path === 'FileC.md')!;
+    const snapAfter = (await runtime4.index.getSourceManifest()).find(
+      (m: any) => m.path === 'FileC.md'
+    )!;
     expect(snapAfter.hash).toBe(snapBefore.hash);
     expect(snapAfter.modifiedAt).toBeGreaterThanOrEqual(snapBefore.modifiedAt);
 
@@ -412,6 +432,55 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     const manifest = await runtime2.index.getSourceManifest();
     const raceDoc = (await runtime2.index.getAll()).find((d: any) => d.path === 'Race.md');
     expect(raceDoc?.title).toBe('Newer Watcher Content On Disk');
+
+    await runtime2.close();
+  });
+
+  it('DesktopVaultRuntime C3: failed watcher read does NOT record commit timestamp, allowing background verifier to reconcile index (no false verified)', async () => {
+    const dbPath = path.join(testVaultDir, 'test-c3.sqlite');
+    fs.writeFileSync(path.join(testVaultDir, 'X.md'), '# Initial X1 Content', 'utf8');
+
+    const runtime = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    await runtime.waitForVerification();
+    await runtime.close();
+
+    // Reopen runtime
+    const runtime2 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const origRead = runtime2.storage.read.bind(runtime2.storage);
+    let watcherReadAttempts = 0;
+
+    // Simulate transient failure ONLY on watcher read attempts, but success on verifier read
+    runtime2.storage.read = async (p: string) => {
+      if (p === 'X.md' && watcherReadAttempts < 2) {
+        watcherReadAttempts++;
+        throw new Error('EACCES: Simulated watcher file lock');
+      }
+      return origRead(p);
+    };
+
+    // Update disk to X3
+    fs.writeFileSync(path.join(testVaultDir, 'X.md'), '# Updated X3 Content', 'utf8');
+
+    // Watcher event occurs and fails to read/upsert
+    await (runtime2 as any).handleWatcherEvent({ type: 'modified', path: 'X.md' });
+
+    // Now reconcile with verifier (verifier should NOT stand down because watcher did not commit!)
+    await runtime2.reconcile();
+    await runtime2.waitForVerification();
+
+    // Index must contain the updated X3 content!
+    const xDoc = (await runtime2.index.getAll()).find((d: any) => d.path === 'X.md');
+    expect(xDoc?.title).toBe('Updated X3 Content');
+    expect(runtime2.reconciliationState).toBe('verified');
 
     await runtime2.close();
   });

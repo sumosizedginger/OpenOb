@@ -35,7 +35,11 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   const flushCallout = (keyIndex: number) => {
     if (currentCallout) {
       elements.push(
-        <Callout key={`callout-${keyIndex}`} type={currentCallout.type} title={currentCallout.title}>
+        <Callout
+          key={`callout-${keyIndex}`}
+          type={currentCallout.type}
+          title={currentCallout.title}
+        >
           {currentCallout.lines.map((l, li) => (
             <p key={`cl-${li}`} style={{ margin: '4px 0' }}>
               {renderInlineFormatting(l, onNavigateWikilink)}
@@ -144,17 +148,29 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
     // Headings
     if (line.startsWith('# ')) {
       const headingText = line.slice(2);
-      elements.push(<h1 key={`h1-${i}`} id={`heading-${lineNumber}`}>{headingText}</h1>);
+      elements.push(
+        <h1 key={`h1-${i}`} id={`heading-${lineNumber}`}>
+          {headingText}
+        </h1>
+      );
       continue;
     }
     if (line.startsWith('## ')) {
       const headingText = line.slice(3);
-      elements.push(<h2 key={`h2-${i}`} id={`heading-${lineNumber}`}>{headingText}</h2>);
+      elements.push(
+        <h2 key={`h2-${i}`} id={`heading-${lineNumber}`}>
+          {headingText}
+        </h2>
+      );
       continue;
     }
     if (line.startsWith('### ')) {
       const headingText = line.slice(4);
-      elements.push(<h3 key={`h3-${i}`} id={`heading-${lineNumber}`}>{headingText}</h3>);
+      elements.push(
+        <h3 key={`h3-${i}`} id={`heading-${lineNumber}`}>
+          {headingText}
+        </h3>
+      );
       continue;
     }
 
@@ -189,11 +205,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
 
     // Regular paragraph
     if (line.trim()) {
-      elements.push(
-        <p key={`p-${i}`}>
-          {renderInlineFormatting(line, onNavigateWikilink)}
-        </p>
-      );
+      elements.push(<p key={`p-${i}`}>{renderInlineFormatting(line, onNavigateWikilink)}</p>);
     }
   }
 
@@ -215,7 +227,10 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   );
 };
 
-function renderInlineFormatting(text: string, onNavigate: (target: string) => void): React.ReactNode {
+function renderInlineFormatting(
+  text: string,
+  onNavigate: (target: string) => void
+): React.ReactNode {
   const parts: React.ReactNode[] = [];
   const regex = /(!?)\[\[([^\]\n]+)\]\]/g;
   let lastIndex = 0;
@@ -232,11 +247,7 @@ function renderInlineFormatting(text: string, onNavigate: (target: string) => vo
     const display = pipeIndex !== -1 ? inner.slice(pipeIndex + 1).trim() : target;
 
     parts.push(
-      <span
-        key={`link-${match.index}`}
-        className="wikilink"
-        onClick={() => onNavigate(target)}
-      >
+      <span key={`link-${match.index}`} className="wikilink" onClick={() => onNavigate(target)}>
         {display}
       </span>
     );

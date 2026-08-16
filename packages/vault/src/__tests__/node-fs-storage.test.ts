@@ -21,7 +21,11 @@ describe('NodeFsVaultStorage (Real Filesystem)', () => {
   });
 
   it('performs atomic writes and reads on disk', async () => {
-    const res1 = await vault.write('notes/sample.md', null, '# Real Disk Note\nTesting atomic write.');
+    const res1 = await vault.write(
+      'notes/sample.md',
+      null,
+      '# Real Disk Note\nTesting atomic write.'
+    );
     expect(res1.wasCreated).toBe(true);
 
     const onDisk = await fs.readFile(path.join(tmpDir, 'notes', 'sample.md'), 'utf8');
@@ -38,9 +42,9 @@ describe('NodeFsVaultStorage (Real Filesystem)', () => {
     await fs.writeFile(path.join(tmpDir, 'test.md'), 'External tool edit v2');
 
     // App attempts save with stale res1 version
-    await expect(
-      vault.write('test.md', res1.snapshot.version, 'App content v3')
-    ).rejects.toThrow(ConflictError);
+    await expect(vault.write('test.md', res1.snapshot.version, 'App content v3')).rejects.toThrow(
+      ConflictError
+    );
 
     // Verify external edit was preserved
     const text = await vault.readText('test.md');
@@ -69,10 +73,10 @@ describe('NodeFsVaultStorage (Real Filesystem)', () => {
   it('preserves UTF-8 BOM across read, edit, and save cycle (P2-DL-002)', async () => {
     const bomString = '\uFEFF# Title with BOM\nInitial content';
     const res1 = await vault.write('bom-note.md', null, bomString);
-    
+
     // Check disk bytes
     const diskBytes1 = await fs.readFile(path.join(tmpDir, 'bom-note.md'));
-    expect([...diskBytes1.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF]);
+    expect([...diskBytes1.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
 
     // Read through vault storage
     const snap1 = await vault.read('bom-note.md');
@@ -85,7 +89,7 @@ describe('NodeFsVaultStorage (Real Filesystem)', () => {
 
     // Check disk bytes after save
     const diskBytes2 = await fs.readFile(path.join(tmpDir, 'bom-note.md'));
-    expect([...diskBytes2.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF]);
+    expect([...diskBytes2.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
 
     const snap2 = await vault.read('bom-note.md');
     expect(snap2.hasBom).toBe(true);

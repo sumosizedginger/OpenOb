@@ -22,7 +22,8 @@ describe('Crash Injection & Atomic Write Durability (H-03 / F-002)', () => {
   });
 
   it('ensures original note is 100% untouched when atomic write fails before rename', async () => {
-    const originalContent = '# Important Canonical Document\nDo not corrupt this file under any circumstances.';
+    const originalContent =
+      '# Important Canonical Document\nDo not corrupt this file under any circumstances.';
     const initial = await writer.safeSave('important.md', originalContent);
 
     // Simulate an interrupted write / crash:

@@ -11,9 +11,18 @@ describe('Unicode & Special Characters Torture Test', () => {
     const index = new MemoryDocumentIndex();
 
     // Notes with Unicode paths, titles, and wikilinks
-    await writer.safeSave('📚 Library/哲学/Existentialism 🧠.md', '# 存在主义 🧠\nLink to [[量子力学/Quantum Notes]] and [[Résumé & CV]].');
-    await writer.safeSave('量子力学/Quantum Notes.md', '# Quantum Notes\nLink to [[📚 Library/哲学/Existentialism 🧠|Philosophy]].');
-    await writer.safeSave('Personal/Résumé & CV.md', '# My Résumé\nBack to [[📚 Library/哲学/Existentialism 🧠]].');
+    await writer.safeSave(
+      '📚 Library/哲学/Existentialism 🧠.md',
+      '# 存在主义 🧠\nLink to [[量子力学/Quantum Notes]] and [[Résumé & CV]].'
+    );
+    await writer.safeSave(
+      '量子力学/Quantum Notes.md',
+      '# Quantum Notes\nLink to [[📚 Library/哲学/Existentialism 🧠|Philosophy]].'
+    );
+    await writer.safeSave(
+      'Personal/Résumé & CV.md',
+      '# My Résumé\nBack to [[📚 Library/哲学/Existentialism 🧠]].'
+    );
 
     // Index all
     await rebuildVaultIndex(storage, index, parser);

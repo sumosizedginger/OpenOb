@@ -15,10 +15,7 @@ describe('Search Engine', () => {
       'projects/okw.md',
       '---\ntags: [project/okw, architecture]\naliases: [Open Knowledge Workspace]\n---\n# OKW Architecture\nCore design and safe save specifications.'
     );
-    const doc3 = await parser.parse(
-      'recipes/pizza.md',
-      '# Sourdough Pizza\nBaking instructions.'
-    );
+    const doc3 = await parser.parse('recipes/pizza.md', '# Sourdough Pizza\nBaking instructions.');
 
     await index.upsert(doc1);
     await index.upsert(doc2);

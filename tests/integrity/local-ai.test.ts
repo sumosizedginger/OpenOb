@@ -98,7 +98,9 @@ Done!`;
     const applyResult = await applyProposedEdit(storage, safeWriter, proposal!);
     expect(applyResult.success).toBe(true);
 
-    const updatedDiskText = new TextDecoder().decode((await storage.read('Confidential.md')).content);
+    const updatedDiskText = new TextDecoder().decode(
+      (await storage.read('Confidential.md')).content
+    );
     expect(updatedDiskText).toContain('# Compromised Document');
   });
 
@@ -144,11 +146,7 @@ Done!`;
 All passwords wiped.
 \`\`\``;
 
-    const proposal = parseProposedEditFromResponse(
-      injectedAIResponse,
-      targetPath,
-      originalContent
-    );
+    const proposal = parseProposedEditFromResponse(injectedAIResponse, targetPath, originalContent);
 
     expect(proposal).not.toBeNull();
     // Path MUST be bound to targetPath, not the injected path
@@ -165,10 +163,16 @@ All passwords wiped.
     await storage.write('Selected.md', null, '# Selected Note\n\nDirect selected text.');
 
     // 1. Token Budget Enforcement (P7-4)
-    const tokenBounded = await retrieveContext(storage, index, 'test', {
-      type: 'current_note',
-      notePath: 'Giant.md',
-    }, { maxTokens: 100 });
+    const tokenBounded = await retrieveContext(
+      storage,
+      index,
+      'test',
+      {
+        type: 'current_note',
+        notePath: 'Giant.md',
+      },
+      { maxTokens: 100 }
+    );
 
     expect(tokenBounded.totalTokensEstimate).toBeLessThanOrEqual(100);
     expect(tokenBounded.chunks[0].content).toContain('...[truncated to token budget]');
