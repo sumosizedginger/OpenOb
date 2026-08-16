@@ -289,25 +289,25 @@ export class NodeFsVaultStorage implements VaultStorage {
         );
       }
 
-      // Delete-during-write protection (H2): re-verify canonical target existence / version immediately before rename
+      await this.onBeforeCommit(normPath, diskPath, tmpDiskPath);
+
+      // Delete-during-write, same-stat, and fail-closed protection (H10, H11): re-verify canonical target immediately before rename
       if (expectedVersion !== undefined && expectedVersion !== null) {
         try {
           const currentStat = await fs.stat(diskPath);
+          const currentBytes = await fs.readFile(diskPath);
+          const currentHash = computeContentHash(currentBytes);
           const currentToken = createVersionToken(
-            existingHash!,
+            currentHash,
             currentStat.mtimeMs,
             currentStat.size
           );
-          if (
-            expectedVersion &&
-            typeof expectedVersion === 'object' &&
-            'token' in expectedVersion &&
-            expectedVersion.token &&
-            expectedVersion.token !== currentToken
-          ) {
+          const tokenMatches = expectedVersion.token === currentToken;
+          const hashMatches = expectedVersion.hash === currentHash;
+          if (!tokenMatches && !hashMatches) {
             const actualVersion: FileVersion = {
               token: currentToken,
-              hash: existingHash!,
+              hash: currentHash,
               modifiedAt: currentStat.mtimeMs,
               size: currentStat.size,
             };
@@ -315,7 +315,7 @@ export class NodeFsVaultStorage implements VaultStorage {
               normPath,
               expectedVersion,
               actualVersion,
-              undefined,
+              currentBytes,
               'File version modified externally during write'
             );
           }
@@ -330,13 +330,20 @@ export class NodeFsVaultStorage implements VaultStorage {
               'Cannot write: file was deleted externally during write'
             );
           }
+          // H11: Fail-closed on any unexpected error during recheck (e.g. EACCES, EPERM, EIO)
+          throw new StorageError(
+            `Pre-commit verification failed for "${normPath}": ${err.message}`,
+            err
+          );
         }
       } else if (expectedVersion === null) {
         try {
           const currentStat = await fs.stat(diskPath);
+          const currentBytes = await fs.readFile(diskPath);
+          const currentHash = computeContentHash(currentBytes);
           const actualVersion: FileVersion = {
-            token: createVersionToken('', currentStat.mtimeMs, currentStat.size),
-            hash: '',
+            token: createVersionToken(currentHash, currentStat.mtimeMs, currentStat.size),
+            hash: currentHash,
             modifiedAt: currentStat.mtimeMs,
             size: currentStat.size,
           };
@@ -344,11 +351,20 @@ export class NodeFsVaultStorage implements VaultStorage {
             normPath,
             expectedVersion,
             actualVersion,
-            undefined,
+            currentBytes,
             'Cannot create: file was created externally during write'
           );
         } catch (err: any) {
           if (err instanceof ConflictError) throw err;
+          if (err.code === 'ENOENT') {
+            // Target file does not exist — creation check passes cleanly!
+          } else {
+            // H11: Fail-closed on any unexpected error during recheck
+            throw new StorageError(
+              `Pre-commit creation verification failed for "${normPath}": ${err.message}`,
+              err
+            );
+          }
         }
       }
 
@@ -524,4 +540,14 @@ export class NodeFsVaultStorage implements VaultStorage {
       }
     }
   }
+
+  /**
+   * Internal hook called immediately after writing temporary file and verifying TOCTOU containment,
+   * before the pre-commit recheck and atomic rename. Subclasses and tests can override.
+   */
+  protected async onBeforeCommit(
+    _normPath: VaultPath,
+    _diskPath: string,
+    _tmpDiskPath: string
+  ): Promise<void> {}
 }

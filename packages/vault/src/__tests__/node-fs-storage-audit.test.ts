@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { NodeFsVaultStorage } from '../node-fs-storage.js';
@@ -175,5 +176,79 @@ describe('Promoted Audit Probes: NodeFsVaultStorage + SafeWriter Hostile Scenari
         fs.chmodSync(readOnlySubdir, 0o777);
       } catch {}
     }
+  });
+
+  it('12. H10: same-size and same-mtime external replacement between validation and rename throws ConflictError', async () => {
+    const dir = tmpVault();
+    const canonicalPath = path.join(dir, 'same-stat.md');
+    let v1: any = null;
+
+    class HookedStorage extends NodeFsVaultStorage {
+      public hookEnabled = false;
+
+      protected override async onBeforeCommit(
+        _normPath: string,
+        _diskPath: string,
+        _tmpDiskPath: string
+      ): Promise<void> {
+        if (_normPath === 'same-stat.md' && this.hookEnabled) {
+          // External process replaces file with C (same size + restored mtime)
+          fs.writeFileSync(canonicalPath, 'CCCCDDDD');
+          const origStat = fs.statSync(canonicalPath);
+          fs.utimesSync(canonicalPath, origStat.atime, new Date(v1?.modifiedAt ?? Date.now()));
+        }
+      }
+    }
+
+    const s = new HookedStorage(dir, 'v');
+
+    // Seed file A with 8 bytes: "AAAABBBB"
+    await s.write('same-stat.md', null, 'AAAABBBB');
+    const stat1 = await s.stat('same-stat.md');
+    v1 = stat1!.version;
+
+    s.hookEnabled = true;
+
+    // Attempt to write B ("EEEEFFFF") with expectedVersion v1
+    await expect(s.write('same-stat.md', v1, 'EEEEFFFF')).rejects.toThrow(ConflictError);
+
+    // External content C must be intact and NOT overwritten by EEEEFFFF
+    expect(fs.readFileSync(canonicalPath, 'utf8')).toBe('CCCCDDDD');
+  });
+
+  it('13. H11: fail-closed commit verification aborts on unexpected recheck error without destroying canonical', async () => {
+    const dir = tmpVault();
+    const canonicalPath = path.join(dir, 'fail-closed.md');
+
+    class FailClosedStorage extends NodeFsVaultStorage {
+      public triggerFailClosed = false;
+
+      protected override async onBeforeCommit(
+        _normPath: string,
+        _diskPath: string,
+        _tmpDiskPath: string
+      ): Promise<void> {
+        if (_normPath === 'fail-closed.md' && this.triggerFailClosed) {
+          // Simulate an I/O or filesystem failure by throwing an error during the recheck
+          const err: any = new Error('EACCES: permission denied during recheck');
+          err.code = 'EACCES';
+          throw err;
+        }
+      }
+    }
+
+    const s = new FailClosedStorage(dir, 'v');
+
+    await s.write('fail-closed.md', null, 'CANONICAL_CONTENT');
+    const stat1 = await s.stat('fail-closed.md');
+    const v1 = stat1!.version;
+
+    s.triggerFailClosed = true;
+
+    await expect(s.write('fail-closed.md', v1, 'REPLACEMENT_CONTENT')).rejects.toThrow(
+      StorageError
+    );
+    // Canonical file must NOT have been replaced
+    expect(fs.readFileSync(canonicalPath, 'utf8')).toBe('CANONICAL_CONTENT');
   });
 });

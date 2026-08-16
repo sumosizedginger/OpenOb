@@ -18,6 +18,7 @@ interface Waiter {
 }
 
 interface NoteInternalState extends NoteState {
+  sessionEpoch: number;
   baselineSnapshot: FileSnapshot | null;
   isWriting: boolean;
   isDiscarded: boolean;
@@ -36,6 +37,8 @@ export class NoteWriteCoordinator {
   private storage: VaultStorage;
   private safeWriter: SafeWriter;
   private notes: Map<VaultPath, NoteInternalState> = new Map();
+  private pathEpochMap: Map<VaultPath, number> = new Map();
+  private activePumps: Set<VaultPath> = new Set();
   private listeners: Set<NoteStateListener> = new Set();
 
   constructor(storage: VaultStorage, safeWriter?: SafeWriter) {
@@ -47,6 +50,8 @@ export class NoteWriteCoordinator {
     this.storage = storage;
     this.safeWriter = safeWriter ?? new SafeWriter(storage);
     this.notes.clear();
+    this.pathEpochMap.clear();
+    this.activePumps.clear();
   }
 
   addListener(listener: NoteStateListener): () => void {
@@ -90,8 +95,12 @@ export class NoteWriteCoordinator {
       snapshot.textContent ??
       new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
     const isDirty = diskText !== content;
+    const nextEpoch = (this.pathEpochMap.get(path) || 0) + 1;
+    this.pathEpochMap.set(path, nextEpoch);
+
     const state: NoteInternalState = {
       path,
+      sessionEpoch: nextEpoch,
       bufferContent: content,
       bufferGeneration: 0,
       committedSnapshot: snapshot,
@@ -111,8 +120,11 @@ export class NoteWriteCoordinator {
   setBuffer(path: VaultPath, newContent: string): NoteState {
     let state = this.notes.get(path);
     if (!state) {
+      const nextEpoch = (this.pathEpochMap.get(path) || 0) + 1;
+      this.pathEpochMap.set(path, nextEpoch);
       state = {
         path,
+        sessionEpoch: nextEpoch,
         bufferContent: newContent,
         bufferGeneration: 1,
         committedSnapshot: null,
@@ -142,12 +154,16 @@ export class NoteWriteCoordinator {
    * Remove note from active tabs.
    * If discard is true, marks note as discarded so in-flight/subsequent writes do not commit.
    * Settles all queued waiters immediately to prevent permanent promise leaks (H5).
+   * Note initialization (initNote) bumps the path epoch to protect reopened sessions (H13).
    */
   removeNote(path: VaultPath, discard = false): void {
     const state = this.notes.get(path);
     if (state) {
       if (discard) {
         state.isDiscarded = true;
+      } else {
+        const nextEpoch = (this.pathEpochMap.get(path) || 0) + 1;
+        this.pathEpochMap.set(path, nextEpoch);
       }
       const pending = state.waiters.splice(0, state.waiters.length);
       for (const w of pending) {
@@ -157,12 +173,18 @@ export class NoteWriteCoordinator {
     }
   }
 
-  renameNote(oldPath: VaultPath, newPath: VaultPath): void {
+  renameNote(oldPath: VaultPath, newPath: VaultPath, newSnapshot?: FileSnapshot): void {
     const state = this.notes.get(oldPath);
     if (state) {
       this.notes.delete(oldPath);
+      this.pathEpochMap.delete(oldPath);
       state.path = newPath;
+      if (newSnapshot) {
+        state.committedSnapshot = newSnapshot;
+        state.baselineSnapshot = newSnapshot;
+      }
       this.notes.set(newPath, state);
+      this.pathEpochMap.set(newPath, state.sessionEpoch);
       this.notify(state);
     }
   }
@@ -173,7 +195,8 @@ export class NoteWriteCoordinator {
   async waitForIdle(path: VaultPath): Promise<void> {
     while (true) {
       const state = this.notes.get(path);
-      if (!state || !state.isWriting) break;
+      const hasActivePump = this.activePumps.has(path);
+      if ((!state || !state.isWriting) && !hasActivePump) break;
       await new Promise((r) => setTimeout(r, 20));
     }
   }
@@ -208,142 +231,180 @@ export class NoteWriteCoordinator {
     if (!state || state.isWriting) return;
 
     state.isWriting = true;
+    this.activePumps.add(path);
+    const pumpEpoch = state.sessionEpoch;
 
-    while (true) {
-      const current = this.notes.get(path);
-      if (!current || current.isDiscarded) {
-        if (current && current.isDiscarded) {
-          // H3: If dirty content was written before discard, restore clean baseline
-          if (
-            current.baselineSnapshot &&
-            current.committedSnapshot?.textContent !== current.baselineSnapshot.textContent
-          ) {
-            try {
-              await this.safeWriter.safeSave(
-                current.path,
-                current.baselineSnapshot.textContent || '',
-                { force: true }
-              );
-              current.committedSnapshot = current.baselineSnapshot;
-            } catch {}
+    try {
+      while (true) {
+        // H13: Invalidate and abort immediately if this path was reopened in a newer session
+        if (this.pathEpochMap.get(path) !== pumpEpoch) {
+          break;
+        }
+
+        const current = this.notes.get(path);
+        if (!current || current.isDiscarded) {
+          if (current && current.isDiscarded) {
+            // H14: If dirty content was written before discard, restore clean baseline WITH version protection
+            if (
+              this.pathEpochMap.get(path) === pumpEpoch &&
+              current.baselineSnapshot &&
+              current.committedSnapshot &&
+              current.committedSnapshot.version.hash !== current.baselineSnapshot.version.hash
+            ) {
+              try {
+                const baselineText =
+                  current.baselineSnapshot.textContent ??
+                  new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+                    current.baselineSnapshot.content
+                  );
+                const restoreRes = await this.safeWriter.safeSave(current.path, baselineText, {
+                  expectedVersion: current.committedSnapshot.version,
+                });
+                current.committedSnapshot = restoreRes.snapshot;
+              } catch (err: any) {
+                console.warn(
+                  `[NoteWriteCoordinator] Discard baseline restoration aborted on external conflict for "${current.path}":`,
+                  err
+                );
+              }
+            }
+            const remaining = current.waiters.splice(0, current.waiters.length);
+            for (const w of remaining) {
+              w.resolve(null);
+            }
           }
-          const remaining = current.waiters.splice(0, current.waiters.length);
+          break;
+        }
+
+        const targetPath = current.path;
+        const contentToSave = current.bufferContent;
+        const generationBeingSaved = current.bufferGeneration;
+        const force = current.pendingForce;
+        current.pendingForce = false;
+        const expectedVersion = force ? undefined : current.committedSnapshot?.version || null;
+
+        current.saveStatus = 'saving';
+        this.notify(current);
+
+        let resSnapshot: FileSnapshot | null = null;
+        let error: any = null;
+
+        try {
+          if (this.pathEpochMap.get(path) !== pumpEpoch) {
+            break;
+          }
+
+          const res = await this.safeWriter.safeSave(targetPath, contentToSave, {
+            expectedVersion,
+            force,
+          });
+
+          // Immediately update authoritative disk snapshot
+          current.committedSnapshot = res.snapshot;
+          resSnapshot = res.snapshot;
+
+          const stillDirty = current.bufferContent !== contentToSave;
+          if (!stillDirty) {
+            current.saveStatus = 'saved';
+            current.conflictData = null;
+            // H12: Advance baselineSnapshot to the latest durably committed snapshot ONLY if not discarded!
+            if (!current.isDiscarded) {
+              current.baselineSnapshot = res.snapshot;
+            }
+          } else {
+            current.saveStatus = 'modified';
+          }
+          this.notify(current);
+        } catch (err: any) {
+          error = err;
+          if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
+            current.saveStatus = 'conflict';
+            try {
+              const diskText = await this.storage.readText(targetPath);
+              current.conflictData = { path: targetPath, diskContent: diskText };
+            } catch {
+              current.conflictData = { path: targetPath };
+            }
+          } else {
+            console.error(`[NoteWriteCoordinator] Save error for "${targetPath}":`, err);
+            current.saveStatus = 'modified';
+          }
+          this.notify(current);
+        }
+
+        // C1: Drain ONLY waiters whose requested generation has been durably written
+        const readyWaiters: Waiter[] = [];
+        const remainingWaiters: Waiter[] = [];
+        for (const w of current.waiters) {
+          if (w.targetGeneration <= generationBeingSaved) {
+            readyWaiters.push(w);
+          } else {
+            remainingWaiters.push(w);
+          }
+        }
+        current.waiters = remainingWaiters;
+
+        for (const w of readyWaiters) {
+          if (error) {
+            w.reject(error);
+          } else {
+            w.resolve(current.isDiscarded ? null : resSnapshot);
+          }
+        }
+
+        if (error || current.isDiscarded || this.pathEpochMap.get(path) !== pumpEpoch) {
+          if (current.isDiscarded) {
+            // H14: Restore clean baseline if discarded mid-write WITH version protection
+            if (
+              this.pathEpochMap.get(path) === pumpEpoch &&
+              current.baselineSnapshot &&
+              current.committedSnapshot &&
+              current.committedSnapshot.version.hash !== current.baselineSnapshot.version.hash
+            ) {
+              try {
+                const baselineText =
+                  current.baselineSnapshot.textContent ??
+                  new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+                    current.baselineSnapshot.content
+                  );
+                const restoreRes = await this.safeWriter.safeSave(targetPath, baselineText, {
+                  expectedVersion: current.committedSnapshot.version,
+                });
+                current.committedSnapshot = restoreRes.snapshot;
+              } catch (err: any) {
+                console.warn(
+                  `[NoteWriteCoordinator] Discard baseline restoration aborted on external conflict for "${targetPath}":`,
+                  err
+                );
+              }
+            }
+            const remaining = current.waiters.splice(0, current.waiters.length);
+            for (const w of remaining) {
+              w.resolve(null);
+            }
+          }
+          break;
+        }
+
+        // Check if another iteration is needed (e.g. user typed during save or more waiters arrived)
+        if (
+          current.bufferContent === contentToSave &&
+          !current.pendingForce &&
+          current.waiters.length === 0
+        ) {
+          break;
+        }
+      }
+    } finally {
+      this.activePumps.delete(path);
+      const finalState = this.notes.get(path);
+      if (finalState && finalState.sessionEpoch === pumpEpoch) {
+        finalState.isWriting = false;
+        if (finalState.isDiscarded && finalState.waiters.length > 0) {
+          const remaining = finalState.waiters.splice(0, finalState.waiters.length);
           for (const w of remaining) {
             w.resolve(null);
           }
-        }
-        break;
-      }
-
-      const targetPath = current.path;
-      const contentToSave = current.bufferContent;
-      const generationBeingSaved = current.bufferGeneration;
-      const force = current.pendingForce;
-      current.pendingForce = false;
-      const expectedVersion = force ? undefined : current.committedSnapshot?.version || null;
-
-      current.saveStatus = 'saving';
-      this.notify(current);
-
-      let resSnapshot: FileSnapshot | null = null;
-      let error: any = null;
-
-      try {
-        const res = await this.safeWriter.safeSave(targetPath, contentToSave, {
-          expectedVersion,
-          force,
-        });
-
-        // Immediately update authoritative disk snapshot
-        current.committedSnapshot = res.snapshot;
-        resSnapshot = res.snapshot;
-
-        const stillDirty = current.bufferContent !== contentToSave;
-        if (!stillDirty) {
-          current.saveStatus = 'saved';
-          current.conflictData = null;
-        } else {
-          current.saveStatus = 'modified';
-        }
-        this.notify(current);
-      } catch (err: any) {
-        error = err;
-        if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
-          current.saveStatus = 'conflict';
-          try {
-            const diskText = await this.storage.readText(targetPath);
-            current.conflictData = { path: targetPath, diskContent: diskText };
-          } catch {
-            current.conflictData = { path: targetPath };
-          }
-        } else {
-          console.error(`[NoteWriteCoordinator] Save error for "${targetPath}":`, err);
-          current.saveStatus = 'modified';
-        }
-        this.notify(current);
-      }
-
-      // C1: Drain ONLY waiters whose requested generation has been durably written
-      const readyWaiters: Waiter[] = [];
-      const remainingWaiters: Waiter[] = [];
-      for (const w of current.waiters) {
-        if (w.targetGeneration <= generationBeingSaved) {
-          readyWaiters.push(w);
-        } else {
-          remainingWaiters.push(w);
-        }
-      }
-      current.waiters = remainingWaiters;
-
-      for (const w of readyWaiters) {
-        if (error) {
-          w.reject(error);
-        } else {
-          w.resolve(resSnapshot);
-        }
-      }
-
-      if (error || current.isDiscarded) {
-        if (current.isDiscarded) {
-          // H3: Restore clean baseline if discarded mid-write
-          if (
-            current.baselineSnapshot &&
-            current.committedSnapshot?.textContent !== current.baselineSnapshot.textContent
-          ) {
-            try {
-              await this.safeWriter.safeSave(
-                targetPath,
-                current.baselineSnapshot.textContent || '',
-                { force: true }
-              );
-              current.committedSnapshot = current.baselineSnapshot;
-            } catch {}
-          }
-          const remaining = current.waiters.splice(0, current.waiters.length);
-          for (const w of remaining) {
-            w.resolve(null);
-          }
-        }
-        break;
-      }
-
-      // Check if another iteration is needed (e.g. user typed during save or more waiters arrived)
-      if (
-        current.bufferContent === contentToSave &&
-        !current.pendingForce &&
-        current.waiters.length === 0
-      ) {
-        break;
-      }
-    }
-
-    const finalState = this.notes.get(path);
-    if (finalState) {
-      finalState.isWriting = false;
-      if (finalState.isDiscarded && finalState.waiters.length > 0) {
-        const remaining = finalState.waiters.splice(0, finalState.waiters.length);
-        for (const w of remaining) {
-          w.resolve(null);
         }
       }
     }

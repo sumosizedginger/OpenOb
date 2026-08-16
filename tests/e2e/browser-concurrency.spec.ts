@@ -151,8 +151,8 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('RenamedWelcome');
     await expect(page.locator('.cm-content')).toContainText('Dirty edit before UI rename');
 
-    // Save renamed document
-    await page.keyboard.press('Control+s');
+    // Click modified save status to trigger safe save of renamed document
+    await page.locator('.save-status').click();
     await expect(page.locator('.save-status.saved')).toContainText('Saved');
 
     // Verify EXACTLY one file exists on disk with the dirty edit, and old path does NOT exist
@@ -171,36 +171,80 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     expect(newContent).toContain('Dirty edit before UI rename');
   });
 
-  test('H3 / C5: Discarding dirty tab restores clean baseline on disk and avoids corrupting storage', async ({
+  test('H12 / H3: Discarding dirty tab after prior save restores last durably saved state (B), not initial state (A)', async ({
     page,
   }) => {
-    const baseline = await page.evaluate(
+    // 1. Initial save of state B
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\n- Durably saved baseline B');
+    await page.keyboard.press('Control+s');
+    await expect(page.locator('.save-status.saved')).toContainText('Saved');
+
+    // Verify disk has state B
+    const diskB = await page.evaluate(
       async () => await (window as any).__readStorage('Welcome.md')
     );
+    expect(diskB).toContain('Durably saved baseline B');
 
-    // Type dirty edit
+    // 2. Type dirty modification C
     await page.locator('.cm-content').click();
-    await page.keyboard.type('\n\n- Dirty discarded modification');
+    await page.keyboard.type('\n\n- Dirty discarded modification C');
     await expect(page.locator('.save-status')).toContainText('Modified');
 
-    // Accept dialog confirmation when closing dirty tab
+    // 3. Discard and close tab via UI dialog
     page.on('dialog', (dialog) => dialog.accept());
-
-    // Close the active tab via .tab-close
     await page.locator('.tab-bar .tab.active .tab-close').click();
 
-    await page.waitForTimeout(500);
-
-    // Reopen Welcome.md from FileTree
+    // Reopen Welcome.md
     await page.locator('.file-tree .tree-item:has-text("Welcome")').first().click();
     await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Welcome');
 
-    // Verify disk content was restored / kept at baseline without the dirty modification
+    // 4. Verification: disk must be state B (NOT initial template A, and NOT dirty C)
     const currentDisk = await page.evaluate(
       async () => await (window as any).__readStorage('Welcome.md')
     );
-    expect(currentDisk).toBe(baseline);
-    expect(currentDisk).not.toContain('Dirty discarded modification');
+    expect(currentDisk).toContain('Durably saved baseline B');
+    expect(currentDisk).not.toContain('Dirty discarded modification C');
+  });
+
+  test('H13: Discard followed by immediate reopen and edit/save cleanly persists reopened state (D)', async ({
+    page,
+  }) => {
+    // Set 200ms write latency to test in-flight discard restoration
+    await page.evaluate(() => {
+      (window as any).__setStorageWriteDelay(200);
+    });
+
+    // Type dirty modification
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\n- Discarded in-flight edit');
+    await page.keyboard.press('Control+s');
+    await expect(page.locator('.save-status.saving')).toContainText('Saving...');
+
+    // Accept dialog confirmation and immediately close tab
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.locator('.tab-bar .tab.active .tab-close').click();
+
+    // Remove artificial delay for subsequent operations
+    await page.evaluate(() => {
+      (window as any).__setStorageWriteDelay(0);
+    });
+
+    // Immediately reopen Welcome.md
+    await page.locator('.file-tree .tree-item:has-text("Welcome")').first().click();
+    await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Welcome');
+
+    // Type new edit D and save
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\n- Reopened session edit D');
+    await page.keyboard.press('Control+s');
+    await expect(page.locator('.save-status.saved')).toContainText('Saved');
+
+    // Verify disk content settled as D
+    const currentDisk = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+    expect(currentDisk).toContain('Reopened session edit D');
   });
 
   test('Hostile Preview Security Smoke Test: Renders hostile XSS payloads strictly escaped', async ({

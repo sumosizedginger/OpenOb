@@ -217,6 +217,7 @@ export function useVault() {
   } | null>(null);
 
   const parseDebounceTimerRef = useRef<any>(null);
+  const saveSequenceRef = useRef<number>(0);
   const indexGenerationMapRef = useRef<Map<VaultPath, number>>(new Map());
   const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
   activeTabPathRef.current = activeTabPath;
@@ -328,11 +329,13 @@ export function useVault() {
   const openNote = async (rawPath: VaultPath) => {
     const path = normalizeVaultPath(rawPath);
     if (coordinatorRef.current.getNoteState(path)) {
+      activeTabPathRef.current = path;
       setActiveTabPath(path);
       return;
     }
 
     try {
+      await coordinatorRef.current.waitForIdle(path);
       const snapshot = await storage.read(path);
       const content =
         snapshot.textContent ||
@@ -352,6 +355,7 @@ export function useVault() {
         if (prev.some((t) => t.path === path)) return prev;
         return [...prev, newTab];
       });
+      activeTabPathRef.current = path;
       setActiveTabPath(path);
       setParsedDoc(parsed);
 
@@ -377,7 +381,9 @@ export function useVault() {
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t.path !== path);
       if (activeTabPath === path) {
-        setActiveTabPath(next.length > 0 ? next[next.length - 1].path : null);
+        const nextActive = next.length > 0 ? next[next.length - 1].path : null;
+        activeTabPathRef.current = nextActive;
+        setActiveTabPath(nextActive);
       }
       return next;
     });
@@ -413,18 +419,18 @@ export function useVault() {
     if (!currentPath) return;
 
     try {
+      const currentSeq = ++saveSequenceRef.current;
       const snapshot = await coordinatorRef.current.save(currentPath, force);
       if (snapshot) {
         const savedText =
           snapshot.textContent ??
           new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
-        const savedGen = snapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
 
-        // H4: Serialize derived index upserts against save generation
+        // H15 & H16: Strictly monotonic sequence guard; drops stale out-of-order parses & tombstoned paths
         const lastIndexed = indexGenerationMapRef.current.get(currentPath) || 0;
-        if (savedGen >= lastIndexed) {
-          indexGenerationMapRef.current.set(currentPath, savedGen);
+        if (currentSeq > lastIndexed) {
+          indexGenerationMapRef.current.set(currentPath, currentSeq);
           await index.upsert(parsed);
           if (activeTabPathRef.current === currentPath) {
             setParsedDoc(parsed);
@@ -529,7 +535,12 @@ export function useVault() {
 
       await coordinatorRef.current.waitForIdle(normalizedOld);
       await renameDocument(storage, index, parser, normalizedOld, normalizedNew);
-      coordinatorRef.current.renameNote(normalizedOld, normalizedNew);
+      const newSnap = await storage.read(normalizedNew);
+      coordinatorRef.current.renameNote(normalizedOld, normalizedNew, newSnap);
+
+      // H16: Tombstone old path so delayed old-path upserts are permanently dropped
+      indexGenerationMapRef.current.set(normalizedOld, Infinity);
+      indexGenerationMapRef.current.set(normalizedNew, ++saveSequenceRef.current);
 
       setOpenTabs((prev) =>
         prev.map((t) => {
@@ -545,6 +556,7 @@ export function useVault() {
       );
 
       if (activeTabPathRef.current === normalizedOld || activeTabPathRef.current === oldPath) {
+        activeTabPathRef.current = normalizedNew;
         setActiveTabPath(normalizedNew);
       }
 
@@ -557,6 +569,8 @@ export function useVault() {
 
   const deletePath = async (path: VaultPath) => {
     try {
+      // H16: Tombstone path so any in-flight delayed upsert is permanently dropped
+      indexGenerationMapRef.current.set(path, Infinity);
       await storage.remove(path);
       await index.remove(path);
       coordinatorRef.current.removeNote(path);
@@ -616,18 +630,18 @@ export function useVault() {
 
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
+      const currentSeq = ++saveSequenceRef.current;
       await coordinatorRef.current.updateProperty(path, key, value, parser);
       const state = coordinatorRef.current.getNoteState(path);
       if (state && state.committedSnapshot) {
-        const savedGen = state.committedSnapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(
           path,
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
         const lastIndexed = indexGenerationMapRef.current.get(path) || 0;
-        if (savedGen >= lastIndexed) {
-          indexGenerationMapRef.current.set(path, savedGen);
+        if (currentSeq > lastIndexed) {
+          indexGenerationMapRef.current.set(path, currentSeq);
           await index.upsert(parsed);
           if (activeTabPathRef.current === path) {
             setParsedDoc(parsed);
@@ -659,19 +673,19 @@ export function useVault() {
   const applyAIProposedEdit = async (
     proposal: any
   ): Promise<{ success: boolean; error?: string }> => {
+    const currentSeq = ++saveSequenceRef.current;
     const res = await coordinatorRef.current.applyAI(proposal);
     if (res.success) {
       const state = coordinatorRef.current.getNoteState(proposal.path);
       if (state && state.committedSnapshot) {
-        const savedGen = state.committedSnapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(
           proposal.path,
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
         const lastIndexed = indexGenerationMapRef.current.get(proposal.path) || 0;
-        if (savedGen >= lastIndexed) {
-          indexGenerationMapRef.current.set(proposal.path, savedGen);
+        if (currentSeq > lastIndexed) {
+          indexGenerationMapRef.current.set(proposal.path, currentSeq);
           await index.upsert(parsed);
           if (activeTabPathRef.current === proposal.path) {
             setParsedDoc(parsed);

@@ -234,28 +234,38 @@ describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E via Not
     expect(state?.saveStatus).toBe('modified');
   });
 
-  it('Probe F (H3): Discarding note reverts in-flight dirty save and restores clean baseline on disk', async () => {
+  it('Probe F (H12): Discarding note after prior durable saves restores last durably saved state (B), not initial state (A)', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
     const coordinator = new NoteWriteCoordinator(storage, safeWriter);
 
-    const initSnap = await safeWriter.safeSave('DiscardTest.md', '# Clean Baseline');
-    coordinator.initNote('DiscardTest.md', initSnap.snapshot, '# Clean Baseline');
+    // Initial state A
+    const initSnap = await safeWriter.safeSave('DiscardTest.md', 'A-initial');
+    coordinator.initNote('DiscardTest.md', initSnap.snapshot, 'A-initial');
 
-    // User edits and triggers slow save
-    coordinator.setBuffer('DiscardTest.md', '# Dirty Modification');
-    const savePromise = coordinator.save('DiscardTest.md');
+    // Save B durably
+    coordinator.setBuffer('DiscardTest.md', 'B-saved');
+    const saveB = await coordinator.save('DiscardTest.md');
+    expect(saveB?.textContent).toBe('B-saved');
+    expect(await storage.readText('DiscardTest.md')).toBe('B-saved');
+
+    // Dirty edit C and trigger slow save
+    coordinator.setBuffer('DiscardTest.md', 'C-dirty');
+    const saveC = coordinator.save('DiscardTest.md');
 
     // While save is in-flight, user discards note
     await new Promise((r) => setTimeout(r, 20));
     coordinator.removeNote('DiscardTest.md', true);
 
-    const saveResult = await savePromise;
-    expect(saveResult).toBeNull();
+    const saveCResult = await saveC;
+    expect(saveCResult).toBeNull();
 
-    // Verify disk was restored to baseline and does NOT contain dirty modification
+    // Allow restore pump to complete
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Verify disk was restored to B-saved (last durable save), NOT A-initial
     const finalDisk = await storage.readText('DiscardTest.md');
-    expect(finalDisk).toBe('# Clean Baseline');
+    expect(finalDisk).toBe('B-saved');
   });
 
   it('Probe G (H5): removeNote immediately drains and settles all queued waiters to prevent promise leaks', async () => {
@@ -279,5 +289,73 @@ describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E via Not
     const [res1, res2] = await Promise.all([w1, w2]);
     expect(res1).toBeNull();
     expect(res2).toBeNull();
+  });
+
+  it('Probe H (H13): Discard + immediate reopen race: old discarded pump does not conflict with or overwrite reopened session D', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    // A-initial
+    const initSnap = await safeWriter.safeSave('ReopenRace.md', 'A-initial');
+    coordinator.initNote('ReopenRace.md', initSnap.snapshot, 'A-initial');
+
+    // User starts slow save of C-dirty
+    coordinator.setBuffer('ReopenRace.md', 'C-dirty');
+    const dirtySavePromise = coordinator.save('ReopenRace.md');
+
+    // Mid-write: user discards note
+    await new Promise((r) => setTimeout(r, 20));
+    coordinator.removeNote('ReopenRace.md', true);
+
+    const dirtyRes = await dirtySavePromise;
+    expect(dirtyRes).toBeNull();
+
+    // Wait for in-flight coordinator pump & restoration to settle before reopening
+    await coordinator.waitForIdle('ReopenRace.md');
+
+    // Immediately reopen same path with fresh snapshot
+    const reopenSnap = await storage.read('ReopenRace.md');
+    coordinator.initNote('ReopenRace.md', reopenSnap, 'D-reopened');
+    coordinator.setBuffer('ReopenRace.md', 'D-reopened');
+    const reopenRes = await coordinator.save('ReopenRace.md');
+
+    expect(reopenRes?.textContent).toBe('D-reopened');
+
+    // Allow any background pumps to settle
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Final disk must be D-reopened
+    const finalDisk = await storage.readText('ReopenRace.md');
+    expect(finalDisk).toBe('D-reopened');
+  });
+
+  it('Probe I (H14): External write X during discard restoration is preserved and not overwritten', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    const initSnap = await safeWriter.safeSave('ExtWrite.md', 'A-initial');
+    coordinator.initNote('ExtWrite.md', initSnap.snapshot, 'A-initial');
+
+    // Start slow save of dirty C
+    coordinator.setBuffer('ExtWrite.md', 'C-dirty');
+    const dirtySave = coordinator.save('ExtWrite.md');
+
+    await new Promise((r) => setTimeout(r, 20));
+    coordinator.removeNote('ExtWrite.md', true);
+
+    // Wait for C-dirty to finish writing to disk
+    await dirtySave;
+
+    // External process writes X before baseline restoration can write A
+    await storage.write('ExtWrite.md', undefined, 'X-external-write');
+
+    // Allow coordinator discard restoration pump to attempt restore
+    await new Promise((r) => setTimeout(r, 250));
+
+    // X-external-write must survive and NOT be overwritten by force:true
+    const finalDisk = await storage.readText('ExtWrite.md');
+    expect(finalDisk).toBe('X-external-write');
   });
 });

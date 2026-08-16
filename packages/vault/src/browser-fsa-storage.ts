@@ -8,6 +8,7 @@ import {
   FileVersion,
   normalizeVaultPath,
   NotFoundError,
+  StorageError,
   VaultChangeEvent,
   VaultChangeListener,
   VaultEntry,
@@ -27,6 +28,23 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     public readonly directoryHandle: any,
     public readonly name: string = directoryHandle.name || 'web-vault'
   ) {}
+
+  private async getParentDirHandle(
+    normPath: VaultPath,
+    create = false
+  ): Promise<{ parentDir: any; filename: string }> {
+    const parts = normPath.split('/');
+    const filename = parts.pop()!;
+    let currentDir = this.directoryHandle;
+    for (const part of parts) {
+      try {
+        currentDir = await currentDir.getDirectoryHandle(part, { create });
+      } catch (err: any) {
+        throw new NotFoundError(normPath, `Directory "${part}" not found in path "${normPath}"`);
+      }
+    }
+    return { parentDir: currentDir, filename };
+  }
 
   private async getHandleForPath(
     rawPath: VaultPath,
@@ -220,11 +238,7 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       }
     }
 
-    const { parent: parentDirHandle, name: filename } = await this.getHandleForPath(
-      norm,
-      true,
-      false
-    );
+    const { parentDir: parentDirHandle, filename } = await this.getParentDirHandle(norm, true);
 
     const bytes =
       typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
@@ -243,36 +257,40 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       await writable.close();
 
       if (typeof (tempHandle as any).move === 'function') {
-        // Delete-during-write protection (H2): re-verify canonical target existence before move
+        // Delete-during-write, same-stat, and fail-closed protection (H9, H10, H11)
         if (expectedVersion !== undefined && expectedVersion !== null) {
           try {
-            const checkHandle = await parentDirHandle.getFileHandle(filename);
+            const checkHandle = await parentDirHandle.getFileHandle(filename, { create: false });
             const checkFile = await checkHandle.getFile();
-            const checkToken = createVersionToken(newHash, checkFile.lastModified, checkFile.size);
-            if (
-              expectedVersion &&
-              typeof expectedVersion === 'object' &&
-              'token' in expectedVersion
-            ) {
-              if (expectedVersion.token && expectedVersion.token !== checkToken) {
-                const actualVersion: FileVersion = {
-                  token: checkToken,
-                  hash: newHash,
-                  modifiedAt: checkFile.lastModified,
-                  size: checkFile.size,
-                };
-                throw new ConflictError(
-                  norm,
-                  expectedVersion,
-                  actualVersion,
-                  undefined,
-                  'File version modified externally during write'
-                );
-              }
+            const checkBuffer = new Uint8Array(await checkFile.arrayBuffer());
+            const canonicalHash = computeContentHash(checkBuffer);
+            const currentToken = createVersionToken(
+              canonicalHash,
+              checkFile.lastModified,
+              checkFile.size
+            );
+            const actualVersion: FileVersion = {
+              token: currentToken,
+              hash: canonicalHash,
+              modifiedAt: checkFile.lastModified,
+              size: checkFile.size,
+            };
+
+            const tokenMatches = expectedVersion.token === currentToken;
+            const hashMatches = expectedVersion.hash === canonicalHash;
+
+            if (!tokenMatches && !hashMatches) {
+              throw new ConflictError(
+                norm,
+                expectedVersion,
+                actualVersion,
+                checkBuffer,
+                'File version modified externally during write'
+              );
             }
           } catch (err: any) {
             if (err instanceof ConflictError) throw err;
-            if (err.name === 'NotFoundError') {
+            if (err.name === 'NotFoundError' || err.code === 'ENOENT') {
               throw new ConflictError(
                 norm,
                 expectedVersion,
@@ -281,14 +299,21 @@ export class BrowserFSAVaultStorage implements VaultStorage {
                 'Cannot write: file was deleted externally during write'
               );
             }
+            // H11: Fail-closed on any unexpected error during recheck
+            throw new StorageError(
+              `Pre-commit verification failed for "${norm}": ${err.message}`,
+              err
+            );
           }
         } else if (expectedVersion === null) {
           try {
-            const checkHandle = await parentDirHandle.getFileHandle(filename);
+            const checkHandle = await parentDirHandle.getFileHandle(filename, { create: false });
             const checkFile = await checkHandle.getFile();
+            const checkBuffer = new Uint8Array(await checkFile.arrayBuffer());
+            const canonicalHash = computeContentHash(checkBuffer);
             const actualVersion: FileVersion = {
-              token: createVersionToken('', checkFile.lastModified, checkFile.size),
-              hash: '',
+              token: createVersionToken(canonicalHash, checkFile.lastModified, checkFile.size),
+              hash: canonicalHash,
               modifiedAt: checkFile.lastModified,
               size: checkFile.size,
             };
@@ -296,11 +321,20 @@ export class BrowserFSAVaultStorage implements VaultStorage {
               norm,
               expectedVersion,
               actualVersion,
-              undefined,
+              checkBuffer,
               'Cannot create: file was created externally during write'
             );
           } catch (err: any) {
             if (err instanceof ConflictError) throw err;
+            if (err.name === 'NotFoundError' || err.code === 'ENOENT') {
+              // Target does not exist — creation check passes cleanly!
+            } else {
+              // H11: Fail-closed on any unexpected error during recheck
+              throw new StorageError(
+                `Pre-commit creation verification failed for "${norm}": ${err.message}`,
+                err
+              );
+            }
           }
         }
 
