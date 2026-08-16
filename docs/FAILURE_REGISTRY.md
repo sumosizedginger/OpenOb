@@ -242,3 +242,21 @@ Scenario: Relying on regex-based HTML sanitizers creates a false sense of securi
 
 Mitigation: Delete the regex sanitizer. Render raw HTML in Markdown strictly as plain escaped text via React JSX element rendering. Prohibit `dangerouslySetInnerHTML` in CI. If raw HTML interpretation is ever introduced in the future, require an established parser-based sanitizer with an explicit allowlist.
 
+### F-036 Browser UI In-Flight Autosave Drop & Tab Switch Clobber
+
+Scenario: When saving to slow storage, user edits made during an in-flight save are dropped if autosave ignores locked states; switching tabs during a slow save causes asynchronous save completion handlers to overwrite the newly active tab's preview, backlinks, or save status.
+
+Mitigation: Track live active tab via ref (`activeTabPathRef`), retain `isDirty: true` and re-arm autosave if the buffer diverges from the saved content during in-flight I/O, and guard asynchronous UI state updates with the live tab identity.
+
+### F-037 Startup Hash-Verify Scalability & Two-Stage Reconciliation
+
+Scenario: Verifying cryptographic hashes for 100,000 notes synchronously on application startup stalls time-to-interactive for tens of seconds even when zero files have changed.
+
+Mitigation: Implement two-stage reconciliation: Stage A performs fast synchronous reconciliation of added, deleted, and stat-modified files for immediate interactivity (< 15s at 100k); Stage B runs bounded-concurrency background integrity hash verification without blocking the UI or mutating files.
+
+### F-038 Silent Ephemeral Desktop Secrets on Write Failure
+
+Scenario: Failures in writing or renaming the encrypted desktop secrets file are swallowed or logged to console without rejecting, leaving API secrets in ephemeral memory while failing to persist to disk.
+
+Mitigation: Force `persistToDisk()` to throw on filesystem errors, roll back memory cache on persistence failure, and ensure `setSecret()` and `clearSecret()` promises reject with durable error context.
+

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -124,5 +124,22 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
     expect(await store1.getSecret('k2')).toBe('v2');
     expect(await store1.getSecret('k3')).toBe('v3');
     expect(await store1.getSecret('k4')).toBe('v4');
+  });
+
+  it('6. rejects setSecret on disk write or rename failure and prevents silent ephemeral writes (F4)', async () => {
+    // Create a plain file where a directory is expected to cause filesystem write failure
+    const blockingFile = path.join(tmpDir, 'blocking-file');
+    fs.writeFileSync(blockingFile, 'i-am-a-file');
+    const invalidPath = path.join(blockingFile, 'secrets.json');
+
+    const store = new DesktopSecretStore({ storagePath: invalidPath, masterSecret: 'pass' });
+
+    await expect(store.setSecret('ephemeral_key', 'my-secret-value')).rejects.toThrow();
+    // In-memory cache must be rolled back on failure (not retained ephemerally)
+    expect(await store.getSecret('ephemeral_key')).toBeNull();
+
+    // Verify fresh store instance sees null
+    const freshStore = new DesktopSecretStore({ storagePath: invalidPath, masterSecret: 'pass' });
+    expect(await freshStore.getSecret('ephemeral_key')).toBeNull();
   });
 });

@@ -125,8 +125,10 @@ export class BrowserFSAVaultStorage implements VaultStorage {
 
   get atomicWrites(): boolean {
     return (
-      typeof FileSystemHandle !== 'undefined' &&
-      typeof (FileSystemHandle.prototype as any)?.move === 'function'
+      (typeof FileSystemFileHandle !== 'undefined' &&
+        typeof (FileSystemFileHandle.prototype as any)?.move === 'function') ||
+      (typeof FileSystemHandle !== 'undefined' &&
+        typeof (FileSystemHandle.prototype as any)?.move === 'function')
     );
   }
 

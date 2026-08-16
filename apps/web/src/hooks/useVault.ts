@@ -198,9 +198,15 @@ export function useVault() {
   const [backlinks, setBacklinks] = useState<any[]>([]);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>('saved');
   const [conflictData, setConflictData] = useState<{ path: VaultPath; diskContent?: string } | null>(null);
+  const [saveGeneration, setSaveGeneration] = useState(0);
 
   const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
   const parseDebounceTimerRef = useRef<any>(null);
+  const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
+  activeTabPathRef.current = activeTabPath;
+  const openTabsRef = useRef<OpenTab[]>(openTabs);
+  openTabsRef.current = openTabs;
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
@@ -328,30 +334,45 @@ export function useVault() {
     updateContent(activeTabPath, newContent);
   };
 
-  // Safe Save active note (C-02 in-flight lock)
+  // Safe Save active note (C-02 in-flight lock, F1 & F2 concurrency fixes)
   const saveActiveNote = async (force = false) => {
-    if (!activeTab || !activeTabPath || isSavingRef.current) return;
+    const currentPath = activeTabPathRef.current;
+    if (!currentPath) return;
 
-    const savingPath = activeTabPath;
-    const contentToSave = activeTab.content;
-    const expectedVersion = force ? undefined : activeTab.initialSnapshot?.version || null;
+    const currentTab = openTabsRef.current.find((t) => t.path === currentPath);
+    if (!currentTab) return;
+
+    if (isSavingRef.current) {
+      // Re-arm autosave / pending save opportunity so edits during slow save are never dropped (F1)
+      pendingSaveRef.current = true;
+      return;
+    }
+
+    const savingPath = currentPath;
+    const contentToSave = currentTab.content;
+    const expectedVersion = force ? undefined : currentTab.initialSnapshot?.version || null;
 
     isSavingRef.current = true;
-    setSaveStatus('saving');
+    if (activeTabPathRef.current === savingPath) {
+      setSaveStatus('saving');
+    }
+
     try {
       const res = await safeWriter.safeSave(savingPath, contentToSave, {
         expectedVersion,
         force,
       });
 
-      // Update tab snapshot: clear isDirty ONLY if current content matches saved content (P2-UI-002)
+      let stillDirty = false;
+      // Update tab snapshot: clear isDirty ONLY if current content matches saved content (F1)
       setOpenTabs((prev) =>
         prev.map((tab) => {
           if (tab.path !== savingPath) return tab;
           const isStillMatching = tab.content === contentToSave;
+          stillDirty = !isStillMatching;
           return {
             ...tab,
-            isDirty: !isStillMatching,
+            isDirty: stillDirty,
             initialSnapshot: res.snapshot,
           };
         })
@@ -360,16 +381,30 @@ export function useVault() {
       const parsed = await parser.parse(savingPath, contentToSave, res.snapshot.version.hash);
       await index.upsert(parsed);
 
-      if (activeTabPath === savingPath) {
+      // Guard with live active tab ref to avoid clobbering switched tab preview/backlinks (F2)
+      if (activeTabPathRef.current === savingPath) {
         setParsedDoc(parsed);
         const bl = await index.getBacklinks(savingPath);
-        setBacklinks(bl);
-        setSaveStatus('saved');
-        setConflictData(null);
+        if (activeTabPathRef.current === savingPath) {
+          setBacklinks(bl);
+          if (!stillDirty) {
+            setSaveStatus('saved');
+            setConflictData(null);
+          } else {
+            setSaveStatus('modified');
+          }
+        }
+      }
+
+      // If user typed during save, re-arm autosave via saveGeneration trigger (F1)
+      if (stillDirty) {
+        setSaveGeneration((g) => g + 1);
       }
     } catch (err: any) {
       if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
-        setSaveStatus('conflict');
+        if (activeTabPathRef.current === savingPath) {
+          setSaveStatus('conflict');
+        }
         try {
           const diskText = await storage.readText(savingPath);
           setConflictData({ path: savingPath, diskContent: diskText });
@@ -378,10 +413,17 @@ export function useVault() {
         }
       } else {
         console.error('Save failed:', err);
-        setSaveStatus('modified');
+        if (activeTabPathRef.current === savingPath) {
+          setSaveStatus('modified');
+        }
       }
     } finally {
       isSavingRef.current = false;
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        // Trigger pending save for any in-flight edits (F1)
+        saveActiveNote();
+      }
     }
   };
 
@@ -499,23 +541,36 @@ export function useVault() {
     }
   };
 
-  // Debounced parse & backlink update effect (M-04 fix)
+  // Debounced AST parsing & backlinks computation for active tab
   useEffect(() => {
+    if (!activeTab || !activeTabPath) {
+      setParsedDoc(null);
+      setBacklinks([]);
+      return;
+    }
+
     if (parseDebounceTimerRef.current) {
       clearTimeout(parseDebounceTimerRef.current);
     }
 
-    if (activeTab) {
-      parseDebounceTimerRef.current = setTimeout(async () => {
-        const parsed = await parser.parse(activeTab.path, activeTab.content);
-        setParsedDoc(parsed);
-        const bl = await index.getBacklinks(activeTab.path);
-        setBacklinks(bl);
-      }, 250);
-    } else {
-      setParsedDoc(null);
-      setBacklinks([]);
-    }
+    parseDebounceTimerRef.current = setTimeout(async () => {
+      try {
+        const parsed = await parser.parse(
+          activeTabPath,
+          activeTab.content,
+          activeTab.initialSnapshot?.version.hash || ''
+        );
+        if (activeTabPathRef.current === activeTabPath) {
+          setParsedDoc(parsed);
+          const bl = await index.getBacklinks(activeTabPath);
+          if (activeTabPathRef.current === activeTabPath) {
+            setBacklinks(bl);
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing document:', err);
+      }
+    }, 150);
 
     return () => {
       if (parseDebounceTimerRef.current) {
@@ -524,7 +579,7 @@ export function useVault() {
     };
   }, [activeTabPath, activeTab?.content]);
 
-  // Debounced Autosave Hook (H-02 fix)
+  // Debounced Autosave Hook (H-02 fix, F1 saveGeneration trigger)
   useEffect(() => {
     if (!activeTab || !activeTab.isDirty) return;
 
@@ -533,15 +588,17 @@ export function useVault() {
     }, 2000); // 2-second debounced autosave
 
     return () => clearTimeout(autosaveTimer);
-  }, [activeTab?.content, activeTab?.isDirty]);
+  }, [activeTabPath, activeTab?.content, activeTab?.isDirty, saveGeneration]);
 
-  // Update a note's frontmatter property (Phase 6 Notion views, P6-3 / P6-4)
+  // Update a note's frontmatter property (Phase 6 Notion views, P6-3 / P6-4, F3 post-await check)
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
-      const openTab = openTabs.find((t) => t.path === path);
+      const currentTabs = openTabsRef.current;
+      const openTab = currentTabs.find((t) => t.path === path);
       if (openTab) {
+        const preEditContent = openTab.content;
         const snap = openTab.initialSnapshot || (await storage.read(path));
-        const parsed = await parser.parse(path, openTab.content);
+        const parsed = await parser.parse(path, preEditContent);
         const currentProps = parsed.properties || {};
         const newProps = { ...currentProps };
         if (value === null || value === undefined) {
@@ -549,22 +606,52 @@ export function useVault() {
         } else {
           newProps[key] = value;
         }
-        const updated = updateDocumentFrontmatter(openTab.content, newProps);
+        const updated = updateDocumentFrontmatter(preEditContent, newProps);
 
         // Perform version-checked save first before mutating buffer
         const saveRes = await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
 
-        // Reconcile tab state functionally without in-place array clobber (P2-UI-003)
+        // Post-await commit check: did the user type into this tab while save was in-flight? (F3)
+        let diverged = false;
         setOpenTabs((prev) =>
-          prev.map((t) =>
-            t.path === path
-              ? { ...t, content: updated, isDirty: false, initialSnapshot: saveRes.snapshot }
-              : t
-          )
+          prev.map((t) => {
+            if (t.path !== path) return t;
+            if (t.content !== preEditContent) {
+              diverged = true;
+              // User typed: KEEP user's typed content, mark dirty, update snapshot
+              return {
+                ...t,
+                isDirty: true,
+                initialSnapshot: saveRes.snapshot,
+              };
+            }
+            return {
+              ...t,
+              content: updated,
+              isDirty: false,
+              initialSnapshot: saveRes.snapshot,
+            };
+          })
         );
+
+        if (diverged) {
+          // Surface conflict so user's in-progress typing is not silently clobbered (F3)
+          setConflictData({
+            path,
+            diskContent: updated,
+          });
+          return;
+        }
 
         const newParsed = await parser.parse(path, updated);
         await index.upsert(newParsed);
+        if (activeTabPathRef.current === path) {
+          setParsedDoc(newParsed);
+          const bl = await index.getBacklinks(path);
+          if (activeTabPathRef.current === path) {
+            setBacklinks(bl);
+          }
+        }
         return;
       }
 
@@ -610,16 +697,18 @@ export function useVault() {
     await openNote(targetPath);
   };
 
-  // Safely apply AI proposed edit with divergence detection and buffer/index reconciliation (F-028, P7-1, P7-3)
+  // Safely apply AI proposed edit with divergence detection and buffer/index reconciliation (F-028, P7-1, P7-3, F3)
   const applyAIProposedEdit = async (proposal: any): Promise<{ success: boolean; error?: string }> => {
     try {
-      const openTab = openTabs.find((t) => t.path === proposal.path);
+      const currentTabs = openTabsRef.current;
+      const openTab = currentTabs.find((t) => t.path === proposal.path);
       if (openTab) {
-        // Divergence check: Has the user edited the active tab buffer since proposal generation?
-        if (openTab.content.trim() !== proposal.originalContent.trim()) {
+        const preEditContent = openTab.content;
+        // Pre-check: Has user edited buffer since proposal generation?
+        if (preEditContent.trim() !== proposal.originalContent.trim()) {
           setConflictData({
             path: proposal.path,
-            diskContent: openTab.content,
+            diskContent: preEditContent,
           });
           return {
             success: false,
@@ -632,23 +721,49 @@ export function useVault() {
           expectedVersion: snap.version,
         });
 
-        // Reconcile tab state functionally without in-place array clobber (P2-UI-003)
+        // Post-await commit check: did user type into buffer while save was in flight? (F3)
+        let diverged = false;
         setOpenTabs((prev) =>
-          prev.map((t) =>
-            t.path === proposal.path
-              ? {
-                  ...t,
-                  content: proposal.proposedContent,
-                  isDirty: false,
-                  initialSnapshot: saveRes.snapshot,
-                }
-              : t
-          )
+          prev.map((t) => {
+            if (t.path !== proposal.path) return t;
+            if (t.content !== preEditContent) {
+              diverged = true;
+              // User typed during save: preserve human work, keep dirty, update snapshot
+              return {
+                ...t,
+                isDirty: true,
+                initialSnapshot: saveRes.snapshot,
+              };
+            }
+            return {
+              ...t,
+              content: proposal.proposedContent,
+              isDirty: false,
+              initialSnapshot: saveRes.snapshot,
+            };
+          })
         );
 
-        // Re-parse and upsert to index
+        if (diverged) {
+          setConflictData({
+            path: proposal.path,
+            diskContent: proposal.proposedContent,
+          });
+          return {
+            success: false,
+            error: 'Conflict: Note buffer was modified while AI proposed edit was being applied.',
+          };
+        }
+
         const parsed = await parser.parse(proposal.path, proposal.proposedContent);
         await index.upsert(parsed);
+        if (activeTabPathRef.current === proposal.path) {
+          setParsedDoc(parsed);
+          const bl = await index.getBacklinks(proposal.path);
+          if (activeTabPathRef.current === proposal.path) {
+            setBacklinks(bl);
+          }
+        }
         return { success: true };
       }
 

@@ -60,21 +60,40 @@ export class DesktopSecretStore implements SecretStore {
 
   async setSecret(providerId: string, value: string): Promise<void> {
     const cleanSecret = value.trim();
+    const previousValue = this.memoryCache.get(providerId);
+
     this.writeLock = this.writeLock.then(async () => {
       if (!cleanSecret) {
         this.memoryCache.delete(providerId);
       } else {
         this.memoryCache.set(providerId, cleanSecret);
       }
-      this.persistToDisk();
+      try {
+        this.persistToDisk();
+      } catch (err) {
+        if (previousValue === undefined) {
+          this.memoryCache.delete(providerId);
+        } else {
+          this.memoryCache.set(providerId, previousValue);
+        }
+        throw err;
+      }
     });
     return this.writeLock;
   }
 
   async clearSecret(providerId: string): Promise<void> {
+    const previousValue = this.memoryCache.get(providerId);
     this.writeLock = this.writeLock.then(async () => {
       this.memoryCache.delete(providerId);
-      this.persistToDisk();
+      try {
+        this.persistToDisk();
+      } catch (err) {
+        if (previousValue !== undefined) {
+          this.memoryCache.set(providerId, previousValue);
+        }
+        throw err;
+      }
     });
     return this.writeLock;
   }
@@ -180,11 +199,11 @@ export class DesktopSecretStore implements SecretStore {
     try {
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf8');
       fs.renameSync(tmpPath, this.storagePath);
-    } catch (err) {
+    } catch (err: any) {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       } catch {}
-      console.error('Failed to persist secrets to disk:', err);
+      throw new Error(`Failed to persist secrets to disk at "${this.storagePath}": ${err.message}`);
     }
   }
 }

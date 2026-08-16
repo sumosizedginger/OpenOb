@@ -261,11 +261,11 @@ export class SqliteDocumentIndex implements DocumentIndex {
     doc: ParsedDocument,
     metadata?: { modifiedAt?: number; size?: number }
   ): Promise<void> {
-    const hash = doc.sourceHash || (doc as any).hash || '';
-    const modifiedAt = metadata?.modifiedAt ?? (doc as any).modifiedAt ?? 0;
+    const hash = doc.sourceHash || '';
+    const modifiedAt = metadata?.modifiedAt ?? doc.modifiedAt ?? 0;
     const size =
       metadata?.size ??
-      (doc as any).size ??
+      doc.size ??
       (typeof doc.textContent === 'string' ? new TextEncoder().encode(doc.textContent).length : 0);
     const lineCount = doc.lineCount ?? doc.textContent.split(/\r?\n/).length;
 

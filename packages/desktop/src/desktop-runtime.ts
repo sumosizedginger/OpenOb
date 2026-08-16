@@ -16,6 +16,8 @@ export interface DesktopVaultRuntimeOptions {
   readonly debounceMs?: number;
 }
 
+export type ReconciliationState = 'ready' | 'verifying' | 'degraded' | 'verified';
+
 export class DesktopVaultRuntime {
   readonly vaultPath: string;
   readonly databasePath: string | null;
@@ -27,6 +29,16 @@ export class DesktopVaultRuntime {
   readonly secretStore: DesktopSecretStore | null;
   private unsubscribeWatcher: (() => void) | null = null;
   private checkpointTimer: NodeJS.Timeout | null = null;
+  private _reconciliationState: ReconciliationState = 'ready';
+  private backgroundVerificationPromise: Promise<void> = Promise.resolve();
+
+  get reconciliationState(): ReconciliationState {
+    return this._reconciliationState;
+  }
+
+  async waitForVerification(): Promise<void> {
+    await this.backgroundVerificationPromise;
+  }
 
   private constructor(
     vaultPath: string,
@@ -100,11 +112,12 @@ export class DesktopVaultRuntime {
     if (!loadedFromDb) {
       // 1. Initial full index build from disk
       await rebuildVaultIndex(this.storage, this.index, this.parser);
+      this._reconciliationState = 'verified';
       if (this.databasePath) {
         await this.checkpoint();
       }
     } else {
-      // 2. Reconcile persistent SQLite against canonical Markdown files before starting watcher
+      // 2. Stage A fast synchronous reconciliation before becoming interactive
       await this.reconcile();
     }
 
@@ -113,13 +126,14 @@ export class DesktopVaultRuntime {
       await this.handleWatcherEvent(event);
     });
 
-    // 4. Start filesystem watcher only AFTER startup reconciliation completes
+    // 4. Start filesystem watcher
     await this.watcher.start();
   }
 
   /**
-   * Reconciles SQLite derived index against canonical Markdown files on startup.
-   * Canonical Markdown is authoritative; SQLite never overwrites Markdown.
+   * Two-Stage Reconciliation (F5 / P2-REC-001):
+   * Stage A (Fast sync): detects added/deleted paths & stat changes immediately before app is interactive.
+   * Stage B (Background async): verifies full file hashes in background without blocking UI.
    */
   async reconcile(): Promise<void> {
     const entries = await this.storage.list('', true);
@@ -132,8 +146,9 @@ export class DesktopVaultRuntime {
     const dbMap = new Map(dbManifest.map((m) => [m.path, m]));
 
     let changed = false;
+    const candidatesForVerification: { path: string; manifestHash: string }[] = [];
 
-    // 1. disk paths − DB paths => new files added offline: read, parse, index
+    // 1. disk paths − DB paths => new files added offline: read, parse, index immediately
     for (const [diskPath] of diskMap) {
       if (!dbMap.has(diskPath)) {
         try {
@@ -154,7 +169,7 @@ export class DesktopVaultRuntime {
       }
     }
 
-    // 2. DB paths − disk paths => files deleted offline: remove from index
+    // 2. DB paths − disk paths => files deleted offline: remove from index immediately
     for (const [dbPath] of dbMap) {
       if (!diskMap.has(dbPath)) {
         try {
@@ -166,37 +181,35 @@ export class DesktopVaultRuntime {
       }
     }
 
-    // 3. paths existing in both => verify content hash and stat changes (P2-REC-001)
+    // 3. Obvious stat changes => reconcile immediately during Stage A
     for (const [pathKey, manifest] of dbMap) {
       const diskEntry = diskMap.get(pathKey);
       if (diskEntry) {
         const statChanged =
           diskEntry.size !== manifest.size || diskEntry.modifiedAt !== manifest.modifiedAt;
-        try {
-          // Verify hash to guarantee zero silent change drops on coarse-timestamp systems (FAT/exFAT/rsync -t/Dropbox)
-          const snapshot = await this.storage.read(pathKey);
-          const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
-          const sz = snapshot.size ?? snapshot.version.size ?? 0;
-
-          if (snapshot.version.hash !== manifest.hash) {
-            // Content changed: reparse and upsert
-            const parsed = await this.parser.parse(
-              pathKey,
-              snapshot.content,
-              snapshot.version.hash
-            );
-            await this.index.upsert(parsed, {
-              modifiedAt: mtime,
-              size: sz,
-            });
-            changed = true;
-          } else if (statChanged) {
-            // Content hash unchanged: update stat metadata only
-            await this.index.setSourceMetadata(pathKey, mtime, sz);
-            changed = true;
+        if (statChanged) {
+          try {
+            const snapshot = await this.storage.read(pathKey);
+            const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
+            const sz = snapshot.size ?? snapshot.version.size ?? 0;
+            if (snapshot.version.hash !== manifest.hash) {
+              const parsed = await this.parser.parse(
+                pathKey,
+                snapshot.content,
+                snapshot.version.hash
+              );
+              await this.index.upsert(parsed, { modifiedAt: mtime, size: sz });
+              changed = true;
+            } else {
+              await this.index.setSourceMetadata(pathKey, mtime, sz);
+              changed = true;
+            }
+          } catch (err) {
+            console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
           }
-        } catch (err) {
-          console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
+        } else {
+          // Stat matches => candidate for Stage B background hash verification
+          candidatesForVerification.push({ path: pathKey, manifestHash: manifest.hash });
         }
       }
     }
@@ -204,6 +217,54 @@ export class DesktopVaultRuntime {
     if (changed && this.databasePath) {
       await this.checkpoint();
     }
+
+    this._reconciliationState = 'ready';
+
+    // Start Stage B background integrity verification without blocking interactive startup
+    if (candidatesForVerification.length > 0) {
+      this._reconciliationState = 'verifying';
+      this.backgroundVerificationPromise = this.runBackgroundVerification(candidatesForVerification);
+    } else {
+      this._reconciliationState = 'verified';
+    }
+  }
+
+  private async runBackgroundVerification(
+    candidates: { path: string; manifestHash: string }[]
+  ): Promise<void> {
+    let backgroundChanged = false;
+    const concurrency = 16;
+    let idx = 0;
+
+    const worker = async () => {
+      while (idx < candidates.length) {
+        const current = candidates[idx++];
+        if (!current) break;
+        try {
+          const snapshot = await this.storage.read(current.path);
+          if (snapshot.version.hash !== current.manifestHash) {
+            // Found hash divergence (e.g. same-size + same-mtime change)
+            const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
+            const sz = snapshot.size ?? snapshot.version.size ?? 0;
+            const parsed = await this.parser.parse(
+              current.path,
+              snapshot.content,
+              snapshot.version.hash
+            );
+            await this.index.upsert(parsed, { modifiedAt: mtime, size: sz });
+            backgroundChanged = true;
+          }
+        } catch {}
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(concurrency, candidates.length) }, () => worker());
+    await Promise.all(workers);
+
+    if (backgroundChanged && this.databasePath) {
+      await this.checkpoint();
+    }
+    this._reconciliationState = 'verified';
   }
 
   private async handleWatcherEvent(event: WatcherEvent): Promise<void> {
@@ -284,6 +345,8 @@ export class DesktopVaultRuntime {
   }
 
   async close(): Promise<void> {
+    await this.waitForVerification();
+
     if (this.checkpointTimer) {
       clearTimeout(this.checkpointTimer);
       this.checkpointTimer = null;

@@ -34,6 +34,8 @@ export interface ParsedDocument {
   readonly sourceHash: string;
   readonly lineCount: number;
   readonly wordCount: number;
+  readonly modifiedAt?: number;
+  readonly size?: number;
 }
 
 export interface DocumentParser {

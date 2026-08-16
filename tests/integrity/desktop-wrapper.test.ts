@@ -294,6 +294,11 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
       masterSecret: 'test-pass',
     });
 
+    // Two-stage reconciliation (F5 / P2-REC-001): Stage A completes immediately, Stage B background verifies
+    expect(['ready', 'verifying', 'verified']).toContain(runtime3.reconciliationState);
+    await runtime3.waitForVerification();
+    expect(runtime3.reconciliationState).toBe('verified');
+
     const searchResAltered = await runtime3.index.query({ query: 'altered' });
     expect(searchResAltered.length).toBe(1);
     expect(searchResAltered[0].path).toBe('FileC.md');

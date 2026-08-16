@@ -315,11 +315,14 @@ export class NodeFsVaultStorage implements VaultStorage {
       size: newStats.size,
     };
 
+    const hasBom = bytes.byteLength >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+
     const snapshot: FileSnapshot = {
       path: normPath,
       version: newVersion,
       content: bytes,
-      textContent: typeof content === 'string' ? content : new TextDecoder().decode(bytes),
+      textContent: typeof content === 'string' ? content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+      hasBom,
       modifiedAt: newStats.mtimeMs,
       size: newStats.size,
     };
