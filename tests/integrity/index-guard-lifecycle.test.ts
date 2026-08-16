@@ -32,7 +32,12 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startRebuild2 = rebuildEpoch;
 
     // Start parse for v1 (delayed)
-    const parseV1Promise = new Promise<{ seq: number; startEpoch: number; startRebuild: number; parsed: any }>((resolve) => {
+    const parseV1Promise = new Promise<{
+      seq: number;
+      startEpoch: number;
+      startRebuild: number;
+      parsed: any;
+    }>((resolve) => {
       setTimeout(async () => {
         const p = await parser.parse(path, snap1.textContent!, snap1.version.hash);
         resolve({ seq: seq1, startEpoch: startEpoch1, startRebuild: startRebuild1, parsed: p });
@@ -91,12 +96,18 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     await index.upsert(initialParsed);
 
     // Trigger edit on oldPath with delayed parse
-    const editSnap = (await storage.write(oldPath, snap1.version, '# Old Note v2\n\n[[Target]]')).snapshot;
+    const editSnap = (await storage.write(oldPath, snap1.version, '# Old Note v2\n\n[[Target]]'))
+      .snapshot;
     const editSeq = ++saveSequence;
     const startEpoch = pathEpochMap.get(oldPath) ?? 0;
     const startRebuild = rebuildEpoch;
 
-    const delayedOldParse = new Promise<{ seq: number; startEpoch: number; startRebuild: number; parsed: any }>((resolve) => {
+    const delayedOldParse = new Promise<{
+      seq: number;
+      startEpoch: number;
+      startRebuild: number;
+      parsed: any;
+    }>((resolve) => {
       setTimeout(async () => {
         const p = await parser.parse(oldPath, editSnap.textContent!, editSnap.version.hash);
         resolve({ seq: editSeq, startEpoch, startRebuild, parsed: p });
@@ -157,7 +168,12 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startEpoch = pathEpochMap.get(path) ?? 0;
     const startRebuild = rebuildEpoch;
 
-    const delayedParse = new Promise<{ seq: number; startEpoch: number; startRebuild: number; parsed: any }>((resolve) => {
+    const delayedParse = new Promise<{
+      seq: number;
+      startEpoch: number;
+      startRebuild: number;
+      parsed: any;
+    }>((resolve) => {
       setTimeout(async () => {
         const p = await parser.parse(path, editSnap.textContent!, editSnap.version.hash);
         resolve({ seq: editSeq, startEpoch, startRebuild, parsed: p });
@@ -225,17 +241,14 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startEpoch = pathEpochMap.get(path) ?? 0;
     const startRebuild = rebuildEpoch;
     const editSeq = ++saveSequence;
-    const snapEdit = (await storage.write(path, snapNew.version, '# Foo NEW\n\nnew body edited')).snapshot;
+    const snapEdit = (await storage.write(path, snapNew.version, '# Foo NEW\n\nnew body edited'))
+      .snapshot;
     const pEdit = await parser.parse(path, snapEdit.textContent!, snapEdit.version.hash);
 
     const currentPathEpoch = pathEpochMap.get(path) ?? 0;
     const lastIndexed = pathSeqMap.get(path) ?? 0;
 
-    if (
-      startRebuild === rebuildEpoch &&
-      startEpoch === currentPathEpoch &&
-      editSeq > lastIndexed
-    ) {
+    if (startRebuild === rebuildEpoch && startEpoch === currentPathEpoch && editSeq > lastIndexed) {
       pathSeqMap.set(path, editSeq);
       await index.upsert(pEdit);
     }
@@ -276,7 +289,8 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     // 3. Create BRAND NEW Bar.md
     pathEpochMap.set(path, (pathEpochMap.get(path) ?? 0) + 1);
     pathSeqMap.set(path, 0);
-    const snapNew = (await storage.write(path, null, '# Bar BRAND NEW\n\nbrand new content')).snapshot;
+    const snapNew = (await storage.write(path, null, '# Bar BRAND NEW\n\nbrand new content'))
+      .snapshot;
     const pNew = await parser.parse(path, snapNew.textContent!, snapNew.version.hash);
     await index.upsert(pNew);
 
@@ -284,17 +298,15 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startEpoch = pathEpochMap.get(path) ?? 0;
     const startRebuild = rebuildEpoch;
     const editSeq = ++saveSequence;
-    const snapEdit = (await storage.write(path, snapNew.version, '# Bar BRAND NEW\n\nbrand new content edited')).snapshot;
+    const snapEdit = (
+      await storage.write(path, snapNew.version, '# Bar BRAND NEW\n\nbrand new content edited')
+    ).snapshot;
     const pEdit = await parser.parse(path, snapEdit.textContent!, snapEdit.version.hash);
 
     const currentPathEpoch = pathEpochMap.get(path) ?? 0;
     const lastIndexed = pathSeqMap.get(path) ?? 0;
 
-    if (
-      startRebuild === rebuildEpoch &&
-      startEpoch === currentPathEpoch &&
-      editSeq > lastIndexed
-    ) {
+    if (startRebuild === rebuildEpoch && startEpoch === currentPathEpoch && editSeq > lastIndexed) {
       pathSeqMap.set(path, editSeq);
       await index.upsert(pEdit);
     }
@@ -326,7 +338,12 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startRebuild1 = rebuildEpoch;
     const seq1 = ++saveSequence;
 
-    const delayedV1Parse = new Promise<{ seq: number; startEpoch: number; startRebuild: number; parsed: any }>((resolve) => {
+    const delayedV1Parse = new Promise<{
+      seq: number;
+      startEpoch: number;
+      startRebuild: number;
+      parsed: any;
+    }>((resolve) => {
       setTimeout(async () => {
         const p = await parser.parse(path, snap1.textContent!, snap1.version.hash);
         resolve({ seq: seq1, startEpoch: startEpoch1, startRebuild: startRebuild1, parsed: p });
@@ -386,7 +403,12 @@ describe('Index Guard Concurrency, Path Lifecycle & Rebuild Epochs (H15, H16, R4
     const startRebuild1 = rebuildEpoch;
     const seq1 = ++saveSequence;
 
-    const delayedV1Parse = new Promise<{ seq: number; startEpoch: number; startRebuild: number; parsed: any }>((resolve) => {
+    const delayedV1Parse = new Promise<{
+      seq: number;
+      startEpoch: number;
+      startRebuild: number;
+      parsed: any;
+    }>((resolve) => {
       setTimeout(async () => {
         const p = await parser.parse(path, snap1.textContent!, snap1.version.hash);
         resolve({ seq: seq1, startEpoch: startEpoch1, startRebuild: startRebuild1, parsed: p });

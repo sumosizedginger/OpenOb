@@ -258,9 +258,7 @@ describe('BrowserFSAVaultStorage Hardening (H9, H10, H11, H17, R1)', () => {
     const initialHandle = await rootHandle.getFileHandle('Existing.md', { create: true });
     initialHandle.content = new TextEncoder().encode('EXTERNAL_DATA');
 
-    await expect(
-      storage.write('Existing.md', undefined, 'NEW_DATA')
-    ).rejects.toThrow(StorageError);
+    await expect(storage.write('Existing.md', undefined, 'NEW_DATA')).rejects.toThrow(StorageError);
 
     // External data MUST survive intact
     expect(await storage.readText('Existing.md')).toBe('EXTERNAL_DATA');
@@ -281,9 +279,7 @@ describe('BrowserFSAVaultStorage Hardening (H9, H10, H11, H17, R1)', () => {
     const rootHandle = new MockDirectoryHandle('vault', false);
     const storage = new BrowserFSAVaultStorage(rootHandle, 'test-vault');
 
-    await expect(
-      storage.write('NewFile.md', null, 'NEW_DATA')
-    ).rejects.toThrow(StorageError);
+    await expect(storage.write('NewFile.md', null, 'NEW_DATA')).rejects.toThrow(StorageError);
 
     expect(await storage.exists('NewFile.md')).toBe(false);
   });

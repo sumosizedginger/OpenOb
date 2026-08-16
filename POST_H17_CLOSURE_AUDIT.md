@@ -10,16 +10,16 @@ Audit type: **read / test / analyze only**. No production code modified. Tempora
 
 ## 2. Baseline / gates (replayed at this HEAD)
 
-| Gate | Result |
-| --- | --- |
-| `npx vitest run` | **45 files / 173 tests PASS** (23.6 s) |
-| `npx playwright test` | **8/8 permanent e2e PASS** (H1 rename, H12 discard, H13 reopen, A1-A4, B, hostile preview) |
-| `npm run typecheck` | PASS |
-| `npm run build` | PASS (chunk-size warning only) |
-| `npm run lint` | PASS — 0 errors, 4 pre-existing react-hooks warnings |
-| Chromium under Playwright | **151.0.7922.34** |
+| Gate                      | Result                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `npx vitest run`          | **45 files / 173 tests PASS** (23.6 s)                                                     |
+| `npx playwright test`     | **8/8 permanent e2e PASS** (H1 rename, H12 discard, H13 reopen, A1-A4, B, hostile preview) |
+| `npm run typecheck`       | PASS                                                                                       |
+| `npm run build`           | PASS (chunk-size warning only)                                                             |
+| `npm run lint`            | PASS — 0 errors, 4 pre-existing react-hooks warnings                                       |
+| Chromium under Playwright | **151.0.7922.34**                                                                          |
 
-CI is green, but **6 of the 8 residual classes reproduce** (1, 2, 3, 4, 5, 6). The previous H9-H17 remediation genuinely fixed the earlier H9/H10/H11/H13/H14/H15 defects; the residual failures are *new/uncovered interleavings* the remediation did not close.
+CI is green, but **6 of the 8 residual classes reproduce** (1, 2, 3, 4, 5, 6). The previous H9-H17 remediation genuinely fixed the earlier H9/H10/H11/H13/H14/H15 defects; the residual failures are _new/uncovered interleavings_ the remediation did not close.
 
 ## 3. Results by audit item
 
@@ -29,11 +29,11 @@ CI is green, but **6 of the 8 residual classes reproduce** (1, 2, 3, 4, 5, 6). T
 
 Forced the fallback with a spec-faithful no-move mock (external action fires in the validation→direct-write window; `createWritable()` on a removed handle throws `NotFoundError` per the FSA spec):
 
-| Case | Scenario | Probe result | Required | Verdict |
-| --- | --- | --- | --- | --- |
-| A | update: external writes X after validation | `outcome=committed finalDisk="BBBB"` | X survives; truthful conflict | **P1 — X silently overwritten** |
-| B | delete after validation | `outcome=committed existsAfter=true disk="BBBB"` | deleted note not recreated | **P1 — resurrection** |
-| C | create (`expectedVersion=null`): external creates X after initial check | `outcome=committed existsAfter=true disk="BBBB"` | X survives; OpenOb conflicts | **P1 — X destroyed** |
+| Case | Scenario                                                                | Probe result                                     | Required                      | Verdict                         |
+| ---- | ----------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------- | ------------------------------- |
+| A    | update: external writes X after validation                              | `outcome=committed finalDisk="BBBB"`             | X survives; truthful conflict | **P1 — X silently overwritten** |
+| B    | delete after validation                                                 | `outcome=committed existsAfter=true disk="BBBB"` | deleted note not recreated    | **P1 — resurrection**           |
+| C    | create (`expectedVersion=null`): external creates X after initial check | `outcome=committed existsAfter=true disk="BBBB"` | X survives; OpenOb conflicts  | **P1 — X destroyed**            |
 
 **Reachability in the Chromium under test:** NOT reachable. Real-browser probe in Chromium 151: `FileSystemFileHandle.prototype.move === 'function'`, `showDirectoryPicker === 'function'`, `navigator.storage.getDirectory === 'function'`. Both OPFS handles and user-picked-directory handles are instances of the same `FileSystemFileHandle`/`FileSystemDirectoryHandle` classes in Chromium, so **real user-picked handles DO provide working `move()` in Chromium 151** — OPFS behavior is not being used as proof here; it is prototype-level identity plus the direct `move()` presence check. (The native picker dialog itself cannot be automated headless.) The fallback therefore triggers only in runtimes lacking `move()` (older Safari, embedded webviews) — and in those runtimes it silently destroys data.
 
@@ -46,7 +46,7 @@ Forced the fallback with a spec-faithful no-move mock (external action fires in 
 - `[probe2] after B commit: saveStatus=saving committed=B-durable` — baseline was **not** advanced at the B commit (buffer already contained C).
 - `[probe2] final disk = "A-initial" (required: "B-durable")` — the H14 discard restoration wrote baseline A over the durable B.
 
-**Classification per the audit rule:** "If baseline remains A merely because the editor already contains C, classify P1." → **P1. The last durable save is destroyed on discard whenever the user typed during the previous save.** This is reachable in the real app on every backend (memory/FSA/Node). The permanent e2e H12 test stays green only because it types B, waits for `Saved`, and *then* types C — it never exercises typing-during-save before discard.
+**Classification per the audit rule:** "If baseline remains A merely because the editor already contains C, classify P1." → **P1. The last durable save is destroyed on discard whenever the user typed during the previous save.** This is reachable in the real app on every backend (memory/FSA/Node). The permanent e2e H12 test stays green only because it types B, waits for `Saved`, and _then_ types C — it never exercises typing-during-save before discard.
 
 ### Item 3 — Delete after pre-commit recheck: **external race unclosable; OpenOb's own delete race real**
 
@@ -69,6 +69,7 @@ Forced the fallback with a spec-faithful no-move mock (external action fires in 
 **Code fact:** `useVault.ts:542` (rename old path) and `:573` (delete) set `indexGenerationMapRef.set(path, Infinity)`. Nothing ever resets it: `openNote` (329-368), `createNote` (447-500), `refreshVault` (278-293), external recreation + refresh — none touch the map. The guard `currentSeq > lastIndexed` (431-434, 642-644, 686-688) can never beat `Infinity`. The tombstone also leaks across vault switches (`setStorage` doesn't clear the map).
 
 **Probe (verbatim guard + real index/parser):**
+
 - CASE A (delete → create NEW Foo.md → edit → save): `saveActiveNote dropped=true finalIndex="# Foo NEW\n\nnew body"` — the **edit never re-indexes**; search/backlinks/graph see stale initial content.
 - CASE B (rename → create new Foo.md → edit → save): `dropped=true finalIndex="# Foo BRAND NEW"` — same.
 
@@ -98,17 +99,17 @@ Forced the fallback with a spec-faithful no-move mock (external action fires in 
 
 ### Item 8 — H9-H17 targeted re-verification (not a full re-audit)
 
-| Directive | Verdict | Evidence |
-| --- | --- | --- |
-| H9 FSA correct canonical hash | **VERIFIED COMPLETE** | recheck builds token from current canonical bytes (browser-fsa-storage.ts:261-307); real-OPFS create/update/no-false-conflict pass; mock tests 1-2 pass |
-| H10 Node current hash | **VERIFIED COMPLETE** | recheck re-reads canonical (node-fs-storage.ts:297-301); node-fs-storage-audit test 12 (same-stat) passes |
-| H11 fail closed | **VERIFIED COMPLETE** | StorageError on unexpected recheck error in both adapters (302-306, 331-337, 333-337); audit test 13 passes |
-| H12 baseline semantics | **MOSTLY COMPLETE** | baseline advances after clean-buffer durable writes (307-313); e2e H12 green; **residual P1 = item 2** (typing-during-save leaves baseline stale) |
-| H13 reopen protection | **VERIFIED COMPLETE** | epoch guard (`pathEpochMap` vs `pumpEpoch`) aborts old pump write/restore on reopen; e2e H13 green. Note: an already-started physical write still lands (known C5 limitation) but becomes the reopened baseline rather than clobbering |
-| H14 version-protected restore | **VERIFIED COMPLETE** | restore uses `expectedVersion: committedSnapshot.version`, no `force` (260-262, 370-372) |
-| H15 sequence ordering | **VERIFIED COMPLETE** | strict monotonic `++saveSequenceRef` + strict `>`; index-guard-lifecycle test 1 (equal modifiedAt) passes |
-| H16 lifecycle tombstones | **MOSTLY COMPLETE** | rename/delete resurrection fixed (index-guard-lifecycle tests 2-3 pass); **residual P2 = item 4** (eternal Infinity blocks path reuse) |
-| H17 permanent coverage | **PARTIAL** | committed suite covers H9/H10/H11 (mock, move-only), H12/H13 (e2e), H15/H16 (guard tests); missing all gaps in item 7 |
+| Directive                     | Verdict               | Evidence                                                                                                                                                                                                                               |
+| ----------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H9 FSA correct canonical hash | **VERIFIED COMPLETE** | recheck builds token from current canonical bytes (browser-fsa-storage.ts:261-307); real-OPFS create/update/no-false-conflict pass; mock tests 1-2 pass                                                                                |
+| H10 Node current hash         | **VERIFIED COMPLETE** | recheck re-reads canonical (node-fs-storage.ts:297-301); node-fs-storage-audit test 12 (same-stat) passes                                                                                                                              |
+| H11 fail closed               | **VERIFIED COMPLETE** | StorageError on unexpected recheck error in both adapters (302-306, 331-337, 333-337); audit test 13 passes                                                                                                                            |
+| H12 baseline semantics        | **MOSTLY COMPLETE**   | baseline advances after clean-buffer durable writes (307-313); e2e H12 green; **residual P1 = item 2** (typing-during-save leaves baseline stale)                                                                                      |
+| H13 reopen protection         | **VERIFIED COMPLETE** | epoch guard (`pathEpochMap` vs `pumpEpoch`) aborts old pump write/restore on reopen; e2e H13 green. Note: an already-started physical write still lands (known C5 limitation) but becomes the reopened baseline rather than clobbering |
+| H14 version-protected restore | **VERIFIED COMPLETE** | restore uses `expectedVersion: committedSnapshot.version`, no `force` (260-262, 370-372)                                                                                                                                               |
+| H15 sequence ordering         | **VERIFIED COMPLETE** | strict monotonic `++saveSequenceRef` + strict `>`; index-guard-lifecycle test 1 (equal modifiedAt) passes                                                                                                                              |
+| H16 lifecycle tombstones      | **MOSTLY COMPLETE**   | rename/delete resurrection fixed (index-guard-lifecycle tests 2-3 pass); **residual P2 = item 4** (eternal Infinity blocks path reuse)                                                                                                 |
+| H17 permanent coverage        | **PARTIAL**           | committed suite covers H9/H10/H11 (mock, move-only), H12/H13 (e2e), H15/H16 (guard tests); missing all gaps in item 7                                                                                                                  |
 
 ## 4. Why CI is green despite the residual failures
 
@@ -125,18 +126,18 @@ Every gate passes because the failing interleavings are not exercised:
 
 Criteria check:
 
-| Criterion | Status |
-| --- | --- |
-| no WEB/SHARED P0/P1 remains | **FAIL** — items 1 (P1 fallback), 2 (P1 discard), 3 (P1 own-delete race) |
-| real Browser FSA create/update works | **PASS** (verified in real Chromium 151 + OPFS) |
-| fallback path cannot silently overwrite an external edit | **FAIL** (item 1A) |
-| fallback path cannot resurrect a deletion | **FAIL** (item 1B) |
-| discard always restores the most recent DURABLE state | **FAIL** (item 2) |
-| delete + active save cannot resurrect the note | **FAIL for OpenOb's own delete** (item 3c-3; external-process window documented as unclosable best-effort) |
-| path reuse after delete/rename indexes correctly | **FAIL** (item 4, P2) |
-| full index rebuild cannot be regressed by an older delayed upsert | **FAIL** (item 5, P2) |
-| existing save/property/AI races remain green | **PASS** (173 unit tests green) |
-| CI remains green | **PASS** |
+| Criterion                                                         | Status                                                                                                     |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| no WEB/SHARED P0/P1 remains                                       | **FAIL** — items 1 (P1 fallback), 2 (P1 discard), 3 (P1 own-delete race)                                   |
+| real Browser FSA create/update works                              | **PASS** (verified in real Chromium 151 + OPFS)                                                            |
+| fallback path cannot silently overwrite an external edit          | **FAIL** (item 1A)                                                                                         |
+| fallback path cannot resurrect a deletion                         | **FAIL** (item 1B)                                                                                         |
+| discard always restores the most recent DURABLE state             | **FAIL** (item 2)                                                                                          |
+| delete + active save cannot resurrect the note                    | **FAIL for OpenOb's own delete** (item 3c-3; external-process window documented as unclosable best-effort) |
+| path reuse after delete/rename indexes correctly                  | **FAIL** (item 4, P2)                                                                                      |
+| full index rebuild cannot be regressed by an older delayed upsert | **FAIL** (item 5, P2)                                                                                      |
+| existing save/property/AI races remain green                      | **PASS** (173 unit tests green)                                                                            |
+| CI remains green                                                  | **PASS**                                                                                                   |
 
 The P2/P3 items (4, 5, 6) alone would not block feature work, but items 1-3 are reproducible data-loss paths (silent overwrite, destroyed last-durable-save, resurrected deletion) and the freeze stays until they are remediated. Do not unfreeze on cosmetic grounds; also do not unfreeze with a reproducible data-loss path.
 

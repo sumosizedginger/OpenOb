@@ -48,7 +48,7 @@ Handoff from `POST_H17_CLOSURE_AUDIT.md` (HEAD `dcf822d2d824c84c866b0ebaef4df7fa
 - **Problem:** `deletePath()` (useVault.ts:570-582) calls `storage.remove` without `coordinator.waitForIdle(path)`. If OpenOb's own save is parked at the storage recheck→rename/move commit, the delete lands and the commit then recreates the file.
 - **Empirical evidence:** coordinator + real `NodeFsVaultStorage` probes (removed): with the write parked at the post-recheck rename, production-order delete → `existsAfter=true disk="B-slow-save" coordAbsent=true` (resurrection). Same delete with `waitForIdle → removeNote → storage.remove` → `existsAfter=false`. With the delay seam at write start (the common interleaving) both orders are safe — the defect is the commit-window interleaving, which is real but narrow.
 - **Exact reproduction:** slow save of note (delay seam > 0); park the write at the storage rename; run production `deletePath` (storage.remove + index.remove + removeNote + closeTab + refreshVault); release the write; file reappears with the saved content while coordinator/index are empty.
-- **Root cause:** `deletePath()` is not sequenced against the coordinator pump; the pump cannot cancel an already-started physical write, and `removeNote`'s epoch bump only stops *future* iterations, not the parked commit.
+- **Root cause:** `deletePath()` is not sequenced against the coordinator pump; the pump cannot cancel an already-started physical write, and `removeNote`'s epoch bump only stops _future_ iterations, not the parked commit.
 - **Affected files:** `apps/web/src/hooks/useVault.ts` (`deletePath`; also consider `renameNote` already does waitForIdle at line 536 — delete should match).
 - **Required change:** sequence the delete: `await coordinator.waitForIdle(path)` → `coordinator.removeNote(path)` → `indexGenerationMapRef.set(path, …)` (tombstone) → `storage.remove(path)` → `index.remove(path)` → `closeTab(path, true)` → `refreshVault()`. After `waitForIdle` no physical write is in flight; after `removeNote` no new save can start (`save()` returns null for absent notes), so OpenOb's own delete deterministically wins.
 - **Required regression test:** coordinator+storage test forcing the post-recheck commit window (delegating `fs/promises` mock parking `rename`): in-flight save + `deletePath` production order → resurrection (red on current code); with the sequenced order → file absent, coordinator absent, no resurrection after settle. Also keep the existing delay-seam variant green.
@@ -99,7 +99,7 @@ Handoff from `POST_H17_CLOSURE_AUDIT.md` (HEAD `dcf822d2d824c84c866b0ebaef4df7fa
 - **ID:** R6
 - **Severity:** P3 (TEST plumbing)
 - **Scope:** TEST (`apps/web/src/hooks/useVault.ts:240-248`)
-- **Problem:** each call wraps the *current* `storage.write`, so old delay closures persist and accumulate.
+- **Problem:** each call wraps the _current_ `storage.write`, so old delay closures persist and accumulate.
 - **Empirical evidence:** verbatim-logic probe (removed): `set(200)`→205 ms; then `set(0)`→214 ms (required ~0); `set(100);set(200);set(0)`→318 ms (accumulated 300 ms).
 - **Exact reproduction:** `__setStorageWriteDelay(200)`; `__setStorageWriteDelay(0)`; measure `storage.write` latency — still ~200 ms.
 - **Root cause:** the seam stores the pre-wrapped `write` inside each new closure instead of replacing a single indirection.
@@ -136,7 +136,7 @@ Handoff from `POST_H17_CLOSURE_AUDIT.md` (HEAD `dcf822d2d824c84c866b0ebaef4df7fa
 - **Root cause:** TOCTOU between the last consistency check and the atomic commit; `rename`/`move` create the destination when missing.
 - **Affected files:** `packages/vault/src/node-fs-storage.ts`, `packages/vault/src/browser-fsa-storage.ts` (comment), `FAILURE_REGISTRY.md`/`ARCHITECTURE.md`.
 - **Required change:** record the limitation explicitly (FAILURE_REGISTRY entry + inline comments): external-process delete-during-commit is best-effort, not guaranteed; OpenOb's own writes are fully serialized via the coordinator (R3). If a future milestone needs hard guarantees, specify `renameat2(RENAME_NOREPLACE)`-class or lock-based coordination for the Node backend.
-- **Required regression test:** n/a (the window is inherent; the permanent tests from R3/R7 document the boundary — the *own-delete* variant must pass, the *external* variant is recorded as a known limit).
+- **Required regression test:** n/a (the window is inherent; the permanent tests from R3/R7 document the boundary — the _own-delete_ variant must pass, the _external_ variant is recorded as a known limit).
 - **Acceptance criteria:** the repo's docs and failure registry state the exact residual race and why it is not closable with the current primitives; no doc claims external-process delete-during-write is fully prevented.
 - **Dependencies:** R3 (own-delete closure makes the statement precise).
 - **What NOT to do:** do not claim complete external-race safety; do not attempt fragile post-commit "detect and delete" heuristics that could delete a NEW external file.
