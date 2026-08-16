@@ -8,6 +8,8 @@
     { "path": "./packages/ai" },
     { "path": "./packages/plugin" },
     { "path": "./packages/desktop" },
+    { "path": "./packages/workspace" },
+    { "path": "./apps/gateway" },
     { "path": "./apps/web" }
   ]
 }

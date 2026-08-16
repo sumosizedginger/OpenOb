@@ -129,34 +129,24 @@ Plugins receive a narrowed facade, never direct application internals.
 ```text
 /
   apps/
-    web/
-    gateway/          # optional local BYOK bridge
-    desktop/          # later wrapper only
+    web/              # React browser UI
+    gateway/          # Local HTTP/MCP agent gateway (127.0.0.1 loopback)
+    desktop/          # future wrapper only
 
   packages/
-    core/
-    vault/
-    markdown/
-    index/
-    search/
-    graph/
-    ai/
-    plugin-api/
-    ui/
-    shared/
-
-  plugins/
-    first-party/
+    core/             # Core interfaces, types, errors, path utilities
+    vault/            # VaultStorage, SafeWriter, NoteWriteCoordinator
+    markdown/         # AST parsing, frontmatter, tasks, wikilinks
+    index/            # DocumentIndex, SQLite index, search engine, graph
+    workspace/        # OpenObWorkspace application-service layer & MCP tools
+    ai/               # Local & cloud AI provider abstractions
+    plugin/           # First-party plugin SDK and host
+    desktop/          # Native Node runtime library (watcher, secret store)
 
   tests/
     fixtures/
-    torture-vaults/
-    integration/
+    integrity/
     e2e/
-    security/
-    performance/
-
-  docs/
 ```
 
 Do not split into independent deployable services.
@@ -236,25 +226,31 @@ Database-like views are query/render layers over those properties.
 
 Do not create an opaque canonical block database.
 
-## 10. AI Gateway
+## 10. Workspace Service & External Gateway (`@okw/workspace` & `apps/gateway`)
 
-The optional local gateway is a small Node/TypeScript application.
+The `OpenObWorkspace` application service layer unifies all interaction with the vault across UI adapters, external agents (Hermes, Claude Code, Antigravity, Reasonix), local CLI tools, and MCP adapters.
 
-Responsibilities:
+### Single-Authority Model:
 
-- hold cloud secrets outside hosted browser JavaScript
-- proxy/stream provider requests
-- normalize provider-specific request mechanics where appropriate
-- limit allowed origins
-- expose health/model capabilities
+- **Browser-Direct Mode:** Web UI owns direct filesystem access via `BrowserFSAVaultStorage`.
+- **Gateway-Managed Mode:** Gateway process owns Node filesystem access and coordinates state via `OpenObWorkspace`.
+- External interfaces are strictly forbidden from directly writing to disk, bypassing `SafeWriter`, or manipulating derived SQLite indexes independently.
 
-Non-responsibilities:
+### Gateway Responsibilities:
 
-- user accounts
-- cloud storage
-- canonical application state
-- analytics backend
-- sync service
+- Local loopback binding (`127.0.0.1` strictly; never `0.0.0.0`)
+- Bearer token authentication and client identity tracking
+- Read-only REST API (`/health`, `/api/v1/workspace`, `/api/v1/entries`, `/api/v1/notes/:path`, `/api/v1/search`, backlinks, links, properties, graph-neighbors)
+- Protocol-neutral MCP tool dispatching (`openob_*`)
+- Hold cloud secrets outside hosted browser JavaScript
+- Redact secrets from stdout and logs
+
+### Non-responsibilities:
+
+- User accounts / cloud multi-tenancy
+- Remote cloud storage
+- Bypass of SafeWriter or NoteWriteCoordinator
+- Telemetry service (`sumo-sized-api` is explicitly separate)
 
 ## 11. Desktop Wrapper
 
