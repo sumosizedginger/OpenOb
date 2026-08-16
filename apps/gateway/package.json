@@ -2,14 +2,14 @@
   "name": "@okw/gateway",
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
   "bin": {
     "openob-gateway": "./dist/bin/gateway.js",
     "openob": "./dist/bin/cli.js"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
   },
   "dependencies": {
     "@okw/core": "*",
@@ -19,7 +19,7 @@
     "@okw/workspace": "*"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "node build.js",
     "typecheck": "tsc --noEmit"
   }
 }

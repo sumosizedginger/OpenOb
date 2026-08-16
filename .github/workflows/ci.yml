@@ -48,8 +48,12 @@ jobs:
       - name: Run Test Suites
         run: npm test
 
-      - name: Build Web Production Bundle
+      - name: Build Production Artifacts (Gateway & Web)
         run: npm run build
+
+      - name: Verify Executable Packaging & Binary Invocation
+        run: |
+          node apps/gateway/dist/bin/cli.js --help
 
   e2e:
     name: Playwright E2E Browser Concurrency Tests
