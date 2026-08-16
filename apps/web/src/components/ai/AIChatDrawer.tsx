@@ -101,7 +101,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       }
     };
 
-    refreshProviderData();
+    void refreshProviderData();
 
     return () => {
       if (abortControllerRef.current) {
@@ -123,7 +123,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       } catch {}
     };
 
-    initDocs();
+    void initDocs();
     return () => {
       isMounted = false;
     };

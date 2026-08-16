@@ -107,7 +107,7 @@ export const App: React.FC = () => {
       activeNotePath: activeTabPath,
       openNote: async (p) => {
         setMainMode('editor');
-        openNote(p);
+        await openNote(p);
       },
       showNotice: (msg) => {
         alert(msg);
@@ -120,11 +120,11 @@ export const App: React.FC = () => {
     host.registerPlugin(characterBibleManifest, () => new CharacterBiblePlugin());
     host.registerPlugin(manuscriptToolsManifest, () => new ManuscriptToolsPlugin());
 
-    host.enablePlugin(wordCountManifest.id);
-    host.enablePlugin(dailyNotesManifest.id);
-    host.enablePlugin(templatesManifest.id);
-    host.enablePlugin(characterBibleManifest.id);
-    host.enablePlugin(manuscriptToolsManifest.id);
+    void host.enablePlugin(wordCountManifest.id);
+    void host.enablePlugin(dailyNotesManifest.id);
+    void host.enablePlugin(templatesManifest.id);
+    void host.enablePlugin(characterBibleManifest.id);
+    void host.enablePlugin(manuscriptToolsManifest.id);
 
     return host;
   });
@@ -153,7 +153,7 @@ export const App: React.FC = () => {
         setAllTags(tagMap);
       }
     };
-    aggregateTags();
+    void aggregateTags();
     return () => {
       isMounted = false;
     };
@@ -217,7 +217,7 @@ export const App: React.FC = () => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         if (!isInsideEditor) {
           e.preventDefault();
-          saveActiveNote();
+          void saveActiveNote();
         }
       }
     };
@@ -245,11 +245,11 @@ export const App: React.FC = () => {
     const res = index.resolveLink(activeTabPath, target);
     if (res.resolved && res.targetPath) {
       setMainMode('editor');
-      openNote(res.targetPath);
+      void openNote(res.targetPath);
     } else {
       const cleanName = target.split('#')[0].split('|')[0].trim();
       if (confirm(`Note "${cleanName}" does not exist. Would you like to create it?`)) {
-        createNote(cleanName);
+        void createNote(cleanName);
       }
     }
   };
@@ -336,7 +336,7 @@ export const App: React.FC = () => {
           <button
             className="btn-icon"
             title="Open Directory from Disk"
-            onClick={openDirectoryVault}
+            onClick={() => void openDirectoryVault()}
           >
             <FolderOpen size={16} />
           </button>
@@ -441,16 +441,20 @@ export const App: React.FC = () => {
             <div className="sidebar-header">
               <span className="sidebar-title">Files</span>
               <div className="sidebar-header-actions">
-                <button className="btn-icon" title="New Note (Ctrl+N)" onClick={() => createNote()}>
+                <button
+                  className="btn-icon"
+                  title="New Note (Ctrl+N)"
+                  onClick={() => void createNote()}
+                >
                   <FilePlus size={14} />
                 </button>
-                <button className="btn-icon" title="New Folder" onClick={() => createFolder()}>
+                <button className="btn-icon" title="New Folder" onClick={() => void createFolder()}>
                   <FolderPlus size={14} />
                 </button>
                 <button
                   className="btn-icon"
                   title="Refresh & Rebuild Index"
-                  onClick={() => refreshVault()}
+                  onClick={() => void refreshVault()}
                 >
                   <RefreshCw size={14} />
                 </button>
@@ -462,12 +466,12 @@ export const App: React.FC = () => {
               activePath={activeTabPath}
               onSelect={(path) => {
                 setMainMode('editor');
-                openNote(path);
+                void openNote(path);
               }}
-              onCreateNote={createNote}
-              onCreateFolder={createFolder}
-              onRename={renameNote}
-              onDelete={deletePath}
+              onCreateNote={(name) => void createNote(name)}
+              onCreateFolder={(folder) => void createFolder(folder)}
+              onRename={(oldPath, newPath) => void renameNote(oldPath, newPath)}
+              onDelete={(path) => void deletePath(path)}
             />
           </aside>
         )}
@@ -480,13 +484,13 @@ export const App: React.FC = () => {
               refreshKey={activeTab?.initialSnapshot?.version.hash}
               onNavigate={(path) => {
                 setMainMode('editor');
-                openNote(path);
+                void openNote(path);
               }}
-              onUpdateNoteProperty={updateNoteProperty}
+              onUpdateNoteProperty={(path, key, value) => void updateNoteProperty(path, key, value)}
               onCreateNoteWithProperties={(props) => {
                 const title = prompt('Enter note title:');
                 if (title) {
-                  createNoteWithProperties(title, props);
+                  void createNoteWithProperties(title, props);
                 }
               }}
             />
@@ -495,7 +499,7 @@ export const App: React.FC = () => {
               <TabBar
                 tabs={openTabs}
                 activePath={activeTabPath}
-                onSelect={(path) => openNote(path)}
+                onSelect={(path) => void openNote(path)}
                 onClose={(path) => closeTab(path)}
               />
 
@@ -508,7 +512,7 @@ export const App: React.FC = () => {
                           key={activeTab.path}
                           content={activeTab.content}
                           onChange={(val) => updateContent(activeTab.path, val)}
-                          onSave={() => saveActiveNote()}
+                          onSave={() => void saveActiveNote()}
                           onCommandPalette={() => setIsCommandPaletteOpen(true)}
                           onNavigateWikilink={handleNavigateWikilink}
                         />
@@ -537,7 +541,7 @@ export const App: React.FC = () => {
                   >
                     <BookOpen size={36} style={{ opacity: 0.3 }} />
                     <p>No document open</p>
-                    <button className="btn btn-primary" onClick={() => createNote()}>
+                    <button className="btn btn-primary" onClick={() => void createNote()}>
                       <FilePlus size={13} /> Create Note
                     </button>
                   </div>
@@ -559,9 +563,9 @@ export const App: React.FC = () => {
             index={index}
             onNavigate={(path) => {
               setMainMode('editor');
-              openNote(path);
+              void openNote(path);
             }}
-            onCreateNote={(name) => createNote(name)}
+            onCreateNote={(name) => void createNote(name)}
           />
         )}
 
@@ -577,7 +581,7 @@ export const App: React.FC = () => {
               isLocal={true}
               onNavigate={(path) => {
                 setMainMode('editor');
-                openNote(path);
+                void openNote(path);
               }}
             />
           </div>
@@ -611,7 +615,7 @@ export const App: React.FC = () => {
               activeNoteContent={activeTab?.content}
               onNavigate={(path) => {
                 setMainMode('editor');
-                openNote(path);
+                void openNote(path);
               }}
               onApplyProposedEdit={handleApplyProposedEdit}
               onClose={() => setShowRightPanel(null)}
@@ -626,7 +630,7 @@ export const App: React.FC = () => {
         activePath={activeTabPath}
         parsedDoc={parsedDoc}
         saveStatus={saveStatus}
-        onSave={() => saveActiveNote()}
+        onSave={() => void saveActiveNote()}
         onOpenConflictModal={() => {}}
       />
 
@@ -644,7 +648,7 @@ export const App: React.FC = () => {
               isLocal={false}
               onNavigate={(path) => {
                 setMainMode('editor');
-                openNote(path);
+                void openNote(path);
                 setIsGlobalGraphOpen(false);
               }}
               onClose={() => setIsGlobalGraphOpen(false)}
@@ -660,7 +664,7 @@ export const App: React.FC = () => {
           diskContent={conflictData.diskContent}
           myContent={activeTab.content}
           onReload={resolveConflictReload}
-          onForceOverwrite={() => saveActiveNote(true)}
+          onForceOverwrite={() => void saveActiveNote(true)}
           onClose={dismissConflict}
         />
       )}
@@ -672,11 +676,11 @@ export const App: React.FC = () => {
         onClose={() => setIsCommandPaletteOpen(false)}
         onOpenNote={(path) => {
           setMainMode('editor');
-          openNote(path);
+          void openNote(path);
         }}
-        onCreateNote={() => createNote()}
-        onCreateFolder={() => createFolder()}
-        onRefresh={() => refreshVault()}
+        onCreateNote={() => void createNote()}
+        onCreateFolder={() => void createFolder()}
+        onRefresh={() => void refreshVault()}
       />
 
       {/* Global Search Modal (Ctrl+Shift+F) */}
@@ -689,7 +693,7 @@ export const App: React.FC = () => {
         }}
         onSelectResult={(path: VaultPath) => {
           setMainMode('editor');
-          openNote(path);
+          void openNote(path);
         }}
         index={index}
       />

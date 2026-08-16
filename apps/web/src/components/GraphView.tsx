@@ -105,7 +105,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       }
     };
 
-    fetchGraph();
+    void fetchGraph();
     return () => {
       isMounted = false;
     };

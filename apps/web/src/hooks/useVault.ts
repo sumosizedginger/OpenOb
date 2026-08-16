@@ -217,6 +217,7 @@ export function useVault() {
   } | null>(null);
 
   const parseDebounceTimerRef = useRef<any>(null);
+  const indexGenerationMapRef = useRef<Map<VaultPath, number>>(new Map());
   const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
   activeTabPathRef.current = activeTabPath;
   const openTabsRef = useRef<OpenTab[]>(openTabs);
@@ -224,9 +225,12 @@ export function useVault() {
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
-  // Expose test and introspection hooks on window for deterministic Playwright verification (C7)
+  // Expose test and introspection hooks on window only in DEV/TEST environments (H6)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (
+      typeof window !== 'undefined' &&
+      ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'test')
+    ) {
       (window as any).__vaultStorage = storage;
       (window as any).__coordinator = coordinatorRef.current;
       (window as any).__readStorage = async (p: string) => {
@@ -289,7 +293,7 @@ export function useVault() {
 
   // Seed default vault on mount
   useEffect(() => {
-    (async () => {
+    void (async () => {
       if (storage instanceof MemoryVaultStorage) {
         await storage.seed(DEFAULT_VAULT_SEED);
         await refreshVault(storage);
@@ -414,13 +418,20 @@ export function useVault() {
         const savedText =
           snapshot.textContent ??
           new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
+        const savedGen = snapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
-        await index.upsert(parsed);
-        if (activeTabPathRef.current === currentPath) {
-          setParsedDoc(parsed);
-          const bl = await index.getBacklinks(currentPath);
+
+        // H4: Serialize derived index upserts against save generation
+        const lastIndexed = indexGenerationMapRef.current.get(currentPath) || 0;
+        if (savedGen >= lastIndexed) {
+          indexGenerationMapRef.current.set(currentPath, savedGen);
+          await index.upsert(parsed);
           if (activeTabPathRef.current === currentPath) {
-            setBacklinks(bl);
+            setParsedDoc(parsed);
+            const bl = await index.getBacklinks(currentPath);
+            if (activeTabPathRef.current === currentPath) {
+              setBacklinks(bl);
+            }
           }
         }
       }
@@ -504,32 +515,42 @@ export function useVault() {
     }
   };
 
-  const renameNote = async (oldPath: VaultPath, newPath: VaultPath) => {
+  const renameNote = async (oldPath: VaultPath, rawNewPath: VaultPath) => {
     try {
-      await coordinatorRef.current.waitForIdle(oldPath);
-      await renameDocument(storage, index, parser, oldPath, newPath);
-      coordinatorRef.current.renameNote(oldPath, newPath);
+      const cleanOld = oldPath.trim();
+      const cleanNew = rawNewPath.trim();
+      const normalizedOld = normalizeVaultPath(
+        cleanOld.endsWith('.md') ? cleanOld : `${cleanOld}.md`
+      );
+      const normalizedNew = normalizeVaultPath(
+        cleanNew.endsWith('.md') ? cleanNew : `${cleanNew}.md`
+      );
+      if (normalizedOld === normalizedNew) return;
+
+      await coordinatorRef.current.waitForIdle(normalizedOld);
+      await renameDocument(storage, index, parser, normalizedOld, normalizedNew);
+      coordinatorRef.current.renameNote(normalizedOld, normalizedNew);
 
       setOpenTabs((prev) =>
         prev.map((t) => {
-          if (t.path === oldPath) {
+          if (t.path === normalizedOld || t.path === oldPath) {
             return {
               ...t,
-              path: newPath,
-              title: newPath.replace(/\.md$/, '').split('/').pop() || newPath,
+              path: normalizedNew,
+              title: normalizedNew.replace(/\.md$/, '').split('/').pop() || normalizedNew,
             };
           }
           return t;
         })
       );
 
-      if (activeTabPath === oldPath) {
-        setActiveTabPath(newPath);
+      if (activeTabPathRef.current === normalizedOld || activeTabPathRef.current === oldPath) {
+        setActiveTabPath(normalizedNew);
       }
 
       await refreshVault();
     } catch (err: any) {
-      console.error(`Failed to rename "${oldPath}" to "${newPath}":`, err);
+      console.error(`Failed to rename "${oldPath}" to "${rawNewPath}":`, err);
       alert(`Rename failed: ${err.message || String(err)}`);
     }
   };
@@ -587,7 +608,7 @@ export function useVault() {
     if (!activeTab || !activeTab.isDirty) return;
 
     const autosaveTimer = setTimeout(() => {
-      saveActiveNote();
+      void saveActiveNote();
     }, 2000);
 
     return () => clearTimeout(autosaveTimer);
@@ -598,17 +619,22 @@ export function useVault() {
       await coordinatorRef.current.updateProperty(path, key, value, parser);
       const state = coordinatorRef.current.getNoteState(path);
       if (state && state.committedSnapshot) {
+        const savedGen = state.committedSnapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(
           path,
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
-        await index.upsert(parsed);
-        if (activeTabPathRef.current === path) {
-          setParsedDoc(parsed);
-          const bl = await index.getBacklinks(path);
+        const lastIndexed = indexGenerationMapRef.current.get(path) || 0;
+        if (savedGen >= lastIndexed) {
+          indexGenerationMapRef.current.set(path, savedGen);
+          await index.upsert(parsed);
           if (activeTabPathRef.current === path) {
-            setBacklinks(bl);
+            setParsedDoc(parsed);
+            const bl = await index.getBacklinks(path);
+            if (activeTabPathRef.current === path) {
+              setBacklinks(bl);
+            }
           }
         }
       }
@@ -637,17 +663,22 @@ export function useVault() {
     if (res.success) {
       const state = coordinatorRef.current.getNoteState(proposal.path);
       if (state && state.committedSnapshot) {
+        const savedGen = state.committedSnapshot.version.modifiedAt || Date.now();
         const parsed = await parser.parse(
           proposal.path,
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
-        await index.upsert(parsed);
-        if (activeTabPathRef.current === proposal.path) {
-          setParsedDoc(parsed);
-          const bl = await index.getBacklinks(proposal.path);
+        const lastIndexed = indexGenerationMapRef.current.get(proposal.path) || 0;
+        if (savedGen >= lastIndexed) {
+          indexGenerationMapRef.current.set(proposal.path, savedGen);
+          await index.upsert(parsed);
           if (activeTabPathRef.current === proposal.path) {
-            setBacklinks(bl);
+            setParsedDoc(parsed);
+            const bl = await index.getBacklinks(proposal.path);
+            if (activeTabPathRef.current === proposal.path) {
+              setBacklinks(bl);
+            }
           }
         }
       }

@@ -18,6 +18,7 @@ interface Waiter {
 }
 
 interface NoteInternalState extends NoteState {
+  baselineSnapshot: FileSnapshot | null;
   isWriting: boolean;
   isDiscarded: boolean;
   pendingForce: boolean;
@@ -94,6 +95,7 @@ export class NoteWriteCoordinator {
       bufferContent: content,
       bufferGeneration: 0,
       committedSnapshot: snapshot,
+      baselineSnapshot: snapshot,
       saveStatus: isDirty ? 'modified' : 'saved',
       conflictData: null,
       isWriting: false,
@@ -114,6 +116,7 @@ export class NoteWriteCoordinator {
         bufferContent: newContent,
         bufferGeneration: 1,
         committedSnapshot: null,
+        baselineSnapshot: null,
         saveStatus: 'modified',
         conflictData: null,
         isWriting: false,
@@ -138,16 +141,17 @@ export class NoteWriteCoordinator {
   /**
    * Remove note from active tabs.
    * If discard is true, marks note as discarded so in-flight/subsequent writes do not commit.
+   * Settles all queued waiters immediately to prevent permanent promise leaks (H5).
    */
   removeNote(path: VaultPath, discard = false): void {
     const state = this.notes.get(path);
     if (state) {
       if (discard) {
         state.isDiscarded = true;
-        const pending = state.waiters.splice(0, state.waiters.length);
-        for (const w of pending) {
-          w.resolve(null);
-        }
+      }
+      const pending = state.waiters.splice(0, state.waiters.length);
+      for (const w of pending) {
+        w.resolve(null);
       }
       this.notes.delete(path);
     }
@@ -193,7 +197,7 @@ export class NoteWriteCoordinator {
     });
 
     if (!state.isWriting) {
-      this.pump(path);
+      void this.pump(path);
     }
 
     return promise;
@@ -207,7 +211,29 @@ export class NoteWriteCoordinator {
 
     while (true) {
       const current = this.notes.get(path);
-      if (!current || current.isDiscarded) break;
+      if (!current || current.isDiscarded) {
+        if (current && current.isDiscarded) {
+          // H3: If dirty content was written before discard, restore clean baseline
+          if (
+            current.baselineSnapshot &&
+            current.committedSnapshot?.textContent !== current.baselineSnapshot.textContent
+          ) {
+            try {
+              await this.safeWriter.safeSave(
+                current.path,
+                current.baselineSnapshot.textContent || '',
+                { force: true }
+              );
+              current.committedSnapshot = current.baselineSnapshot;
+            } catch {}
+          }
+          const remaining = current.waiters.splice(0, current.waiters.length);
+          for (const w of remaining) {
+            w.resolve(null);
+          }
+        }
+        break;
+      }
 
       const targetPath = current.path;
       const contentToSave = current.bufferContent;
@@ -278,6 +304,26 @@ export class NoteWriteCoordinator {
       }
 
       if (error || current.isDiscarded) {
+        if (current.isDiscarded) {
+          // H3: Restore clean baseline if discarded mid-write
+          if (
+            current.baselineSnapshot &&
+            current.committedSnapshot?.textContent !== current.baselineSnapshot.textContent
+          ) {
+            try {
+              await this.safeWriter.safeSave(
+                targetPath,
+                current.baselineSnapshot.textContent || '',
+                { force: true }
+              );
+              current.committedSnapshot = current.baselineSnapshot;
+            } catch {}
+          }
+          const remaining = current.waiters.splice(0, current.waiters.length);
+          for (const w of remaining) {
+            w.resolve(null);
+          }
+        }
         break;
       }
 
@@ -294,6 +340,12 @@ export class NoteWriteCoordinator {
     const finalState = this.notes.get(path);
     if (finalState) {
       finalState.isWriting = false;
+      if (finalState.isDiscarded && finalState.waiters.length > 0) {
+        const remaining = finalState.waiters.splice(0, finalState.waiters.length);
+        for (const w of remaining) {
+          w.resolve(null);
+        }
+      }
     }
   }
 
@@ -368,7 +420,13 @@ export class NoteWriteCoordinator {
       this.notify(state);
 
       try {
-        await this.save(path, false);
+        const saveRes = await this.save(path, false);
+        if (!saveRes || state.isDiscarded) {
+          return {
+            success: false,
+            error: 'Save cancelled: Note was discarded or closed while applying AI proposal.',
+          };
+        }
 
         // Check if user typed while save was executing
         if (state.bufferGeneration !== initialGen + 1) {

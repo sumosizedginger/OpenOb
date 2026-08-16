@@ -104,7 +104,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
         setAvailableProps(props);
       }
     };
-    fetchProps();
+    void fetchProps();
     return () => {
       isMounted = false;
     };
@@ -133,7 +133,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
       }
     };
 
-    runQuery();
+    void runQuery();
     return () => {
       isMounted = false;
     };

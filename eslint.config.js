@@ -18,6 +18,18 @@ export default [
   js.configs.recommended,
   ...tsPlugin.configs.recommended,
   {
+    files: ['packages/*/src/**/*.{ts,tsx}', 'apps/*/src/**/*.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+  {
     files: ['apps/web/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
@@ -47,6 +59,7 @@ export default [
     files: ['**/__tests__/**', 'tests/**', '**/*.spec.ts', '**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
       'no-empty': 'off',
     },
   },

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, C7)', () => {
+test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, C5, C7, H1-H8)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // Wait for the app to initialize and default note to open
@@ -30,11 +30,11 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     expect(diskContent).toContain('## Quick Edit A1');
   });
 
-  test('A2 & A3: Slow save exceeding debounce handles typing during in-flight save without false conflict (C7 latency seam + disk assertion)', async ({
+  test('A2 & A3: Slow save exceeding 2000ms debounce handles typing during in-flight save without false conflict (C7 latency seam + disk assertion)', async ({
     page,
   }) => {
-    // Inject 1200ms slow write latency
-    await page.evaluate(() => (window as any).__setStorageWriteDelay(1200));
+    // Inject 3200ms slow write latency (> 2000ms debounce window)
+    await page.evaluate(() => (window as any).__setStorageWriteDelay(3200));
 
     // Type initial change
     await page.locator('.cm-content').click();
@@ -48,9 +48,9 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     // Immediately type v2 while save 1 is in-flight
     await page.keyboard.type('\n- Line 2 (v2 typed during save)');
 
-    // Wait for the pump loop and debounced autosave to settle
-    await page.waitForTimeout(3000);
-    await expect(page.locator('.save-status.saved')).toContainText('Saved');
+    // Wait for the pump loop and debounced autosave to settle (> 3200ms save + debounce)
+    await page.waitForTimeout(5000);
+    await expect(page.locator('.save-status.saved')).toContainText('Saved', { timeout: 10000 });
     await expect(page.locator('.cm-content')).toContainText('Line 2 (v2 typed during save)');
 
     // C7: Verify actual storage disk content has v2 and no conflict occurred
@@ -73,7 +73,7 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     }
 
     // Wait for debounced autosave to settle
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(3500);
     await expect(page.locator('.save-status.saved')).toContainText('Saved');
     await expect(page.locator('.cm-content')).toContainText('Sequential step 4');
 
@@ -126,30 +126,36 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     expect(diskWelcome).toContain('Typed in Welcome Note');
   });
 
-  test('C2: Rename note during slow save does not recreate old path as ghost file on disk', async ({
+  test('H1 / C2: UI-driven rename via FileTree during pending edits safely migrates tab and leaves no ghost file on disk', async ({
     page,
   }) => {
-    await page.evaluate(() => (window as any).__setStorageWriteDelay(800));
-
-    // Type dirty change in Welcome.md and trigger slow save
+    // Type dirty change in Welcome.md
     await page.locator('.cm-content').click();
-    await page.keyboard.type('\n\n- Dirty edit before rename');
+    await page.keyboard.type('\n\n- Dirty edit before UI rename');
+    await expect(page.locator('.save-status')).toContainText('Modified');
+
+    // Trigger rename via FileTree UI
+    const welcomeItem = page.locator('.file-tree .tree-item:has-text("Welcome")').first();
+    await welcomeItem.hover();
+    await welcomeItem.locator('.btn-icon[title="Rename Note"]').click();
+
+    const renameInput = page.locator('.file-tree input.command-input');
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill('RenamedWelcome');
+    await renameInput.press('Enter');
+
+    // Wait for rename to process
+    await page.waitForTimeout(1000);
+
+    // Verify tab title updated and tab is active with content
+    await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('RenamedWelcome');
+    await expect(page.locator('.cm-content')).toContainText('Dirty edit before UI rename');
+
+    // Save renamed document
     await page.keyboard.press('Control+s');
+    await expect(page.locator('.save-status.saved')).toContainText('Saved');
 
-    // While save is in-flight, execute rename via coordinator/storage
-    await page.evaluate(async () => {
-      const coord = (window as any).__coordinator;
-      const storage = (window as any).__vaultStorage;
-      await coord.waitForIdle('Welcome.md');
-      const content = await storage.readText('Welcome.md');
-      await storage.write('RenamedWelcome.md', null, content);
-      await storage.remove('Welcome.md');
-      coord.renameNote('Welcome.md', 'RenamedWelcome.md');
-    });
-
-    await page.waitForTimeout(1500);
-
-    // Verify EXACTLY one file exists on disk with the dirty edit, and old path does NOT exist (no ghost!)
+    // Verify EXACTLY one file exists on disk with the dirty edit, and old path does NOT exist
     const oldExists = await page.evaluate(
       async () => await (window as any).__vaultStorage.exists('Welcome.md')
     );
@@ -162,7 +168,39 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
 
     expect(oldExists).toBe(false);
     expect(newExists).toBe(true);
-    expect(newContent).toContain('Dirty edit before rename');
+    expect(newContent).toContain('Dirty edit before UI rename');
+  });
+
+  test('H3 / C5: Discarding dirty tab restores clean baseline on disk and avoids corrupting storage', async ({
+    page,
+  }) => {
+    const baseline = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+
+    // Type dirty edit
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\n- Dirty discarded modification');
+    await expect(page.locator('.save-status')).toContainText('Modified');
+
+    // Accept dialog confirmation when closing dirty tab
+    page.on('dialog', (dialog) => dialog.accept());
+
+    // Close the active tab via .tab-close
+    await page.locator('.tab-bar .tab.active .tab-close').click();
+
+    await page.waitForTimeout(500);
+
+    // Reopen Welcome.md from FileTree
+    await page.locator('.file-tree .tree-item:has-text("Welcome")').first().click();
+    await expect(page.locator('.tab-bar .tab.active .tab-title')).toContainText('Welcome');
+
+    // Verify disk content was restored / kept at baseline without the dirty modification
+    const currentDisk = await page.evaluate(
+      async () => await (window as any).__readStorage('Welcome.md')
+    );
+    expect(currentDisk).toBe(baseline);
+    expect(currentDisk).not.toContain('Dirty discarded modification');
   });
 
   test('Hostile Preview Security Smoke Test: Renders hostile XSS payloads strictly escaped', async ({

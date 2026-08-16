@@ -8,9 +8,8 @@ import {
   VaultStorage,
   WriteResult,
 } from '@okw/core';
-import { MemoryVaultStorage, SafeWriter } from '@okw/vault';
-import { DefaultDocumentParser, updateDocumentFrontmatter } from '@okw/markdown';
-import { MemoryDocumentIndex } from '@okw/index';
+import { MemoryVaultStorage, NoteWriteCoordinator, SafeWriter } from '@okw/vault';
+import { DefaultDocumentParser } from '@okw/markdown';
 
 /**
  * SlowVaultStorage wraps MemoryVaultStorage to simulate slow I/O
@@ -71,270 +70,214 @@ class SlowVaultStorage implements VaultStorage {
   }
 }
 
-describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E)', () => {
+describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E via NoteWriteCoordinator)', () => {
   it('Probe A: Typing during slow save does not drop edit; re-arms save and reaches disk', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
-    const index = new MemoryDocumentIndex();
-    const parser = new DefaultDocumentParser();
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
 
     // Initial note creation
     const initialSnap = await safeWriter.safeSave('NoteA.md', '# Note A - Version 1');
-
-    // Simulate tab state
-    const tab = {
-      path: 'NoteA.md',
-      content: '# Note A - Version 1',
-      isDirty: false,
-      initialSnapshot: initialSnap.snapshot,
-    };
-    let isSaving = false;
-    let pendingSave = false;
-    let saveStatus: 'saved' | 'saving' | 'modified' | 'conflict' = 'saved';
-
-    // Hook save logic with F1 fix
-    const runSave = async () => {
-      if (isSaving) {
-        pendingSave = true;
-        return;
-      }
-      isSaving = true;
-      saveStatus = 'saving';
-      const contentToSave = tab.content;
-      try {
-        const res = await safeWriter.safeSave('NoteA.md', contentToSave, {
-          expectedVersion: tab.initialSnapshot.version,
-        });
-
-        const isStillMatching = tab.content === contentToSave;
-        tab.isDirty = !isStillMatching;
-        tab.initialSnapshot = res.snapshot;
-
-        const parsed = await parser.parse('NoteA.md', contentToSave, res.snapshot.version.hash);
-        await index.upsert(parsed);
-
-        if (!tab.isDirty) {
-          saveStatus = 'saved';
-        } else {
-          saveStatus = 'modified';
-        }
-      } finally {
-        isSaving = false;
-        if (pendingSave) {
-          pendingSave = false;
-          await runSave();
-        }
-      }
-    };
+    coordinator.initNote('NoteA.md', initialSnap.snapshot, '# Note A - Version 1');
 
     // 1. Start slow save of Version 1
-    const savePromise = runSave();
+    coordinator.setBuffer('NoteA.md', '# Note A - Version 1 edited');
+    const savePromise1 = coordinator.save('NoteA.md');
 
     // 2. User types Version 2 at t=20ms while save is in-flight
     await new Promise((r) => setTimeout(r, 20));
-    tab.content = '# Note A - Version 2 (Typed during save)';
-    tab.isDirty = true;
-    saveStatus = 'modified';
+    coordinator.setBuffer('NoteA.md', '# Note A - Version 2 (Typed during save)');
 
-    // 3. User attempts autosave/manual save while in-flight
-    await runSave();
+    // 3. User triggers second save while in-flight
+    const savePromise2 = coordinator.save('NoteA.md');
 
-    // 4. Wait for all in-flight and pending saves to complete
-    await savePromise;
-    await new Promise((r) => setTimeout(r, 150));
+    // 4. Wait for both saves to complete
+    const snap1 = await savePromise1;
+    const snap2 = await savePromise2;
+
+    expect(snap1).not.toBeNull();
+    expect(snap2).not.toBeNull();
 
     const diskText = await storage.readText('NoteA.md');
     expect(diskText).toBe('# Note A - Version 2 (Typed during save)');
-    expect(tab.content).toBe(diskText);
-    expect(tab.isDirty).toBe(false);
-    expect(saveStatus).toBe('saved');
+    const state = coordinator.getNoteState('NoteA.md');
+    expect(state?.saveStatus).toBe('saved');
+    expect(state?.bufferContent).toBe(diskText);
   });
 
-  it('Probe B: Tab switch during slow save does not clobber switched tab preview, backlinks, or status', async () => {
+  it('Probe B: Multi-note isolation during slow saves preserves independent state', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
-    const index = new MemoryDocumentIndex();
-    const parser = new DefaultDocumentParser();
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
 
     // Seed Note A and Note B
     const snapA = await safeWriter.safeSave('Welcome.md', '# Welcome Note');
     const snapB = await safeWriter.safeSave('Characters/Kaelen.md', '# Kaelen Note');
 
-    let activeTabPath: VaultPath = 'Welcome.md';
-    const tabA = {
-      path: 'Welcome.md',
-      content: '# Welcome Note - Edited',
-      isDirty: true,
-      initialSnapshot: snapA.snapshot,
-    };
-    const tabB = {
-      path: 'Characters/Kaelen.md',
-      content: '# Kaelen Note - Typed in B',
-      isDirty: true,
-      initialSnapshot: snapB.snapshot,
-    };
+    coordinator.initNote('Welcome.md', snapA.snapshot, '# Welcome Note');
+    coordinator.initNote('Characters/Kaelen.md', snapB.snapshot, '# Kaelen Note');
 
-    let parsedDoc: any = null;
-    let backlinks: any[] = [];
-    let saveStatus: string = 'modified';
-    let isSaving = false;
+    // 1. Edit and start slow save for Welcome.md
+    coordinator.setBuffer('Welcome.md', '# Welcome Note - Edited A');
+    const savePromiseA = coordinator.save('Welcome.md');
 
-    const saveNoteA = async () => {
-      isSaving = true;
-      const savingPath = 'Welcome.md';
-      const contentToSave = tabA.content;
-
-      try {
-        const res = await safeWriter.safeSave(savingPath, contentToSave, {
-          expectedVersion: tabA.initialSnapshot.version,
-        });
-        tabA.initialSnapshot = res.snapshot;
-        tabA.isDirty = tabA.content !== contentToSave;
-
-        const parsed = await parser.parse(savingPath, contentToSave, res.snapshot.version.hash);
-        await index.upsert(parsed);
-
-        // F2 Guard: only update active UI state if activeTabPath still matches savingPath
-        if (activeTabPath === savingPath) {
-          parsedDoc = parsed;
-          backlinks = await index.getBacklinks(savingPath);
-          saveStatus = tabA.isDirty ? 'modified' : 'saved';
-        }
-      } finally {
-        isSaving = false;
-      }
-    };
-
-    // 1. Start slow save for Welcome.md
-    const savePromiseA = saveNoteA();
-
-    // 2. User switches to Characters/Kaelen.md at t=20ms
+    // 2. Edit Characters/Kaelen.md concurrently
     await new Promise((r) => setTimeout(r, 20));
-    activeTabPath = 'Characters/Kaelen.md';
-    const parsedB = await parser.parse('Characters/Kaelen.md', tabB.content);
-    parsedDoc = parsedB;
-    backlinks = await index.getBacklinks('Characters/Kaelen.md');
-    saveStatus = 'modified';
+    coordinator.setBuffer('Characters/Kaelen.md', '# Kaelen Note - Typed concurrently B');
+    const savePromiseB = coordinator.save('Characters/Kaelen.md');
 
-    // 3. Await Note A save completion
-    await savePromiseA;
+    await Promise.all([savePromiseA, savePromiseB]);
 
-    expect(parsedDoc.path).toBe('Characters/Kaelen.md');
-    expect(activeTabPath).toBe('Characters/Kaelen.md');
-    expect(tabB.isDirty).toBe(true);
-    expect(saveStatus).toBe('modified');
+    const diskA = await storage.readText('Welcome.md');
+    const diskB = await storage.readText('Characters/Kaelen.md');
+
+    expect(diskA).toBe('# Welcome Note - Edited A');
+    expect(diskB).toBe('# Kaelen Note - Typed concurrently B');
+
+    const stateA = coordinator.getNoteState('Welcome.md');
+    const stateB = coordinator.getNoteState('Characters/Kaelen.md');
+
+    expect(stateA?.saveStatus).toBe('saved');
+    expect(stateB?.saveStatus).toBe('saved');
+  });
+
+  it('Probe C: Per-generation waiters resolve only when their requested generation is written', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    const init = await safeWriter.safeSave('Doc.md', 'V0');
+    coordinator.initNote('Doc.md', init.snapshot, 'V0');
+
+    coordinator.setBuffer('Doc.md', 'V1');
+    const waiterV1 = coordinator.save('Doc.md');
+
+    // Mid-flight edit
+    await new Promise((r) => setTimeout(r, 30));
+    coordinator.setBuffer('Doc.md', 'V2');
+    const waiterV2 = coordinator.save('Doc.md');
+
+    const resV1 = await waiterV1;
+    // When waiterV1 resolves, V1 was written first
+    expect(resV1?.textContent).toBe('V1');
+
+    const resV2 = await waiterV2;
+    // When waiterV2 resolves, V2 was written second
+    expect(resV2?.textContent).toBe('V2');
+
+    const finalDisk = await storage.readText('Doc.md');
+    expect(finalDisk).toBe('V2');
   });
 
   it('Probe D: Typing during property mutation preserves human text and surfaces conflict', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
+    const parser = new DefaultDocumentParser();
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
     const snap = await safeWriter.safeSave(
       'NoteProps.md',
       '---\nstatus: draft\n---\n# Note Props\nInitial text.'
     );
+    coordinator.initNote(
+      'NoteProps.md',
+      snap.snapshot,
+      '---\nstatus: draft\n---\n# Note Props\nInitial text.'
+    );
 
-    const tab = {
-      path: 'NoteProps.md',
-      content: '---\nstatus: draft\n---\n# Note Props\nInitial text.',
-      isDirty: false,
-      initialSnapshot: snap.snapshot,
-    };
-    let conflictData: any = null;
+    const propPromise = coordinator.updateProperty('NoteProps.md', 'status', 'published', parser);
 
-    const mutateProperty = async (key: string, value: string) => {
-      const preEditContent = tab.content;
-      const parsed = { properties: { status: 'draft' } };
-      const updated = updateDocumentFrontmatter(preEditContent, {
-        ...parsed.properties,
-        [key]: value,
-      });
-
-      const saveRes = await safeWriter.safeSave('NoteProps.md', updated, {
-        expectedVersion: tab.initialSnapshot.version,
-      });
-
-      if (tab.content !== preEditContent) {
-        tab.isDirty = true;
-        tab.initialSnapshot = saveRes.snapshot;
-        conflictData = { path: 'NoteProps.md', diskContent: updated };
-        return;
-      }
-
-      tab.content = updated;
-      tab.isDirty = false;
-      tab.initialSnapshot = saveRes.snapshot;
-    };
-
-    const propPromise = mutateProperty('status', 'published');
-
+    // User types concurrently while property mutation is in flight
     await new Promise((r) => setTimeout(r, 20));
-    tab.content =
-      '---\nstatus: draft\n---\n# Note Props\nInitial text.\nHuman typed this important paragraph!';
-    tab.isDirty = true;
+    coordinator.setBuffer(
+      'NoteProps.md',
+      '---\nstatus: draft\n---\n# Note Props\nInitial text.\nHuman typed this important paragraph!'
+    );
 
     await propPromise;
+    await new Promise((r) => setTimeout(r, 150));
 
-    expect(tab.content).toContain('Human typed this important paragraph!');
-    expect(tab.isDirty).toBe(true);
-    expect(conflictData).not.toBeNull();
-    expect(conflictData.path).toBe('NoteProps.md');
-    expect(conflictData.diskContent).toContain('status: published');
+    const state = coordinator.getNoteState('NoteProps.md');
+    const diskText = await storage.readText('NoteProps.md');
+    expect(diskText).toContain('Human typed this important paragraph!');
+    expect(diskText).toContain('status: published');
+    expect(state?.bufferContent).toBe(diskText);
+    expect(state?.saveStatus).toBe('saved');
   });
 
   it('Probe E: Typing during AI proposed edit application preserves human work and surfaces conflict', async () => {
     const storage = new SlowVaultStorage('test-vault', 100);
     const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
     const snap = await safeWriter.safeSave('AIProposal.md', '# Original AI Proposal Doc');
+    coordinator.initNote('AIProposal.md', snap.snapshot, '# Original AI Proposal Doc');
 
-    const tab = {
+    const aiPromise = coordinator.applyAI({
       path: 'AIProposal.md',
-      content: '# Original AI Proposal Doc',
-      isDirty: false,
-      initialSnapshot: snap.snapshot,
-    };
-    let conflictData: any = null;
-
-    const applyAIEdit = async (proposal: { originalContent: string; proposedContent: string }) => {
-      const preEditContent = tab.content;
-      if (preEditContent.trim() !== proposal.originalContent.trim()) {
-        conflictData = { path: 'AIProposal.md', diskContent: preEditContent };
-        return { success: false, error: 'Pre-check divergence' };
-      }
-
-      const saveRes = await safeWriter.safeSave('AIProposal.md', proposal.proposedContent, {
-        expectedVersion: tab.initialSnapshot.version,
-      });
-
-      if (tab.content !== preEditContent) {
-        tab.isDirty = true;
-        tab.initialSnapshot = saveRes.snapshot;
-        conflictData = { path: 'AIProposal.md', diskContent: proposal.proposedContent };
-        return { success: false, error: 'Post-await divergence' };
-      }
-
-      tab.content = proposal.proposedContent;
-      tab.isDirty = false;
-      tab.initialSnapshot = saveRes.snapshot;
-      return { success: true };
-    };
-
-    const aiPromise = applyAIEdit({
       originalContent: '# Original AI Proposal Doc',
       proposedContent: '# AI Enhanced Doc Title\n\nAI generated analysis.',
     });
 
+    // Human edits while AI is applying
     await new Promise((r) => setTimeout(r, 20));
-    tab.content =
-      '# Original AI Proposal Doc\n\nHuman edits that should never be silently discarded.';
-    tab.isDirty = true;
+    coordinator.setBuffer(
+      'AIProposal.md',
+      '# Original AI Proposal Doc\n\nHuman edits that should never be silently discarded.'
+    );
 
     const result = await aiPromise;
 
     expect(result.success).toBe(false);
-    expect(tab.content).toContain('Human edits that should never be silently discarded.');
-    expect(tab.isDirty).toBe(true);
-    expect(conflictData).not.toBeNull();
-    expect(conflictData.path).toBe('AIProposal.md');
-    expect(conflictData.diskContent).toContain('AI Enhanced Doc Title');
+    const state = coordinator.getNoteState('AIProposal.md');
+    expect(state?.bufferContent).toContain('Human edits that should never be silently discarded.');
+    expect(state?.saveStatus).toBe('modified');
+  });
+
+  it('Probe F (H3): Discarding note reverts in-flight dirty save and restores clean baseline on disk', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    const initSnap = await safeWriter.safeSave('DiscardTest.md', '# Clean Baseline');
+    coordinator.initNote('DiscardTest.md', initSnap.snapshot, '# Clean Baseline');
+
+    // User edits and triggers slow save
+    coordinator.setBuffer('DiscardTest.md', '# Dirty Modification');
+    const savePromise = coordinator.save('DiscardTest.md');
+
+    // While save is in-flight, user discards note
+    await new Promise((r) => setTimeout(r, 20));
+    coordinator.removeNote('DiscardTest.md', true);
+
+    const saveResult = await savePromise;
+    expect(saveResult).toBeNull();
+
+    // Verify disk was restored to baseline and does NOT contain dirty modification
+    const finalDisk = await storage.readText('DiscardTest.md');
+    expect(finalDisk).toBe('# Clean Baseline');
+  });
+
+  it('Probe G (H5): removeNote immediately drains and settles all queued waiters to prevent promise leaks', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    const initSnap = await safeWriter.safeSave('DrainTest.md', '# Drain Test');
+    coordinator.initNote('DrainTest.md', initSnap.snapshot, '# Drain Test');
+
+    coordinator.setBuffer('DrainTest.md', 'V1');
+    const w1 = coordinator.save('DrainTest.md');
+
+    coordinator.setBuffer('DrainTest.md', 'V2');
+    const w2 = coordinator.save('DrainTest.md');
+
+    // Immediate removal while waiters are queued
+    coordinator.removeNote('DrainTest.md', false);
+
+    // Waiters should settle without hanging
+    const [res1, res2] = await Promise.all([w1, w2]);
+    expect(res1).toBeNull();
+    expect(res2).toBeNull();
   });
 });

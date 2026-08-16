@@ -128,8 +128,8 @@ export class DesktopVaultRuntime {
     }
 
     // 3. Attach filesystem watcher to sync external disk changes to SQLite index
-    this.unsubscribeWatcher = this.watcher.addListener(async (event: WatcherEvent) => {
-      await this.handleWatcherEvent(event);
+    this.unsubscribeWatcher = this.watcher.addListener((event: WatcherEvent) => {
+      void this.handleWatcherEvent(event);
     });
 
     // 4. Start filesystem watcher
@@ -350,8 +350,8 @@ export class DesktopVaultRuntime {
     if (this.checkpointTimer) {
       clearTimeout(this.checkpointTimer);
     }
-    this.checkpointTimer = setTimeout(async () => {
-      await this.checkpoint();
+    this.checkpointTimer = setTimeout(() => {
+      void this.checkpoint();
     }, 100);
   }
 

@@ -243,6 +243,67 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       await writable.close();
 
       if (typeof (tempHandle as any).move === 'function') {
+        // Delete-during-write protection (H2): re-verify canonical target existence before move
+        if (expectedVersion !== undefined && expectedVersion !== null) {
+          try {
+            const checkHandle = await parentDirHandle.getFileHandle(filename);
+            const checkFile = await checkHandle.getFile();
+            const checkToken = createVersionToken(newHash, checkFile.lastModified, checkFile.size);
+            if (
+              expectedVersion &&
+              typeof expectedVersion === 'object' &&
+              'token' in expectedVersion
+            ) {
+              if (expectedVersion.token && expectedVersion.token !== checkToken) {
+                const actualVersion: FileVersion = {
+                  token: checkToken,
+                  hash: newHash,
+                  modifiedAt: checkFile.lastModified,
+                  size: checkFile.size,
+                };
+                throw new ConflictError(
+                  norm,
+                  expectedVersion,
+                  actualVersion,
+                  undefined,
+                  'File version modified externally during write'
+                );
+              }
+            }
+          } catch (err: any) {
+            if (err instanceof ConflictError) throw err;
+            if (err.name === 'NotFoundError') {
+              throw new ConflictError(
+                norm,
+                expectedVersion,
+                null,
+                undefined,
+                'Cannot write: file was deleted externally during write'
+              );
+            }
+          }
+        } else if (expectedVersion === null) {
+          try {
+            const checkHandle = await parentDirHandle.getFileHandle(filename);
+            const checkFile = await checkHandle.getFile();
+            const actualVersion: FileVersion = {
+              token: createVersionToken('', checkFile.lastModified, checkFile.size),
+              hash: '',
+              modifiedAt: checkFile.lastModified,
+              size: checkFile.size,
+            };
+            throw new ConflictError(
+              norm,
+              expectedVersion,
+              actualVersion,
+              undefined,
+              'Cannot create: file was created externally during write'
+            );
+          } catch (err: any) {
+            if (err instanceof ConflictError) throw err;
+          }
+        }
+
         await (tempHandle as any).move(filename);
         targetHandle = await parentDirHandle.getFileHandle(filename, { create: false });
       } else {

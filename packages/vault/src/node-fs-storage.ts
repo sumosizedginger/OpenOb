@@ -289,6 +289,69 @@ export class NodeFsVaultStorage implements VaultStorage {
         );
       }
 
+      // Delete-during-write protection (H2): re-verify canonical target existence / version immediately before rename
+      if (expectedVersion !== undefined && expectedVersion !== null) {
+        try {
+          const currentStat = await fs.stat(diskPath);
+          const currentToken = createVersionToken(
+            existingHash!,
+            currentStat.mtimeMs,
+            currentStat.size
+          );
+          if (
+            expectedVersion &&
+            typeof expectedVersion === 'object' &&
+            'token' in expectedVersion &&
+            expectedVersion.token &&
+            expectedVersion.token !== currentToken
+          ) {
+            const actualVersion: FileVersion = {
+              token: currentToken,
+              hash: existingHash!,
+              modifiedAt: currentStat.mtimeMs,
+              size: currentStat.size,
+            };
+            throw new ConflictError(
+              normPath,
+              expectedVersion,
+              actualVersion,
+              undefined,
+              'File version modified externally during write'
+            );
+          }
+        } catch (err: any) {
+          if (err instanceof ConflictError) throw err;
+          if (err.code === 'ENOENT') {
+            throw new ConflictError(
+              normPath,
+              expectedVersion,
+              null,
+              undefined,
+              'Cannot write: file was deleted externally during write'
+            );
+          }
+        }
+      } else if (expectedVersion === null) {
+        try {
+          const currentStat = await fs.stat(diskPath);
+          const actualVersion: FileVersion = {
+            token: createVersionToken('', currentStat.mtimeMs, currentStat.size),
+            hash: '',
+            modifiedAt: currentStat.mtimeMs,
+            size: currentStat.size,
+          };
+          throw new ConflictError(
+            normPath,
+            expectedVersion,
+            actualVersion,
+            undefined,
+            'Cannot create: file was created externally during write'
+          );
+        } catch (err: any) {
+          if (err instanceof ConflictError) throw err;
+        }
+      }
+
       // Atomic rename replaces target file safely
       await fs.rename(tmpDiskPath, diskPath);
 
