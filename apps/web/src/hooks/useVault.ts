@@ -218,7 +218,9 @@ export function useVault() {
 
   const parseDebounceTimerRef = useRef<any>(null);
   const saveSequenceRef = useRef<number>(0);
-  const indexGenerationMapRef = useRef<Map<VaultPath, number>>(new Map());
+  const pathEpochMapRef = useRef<Map<VaultPath, number>>(new Map());
+  const pathSeqMapRef = useRef<Map<VaultPath, number>>(new Map());
+  const vaultRebuildEpochRef = useRef<number>(0);
   const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
   activeTabPathRef.current = activeTabPath;
   const openTabsRef = useRef<OpenTab[]>(openTabs);
@@ -226,7 +228,7 @@ export function useVault() {
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
-  // Expose test and introspection hooks on window only in DEV/TEST environments (H6)
+  // Expose test and introspection hooks on window only in DEV/TEST environments (H6, R6)
   useEffect(() => {
     if (
       typeof window !== 'undefined' &&
@@ -234,17 +236,25 @@ export function useVault() {
     ) {
       (window as any).__vaultStorage = storage;
       (window as any).__coordinator = coordinatorRef.current;
+      (window as any).__BrowserFSAVaultStorage = BrowserFSAVaultStorage;
       (window as any).__readStorage = async (p: string) => {
         return storage.readText(p);
       };
-      (window as any).__setStorageWriteDelay = (delayMs: number) => {
-        const origWrite = storage.write.bind(storage);
-        storage.write = async (...args: any[]) => {
-          if (delayMs > 0) {
-            await new Promise((r) => setTimeout(r, delayMs));
-          }
-          return (origWrite as any)(...args);
-        };
+
+      // R6: Single-level delay indirection; no closure accumulation
+      let delayMs = 0;
+      const uninstrumentedWrite = (storage as any).__origWrite || storage.write.bind(storage);
+      (storage as any).__origWrite = uninstrumentedWrite;
+
+      storage.write = async (...args: any[]) => {
+        if (delayMs > 0) {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        return (uninstrumentedWrite as any)(...args);
+      };
+
+      (window as any).__setStorageWriteDelay = (newDelay: number) => {
+        delayMs = newDelay;
       };
     }
   }, [storage]);
@@ -274,13 +284,14 @@ export function useVault() {
     return unsubscribe;
   }, []);
 
-  // Refresh directory list & derived index
+  // Refresh directory list & derived index (R5: Invalidate pre-rebuild upserts via rebuild epoch)
   const refreshVault = useCallback(
     async (currentStorage: VaultStorage = storage) => {
       try {
         const list = await currentStorage.list('', true);
         setEntries(list);
         await rebuildVaultIndex(currentStorage, index, parser);
+        vaultRebuildEpochRef.current++;
         if (activeTabPath) {
           const bl = await index.getBacklinks(activeTabPath);
           setBacklinks(bl);
@@ -313,6 +324,9 @@ export function useVault() {
         setStorage(fsaStorage);
         setSafeWriter(newWriter);
         coordinatorRef.current.setStorage(fsaStorage, newWriter);
+        pathEpochMapRef.current.clear();
+        pathSeqMapRef.current.clear();
+        vaultRebuildEpochRef.current++;
         setOpenTabs([]);
         setActiveTabPath(null);
         await refreshVault(fsaStorage);
@@ -342,6 +356,10 @@ export function useVault() {
         new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
       const parsed = await parser.parse(path, content, snapshot.version.hash);
       coordinatorRef.current.initNote(path, snapshot, content);
+
+      // R4: Initialize path lifecycle epoch
+      pathEpochMapRef.current.set(path, (pathEpochMapRef.current.get(path) ?? 0) + 1);
+      pathSeqMapRef.current.set(path, 0);
 
       const newTab: OpenTab = {
         path,
@@ -419,7 +437,10 @@ export function useVault() {
     if (!currentPath) return;
 
     try {
+      const startEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
+      const startRebuildEpoch = vaultRebuildEpochRef.current;
       const currentSeq = ++saveSequenceRef.current;
+
       const snapshot = await coordinatorRef.current.save(currentPath, force);
       if (snapshot) {
         const savedText =
@@ -427,10 +448,16 @@ export function useVault() {
           new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
         const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
 
-        // H15 & H16: Strictly monotonic sequence guard; drops stale out-of-order parses & tombstoned paths
-        const lastIndexed = indexGenerationMapRef.current.get(currentPath) || 0;
-        if (currentSeq > lastIndexed) {
-          indexGenerationMapRef.current.set(currentPath, currentSeq);
+        // H15, H16, R4, R5: Rebuild-epoch, lifecycle-epoch, and strictly monotonic sequence guard
+        const currentPathEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
+        const lastIndexed = pathSeqMapRef.current.get(currentPath) ?? 0;
+
+        if (
+          startRebuildEpoch === vaultRebuildEpochRef.current &&
+          startEpoch === currentPathEpoch &&
+          currentSeq > lastIndexed
+        ) {
+          pathSeqMapRef.current.set(currentPath, currentSeq);
           await index.upsert(parsed);
           if (activeTabPathRef.current === currentPath) {
             setParsedDoc(parsed);
@@ -479,6 +506,10 @@ export function useVault() {
       await index.upsert(parsed);
 
       coordinatorRef.current.initNote(candidate, res.snapshot, initialContent);
+
+      // R4: Initialize path lifecycle epoch
+      pathEpochMapRef.current.set(candidate, (pathEpochMapRef.current.get(candidate) ?? 0) + 1);
+      pathSeqMapRef.current.set(candidate, 0);
 
       const newTab: OpenTab = {
         path: candidate,
@@ -538,9 +569,17 @@ export function useVault() {
       const newSnap = await storage.read(normalizedNew);
       coordinatorRef.current.renameNote(normalizedOld, normalizedNew, newSnap);
 
-      // H16: Tombstone old path so delayed old-path upserts are permanently dropped
-      indexGenerationMapRef.current.set(normalizedOld, Infinity);
-      indexGenerationMapRef.current.set(normalizedNew, ++saveSequenceRef.current);
+      // H16 & R4: Invalidate old path lifecycle; initialize new path lifecycle
+      pathEpochMapRef.current.set(
+        normalizedOld,
+        (pathEpochMapRef.current.get(normalizedOld) ?? 0) + 1
+      );
+      pathSeqMapRef.current.delete(normalizedOld);
+      pathEpochMapRef.current.set(
+        normalizedNew,
+        (pathEpochMapRef.current.get(normalizedNew) ?? 0) + 1
+      );
+      pathSeqMapRef.current.set(normalizedNew, ++saveSequenceRef.current);
 
       setOpenTabs((prev) =>
         prev.map((t) => {
@@ -569,11 +608,16 @@ export function useVault() {
 
   const deletePath = async (path: VaultPath) => {
     try {
-      // H16: Tombstone path so any in-flight delayed upsert is permanently dropped
-      indexGenerationMapRef.current.set(path, Infinity);
+      // R3: Deterministically sequence delete against coordinator pump before removing from disk
+      await coordinatorRef.current.waitForIdle(path);
+      coordinatorRef.current.removeNote(path);
+
+      // H16 & R4: Invalidate path lifecycle epoch
+      pathEpochMapRef.current.set(path, (pathEpochMapRef.current.get(path) ?? 0) + 1);
+      pathSeqMapRef.current.delete(path);
+
       await storage.remove(path);
       await index.remove(path);
-      coordinatorRef.current.removeNote(path);
       closeTab(path, true);
       await refreshVault();
     } catch (err) {
@@ -630,7 +674,10 @@ export function useVault() {
 
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
+      const startEpoch = pathEpochMapRef.current.get(path) ?? 0;
+      const startRebuildEpoch = vaultRebuildEpochRef.current;
       const currentSeq = ++saveSequenceRef.current;
+
       await coordinatorRef.current.updateProperty(path, key, value, parser);
       const state = coordinatorRef.current.getNoteState(path);
       if (state && state.committedSnapshot) {
@@ -639,9 +686,15 @@ export function useVault() {
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
-        const lastIndexed = indexGenerationMapRef.current.get(path) || 0;
-        if (currentSeq > lastIndexed) {
-          indexGenerationMapRef.current.set(path, currentSeq);
+        const currentPathEpoch = pathEpochMapRef.current.get(path) ?? 0;
+        const lastIndexed = pathSeqMapRef.current.get(path) ?? 0;
+
+        if (
+          startRebuildEpoch === vaultRebuildEpochRef.current &&
+          startEpoch === currentPathEpoch &&
+          currentSeq > lastIndexed
+        ) {
+          pathSeqMapRef.current.set(path, currentSeq);
           await index.upsert(parsed);
           if (activeTabPathRef.current === path) {
             setParsedDoc(parsed);
@@ -666,6 +719,9 @@ export function useVault() {
     const fullContent = updateDocumentFrontmatter(body, initialProps);
 
     await storage.write(targetPath, null, fullContent);
+    pathEpochMapRef.current.set(targetPath, (pathEpochMapRef.current.get(targetPath) ?? 0) + 1);
+    pathSeqMapRef.current.set(targetPath, 0);
+
     await refreshVault();
     await openNote(targetPath);
   };
@@ -673,24 +729,34 @@ export function useVault() {
   const applyAIProposedEdit = async (
     proposal: any
   ): Promise<{ success: boolean; error?: string }> => {
+    const targetPath = proposal.path;
+    const startEpoch = pathEpochMapRef.current.get(targetPath) ?? 0;
+    const startRebuildEpoch = vaultRebuildEpochRef.current;
     const currentSeq = ++saveSequenceRef.current;
+
     const res = await coordinatorRef.current.applyAI(proposal);
     if (res.success) {
-      const state = coordinatorRef.current.getNoteState(proposal.path);
+      const state = coordinatorRef.current.getNoteState(targetPath);
       if (state && state.committedSnapshot) {
         const parsed = await parser.parse(
-          proposal.path,
+          targetPath,
           state.bufferContent,
           state.committedSnapshot.version.hash
         );
-        const lastIndexed = indexGenerationMapRef.current.get(proposal.path) || 0;
-        if (currentSeq > lastIndexed) {
-          indexGenerationMapRef.current.set(proposal.path, currentSeq);
+        const currentPathEpoch = pathEpochMapRef.current.get(targetPath) ?? 0;
+        const lastIndexed = pathSeqMapRef.current.get(targetPath) ?? 0;
+
+        if (
+          startRebuildEpoch === vaultRebuildEpochRef.current &&
+          startEpoch === currentPathEpoch &&
+          currentSeq > lastIndexed
+        ) {
+          pathSeqMapRef.current.set(targetPath, currentSeq);
           await index.upsert(parsed);
-          if (activeTabPathRef.current === proposal.path) {
+          if (activeTabPathRef.current === targetPath) {
             setParsedDoc(parsed);
-            const bl = await index.getBacklinks(proposal.path);
-            if (activeTabPathRef.current === proposal.path) {
+            const bl = await index.getBacklinks(targetPath);
+            if (activeTabPathRef.current === targetPath) {
               setBacklinks(bl);
             }
           }

@@ -307,12 +307,12 @@ export class NoteWriteCoordinator {
           if (!stillDirty) {
             current.saveStatus = 'saved';
             current.conflictData = null;
-            // H12: Advance baselineSnapshot to the latest durably committed snapshot ONLY if not discarded!
-            if (!current.isDiscarded) {
-              current.baselineSnapshot = res.snapshot;
-            }
           } else {
             current.saveStatus = 'modified';
+          }
+          // H12 & R2: Advance baselineSnapshot to the latest durably committed snapshot on every successful write if not discarded!
+          if (!current.isDiscarded) {
+            current.baselineSnapshot = res.snapshot;
           }
           this.notify(current);
         } catch (err: any) {

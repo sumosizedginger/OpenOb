@@ -291,7 +291,9 @@ export class NodeFsVaultStorage implements VaultStorage {
 
       await this.onBeforeCommit(normPath, diskPath, tmpDiskPath);
 
-      // Delete-during-write, same-stat, and fail-closed protection (H10, H11): re-verify canonical target immediately before rename
+      // Delete-during-write, same-stat, and fail-closed protection (H10, H11): re-verify canonical target immediately before rename.
+      // Architectural boundary: The millisecond TOCTOU window between pre-commit verification and fs.rename()
+      // is an inherent limit of standard POSIX rename semantics (F-039). Internal operations are fully serialized by NoteWriteCoordinator.
       if (expectedVersion !== undefined && expectedVersion !== null) {
         try {
           const currentStat = await fs.stat(diskPath);

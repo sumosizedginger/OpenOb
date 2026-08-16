@@ -258,6 +258,9 @@ export class BrowserFSAVaultStorage implements VaultStorage {
 
       if (typeof (tempHandle as any).move === 'function') {
         // Delete-during-write, same-stat, and fail-closed protection (H9, H10, H11)
+        // Architectural boundary: The millisecond TOCTOU window between pre-commit verification
+        // and move() is an inherent limit of standard browser/OS primitives (F-039). Internal
+        // operations are fully serialized by NoteWriteCoordinator.
         if (expectedVersion !== undefined && expectedVersion !== null) {
           try {
             const checkHandle = await parentDirHandle.getFileHandle(filename, { create: false });
@@ -341,17 +344,13 @@ export class BrowserFSAVaultStorage implements VaultStorage {
         await (tempHandle as any).move(filename);
         targetHandle = await parentDirHandle.getFileHandle(filename, { create: false });
       } else {
-        // Fallback for browsers without FileSystemHandle.move() (P2-FSA-001)
+        // Fallback for browsers without FileSystemHandle.move() (P2-FSA-001 / R1 Fail-Closed)
         console.warn(
-          `[BrowserFsaVaultStorage] FileSystemHandle.move() is not supported in this browser runtime. Falling back to direct in-place write for "${norm}". Atomic temp-and-swap guarantees are unavailable.`
+          `[BrowserFsaVaultStorage] FileSystemHandle.move() is not supported in this browser runtime. Atomic save guarantees are unavailable for "${norm}".`
         );
-        try {
-          await parentDirHandle.removeEntry(tempName);
-        } catch {}
-        targetHandle = await parentDirHandle.getFileHandle(filename, { create: true });
-        const directWritable = await targetHandle.createWritable();
-        await directWritable.write(bytes);
-        await directWritable.close();
+        throw new StorageError(
+          `Atomic save unsupported for "${norm}": FileSystemHandle.move() is unavailable in this browser runtime.`
+        );
       }
     } catch (err: any) {
       try {

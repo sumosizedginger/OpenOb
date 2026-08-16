@@ -43,12 +43,23 @@ class MockWritable {
 
 class MockFileHandle {
   public kind = 'file';
+  public move?: (newName: string) => Promise<void>;
+
   constructor(
     public name: string,
     private parent: MockDirectoryHandle,
     public content: Uint8Array = new Uint8Array(),
-    public lastModified: number = Date.now()
-  ) {}
+    public lastModified: number = Date.now(),
+    supportsMove: boolean = true
+  ) {
+    if (supportsMove) {
+      this.move = async (newName: string) => {
+        this.parent.entriesMap.delete(this.name);
+        this.name = newName;
+        this.parent.entriesMap.set(newName, this);
+      };
+    }
+  }
 
   async getFile(): Promise<MockFile> {
     return new MockFile(this.name, this.content, this.lastModified);
@@ -60,19 +71,16 @@ class MockFileHandle {
       this.lastModified = Date.now();
     });
   }
-
-  async move(newName: string): Promise<void> {
-    this.parent.entriesMap.delete(this.name);
-    this.name = newName;
-    this.parent.entriesMap.set(newName, this);
-  }
 }
 
 class MockDirectoryHandle {
   public kind = 'directory';
   public entriesMap = new Map<string, MockFileHandle | MockDirectoryHandle>();
 
-  constructor(public name: string = 'root') {}
+  constructor(
+    public name: string = 'root',
+    public supportsMove: boolean = true
+  ) {}
 
   async *entries(): AsyncIterable<[string, MockFileHandle | MockDirectoryHandle]> {
     for (const [k, v] of this.entriesMap.entries()) {
@@ -87,7 +95,7 @@ class MockDirectoryHandle {
     let entry = this.entriesMap.get(name);
     if (!entry) {
       if (options?.create) {
-        entry = new MockDirectoryHandle(name);
+        entry = new MockDirectoryHandle(name, this.supportsMove);
         this.entriesMap.set(name, entry);
       } else {
         const err: any = new Error(`Directory "${name}" not found`);
@@ -107,7 +115,7 @@ class MockDirectoryHandle {
     let entry = this.entriesMap.get(name);
     if (!entry) {
       if (options?.create) {
-        entry = new MockFileHandle(name, this);
+        entry = new MockFileHandle(name, this, new Uint8Array(), Date.now(), this.supportsMove);
         this.entriesMap.set(name, entry);
       } else {
         const err: any = new Error(`File "${name}" not found`);
@@ -133,7 +141,7 @@ class MockDirectoryHandle {
   }
 }
 
-describe('BrowserFSAVaultStorage Hardening (H9, H10, H11, H17)', () => {
+describe('BrowserFSAVaultStorage Hardening (H9, H10, H11, H17, R1)', () => {
   it('1. creates new note with expectedVersion=null and does not false conflict', async () => {
     const rootHandle = new MockDirectoryHandle('vault');
     const storage = new BrowserFSAVaultStorage(rootHandle, 'test-vault');
@@ -241,5 +249,42 @@ describe('BrowserFSAVaultStorage Hardening (H9, H10, H11, H17)', () => {
     }
 
     expect(await storage.readText('Safe.md')).toBe('CANONICAL_SAFE');
+  });
+
+  it('6. R1 fallback: update throws StorageError when move() is unavailable and leaves external edit intact', async () => {
+    const rootHandle = new MockDirectoryHandle('vault', false);
+    const storage = new BrowserFSAVaultStorage(rootHandle, 'test-vault');
+
+    const initialHandle = await rootHandle.getFileHandle('Existing.md', { create: true });
+    initialHandle.content = new TextEncoder().encode('EXTERNAL_DATA');
+
+    await expect(
+      storage.write('Existing.md', undefined, 'NEW_DATA')
+    ).rejects.toThrow(StorageError);
+
+    // External data MUST survive intact
+    expect(await storage.readText('Existing.md')).toBe('EXTERNAL_DATA');
+  });
+
+  it('7. R1 fallback: delete scenario throws ConflictError when expected file is missing and does not recreate file', async () => {
+    const rootHandle = new MockDirectoryHandle('vault', false);
+    const storage = new BrowserFSAVaultStorage(rootHandle, 'test-vault');
+
+    await expect(
+      storage.write('Deleted.md', { token: 'old', hash: 'old', modifiedAt: 1, size: 3 }, 'NEW_DATA')
+    ).rejects.toThrow(ConflictError);
+
+    expect(await storage.exists('Deleted.md')).toBe(false);
+  });
+
+  it('8. R1 fallback: create throws StorageError when move() is unavailable and leaves existing file intact', async () => {
+    const rootHandle = new MockDirectoryHandle('vault', false);
+    const storage = new BrowserFSAVaultStorage(rootHandle, 'test-vault');
+
+    await expect(
+      storage.write('NewFile.md', null, 'NEW_DATA')
+    ).rejects.toThrow(StorageError);
+
+    expect(await storage.exists('NewFile.md')).toBe(false);
   });
 });

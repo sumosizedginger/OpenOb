@@ -260,4 +260,50 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     const scriptCount = await page.locator('.preview-pane script').count();
     expect(scriptCount).toBe(0);
   });
+
+  test('Real OPFS + BrowserFSAVaultStorage: creates, updates with expectedVersion, and verifies no false conflict in real Chromium (R7)', async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        return { supported: false };
+      }
+      const root = await navigator.storage.getDirectory();
+      const testDirName = `test-opfs-${Date.now()}`;
+      const testDir = await root.getDirectoryHandle(testDirName, { create: true });
+      const BrowserFSAVaultStorage = (window as any).__BrowserFSAVaultStorage;
+      const storage = new BrowserFSAVaultStorage(testDir, 'opfs-test-vault');
+
+      // 1. Create file with expectedVersion = null
+      const res1 = await storage.write('OpfsNote.md', null, '# OPFS Note v1');
+      const text1 = await storage.readText('OpfsNote.md');
+
+      // 2. Update file with expectedVersion = res1.snapshot.version
+      const res2 = await storage.write('OpfsNote.md', res1.snapshot.version, '# OPFS Note v2');
+      const text2 = await storage.readText('OpfsNote.md');
+
+      // 3. Verify exists and list
+      const exists = await storage.exists('OpfsNote.md');
+      const list = await storage.list('', false);
+
+      return {
+        supported: true,
+        text1,
+        text2,
+        exists,
+        entryCount: list.length,
+        wasCreated: res1.wasCreated,
+        version2Matches: res2.snapshot.version.hash !== res1.snapshot.version.hash,
+      };
+    });
+
+    if (result.supported) {
+      expect(result.wasCreated).toBe(true);
+      expect(result.text1).toBe('# OPFS Note v1');
+      expect(result.text2).toBe('# OPFS Note v2');
+      expect(result.exists).toBe(true);
+      expect(result.entryCount).toBeGreaterThanOrEqual(1);
+      expect(result.version2Matches).toBe(true);
+    }
+  });
 });

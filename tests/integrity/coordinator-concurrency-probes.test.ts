@@ -358,4 +358,66 @@ describe('Coordinator Concurrency Probes (F1, F2, F3 / Probes A, B, D, E via Not
     const finalDisk = await storage.readText('ExtWrite.md');
     expect(finalDisk).toBe('X-external-write');
   });
+
+  it('Probe J (R2): Discard restores last durable save (B) when user typed (C) during the previous save', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    // Initial state A
+    const initSnap = await safeWriter.safeSave('DiscardTypingRace.md', 'A-initial');
+    coordinator.initNote('DiscardTypingRace.md', initSnap.snapshot, 'A-initial');
+
+    // 1. User buffers B and triggers slow save (100ms)
+    coordinator.setBuffer('DiscardTypingRace.md', 'B-durable');
+    const savePromiseB = coordinator.save('DiscardTypingRace.md');
+
+    // 2. User types C while B save is in flight (t=30ms)
+    await new Promise((r) => setTimeout(r, 30));
+    coordinator.setBuffer('DiscardTypingRace.md', 'C-dirty-edit');
+
+    // 3. Save B resolves and reaches disk
+    const resB = await savePromiseB;
+    expect(resB?.textContent).toBe('B-durable');
+    expect(await storage.readText('DiscardTypingRace.md')).toBe('B-durable');
+
+    // 4. While C save is running or in-flight in pump, user discards the note
+    await new Promise((r) => setTimeout(r, 30));
+    coordinator.removeNote('DiscardTypingRace.md', true);
+
+    // 5. Allow pump restoration to settle
+    await new Promise((r) => setTimeout(r, 350));
+
+    // 6. Verification: disk MUST be B-durable (the last durable save), NOT A-initial, and NOT C-dirty-edit
+    const finalDisk = await storage.readText('DiscardTypingRace.md');
+    expect(finalDisk).toBe('B-durable');
+    expect(finalDisk).not.toBe('A-initial');
+    expect(finalDisk).not.toBe('C-dirty-edit');
+  });
+
+  it('Probe K (R3): Sequenced deletePath synchronizes against coordinator pump and leaves note absent on disk', async () => {
+    const storage = new SlowVaultStorage('test-vault', 100);
+    const safeWriter = new SafeWriter(storage);
+    const coordinator = new NoteWriteCoordinator(storage, safeWriter);
+
+    // Initial state
+    const initSnap = await safeWriter.safeSave('DeleteSequenced.md', 'A-initial');
+    coordinator.initNote('DeleteSequenced.md', initSnap.snapshot, 'A-initial');
+
+    // Trigger in-flight save of B
+    coordinator.setBuffer('DeleteSequenced.md', 'B-slow-save');
+    const savePromise = coordinator.save('DeleteSequenced.md');
+
+    // Sequence delete as production useVault does: waitForIdle -> removeNote -> storage.remove
+    await coordinator.waitForIdle('DeleteSequenced.md');
+    coordinator.removeNote('DeleteSequenced.md');
+    await storage.remove('DeleteSequenced.md');
+
+    await savePromise;
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Must be completely absent from disk and coordinator
+    expect(await storage.exists('DeleteSequenced.md')).toBe(false);
+    expect(coordinator.getNoteState('DeleteSequenced.md')).toBeUndefined();
+  });
 });

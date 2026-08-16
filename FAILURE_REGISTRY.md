@@ -259,3 +259,10 @@ Mitigation: Implement two-stage reconciliation: Stage A performs fast synchronou
 Scenario: Failures in writing or renaming the encrypted desktop secrets file are swallowed or logged to console without rejecting, leaving API secrets in ephemeral memory while failing to persist to disk.
 
 Mitigation: Force `persistToDisk()` to throw on filesystem errors, roll back memory cache on persistence failure, and ensure `setSecret()` and `clearSecret()` promises reject with durable error context.
+
+### F-039 External-Process TOCTOU Deletion/Overwrite Window During Atomic Commit
+
+Scenario: An external process deletes or modifies a canonical note in the narrow window between the storage adapter's pre-commit validation recheck and the underlying OS/browser commit primitive (`fs.rename` in Node or `FileSystemHandle.move` in Browser FSA). Because standard filesystem `rename`/`move` replaces or recreates the target path when missing, the in-flight commit may recreate a deleted file or overwrite an external change that occurred within that millisecond window.
+
+Mitigation: Best-effort mitigation via pre-commit hash and metadata recheck immediately before commit. OpenOb's internal writes and deletes are strictly sequenced and serialized via `NoteWriteCoordinator` (`waitForIdle` / `removeNote` / epoch tracking), guaranteeing internal consistency. Complete elimination of external-process TOCTOU in this window would require OS-level CAS primitives (e.g. `renameat2(RENAME_NOREPLACE)` or OS-level file locking) which are not exposed by standard Node `fs/promises` or browser FSA APIs.
+
