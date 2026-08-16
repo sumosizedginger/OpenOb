@@ -51,6 +51,7 @@ import {
   FileText,
   Bot,
   Boxes,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -80,6 +81,7 @@ export const App: React.FC = () => {
     updateNoteProperty,
     createNoteWithProperties,
     applyAIProposedEdit,
+    atomicWrites,
     dismissConflict,
     resolveConflictReload,
   } = useVault();
@@ -413,6 +415,27 @@ export const App: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {!atomicWrites && (
+        <div
+          className="degraded-atomicity-banner"
+          style={{
+            background: 'var(--accent-warning, rgba(245, 158, 11, 0.12))',
+            color: '#f59e0b',
+            borderBottom: '1px solid rgba(245, 158, 11, 0.3)',
+            padding: '6px 16px',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <AlertTriangle size={14} />
+          <span>
+            Atomic replacement guarantee unavailable in this browser — saves will write directly to open file.
+          </span>
+        </div>
+      )}
 
       {/* Main Workspace Layout */}
       <div className="workspace-body">

@@ -142,4 +142,94 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
     const freshStore = new DesktopSecretStore({ storagePath: invalidPath, masterSecret: 'pass' });
     expect(await freshStore.getSecret('ephemeral_key')).toBeNull();
   });
+
+  it('7. failed write does not poison queue: subsequent operations succeed (G6)', async () => {
+    const secretsPath = path.join(tmpDir, 'secrets-queue.json');
+    const store = new DesktopSecretStore({ storagePath: secretsPath, masterSecret: 'pass' });
+
+    await store.setSecret('k1', 'initial-val');
+    expect(await store.getSecret('k1')).toBe('initial-val');
+
+    // Force failure on persistToDisk
+    let shouldFail = true;
+    const origPersist = (store as any).persistToDisk.bind(store);
+    (store as any).persistToDisk = () => {
+      if (shouldFail) {
+        throw new Error('EIO: Simulated disk failure');
+      }
+      return origPersist();
+    };
+
+    // Failed write
+    await expect(store.setSecret('k1', 'new-failed-val')).rejects.toThrow('EIO');
+    // Memory cache rolled back to previous value
+    expect(await store.getSecret('k1')).toBe('initial-val');
+
+    // Turn off failure: next operation must succeed on the same store instance!
+    shouldFail = false;
+    await store.setSecret('k1', 'recovered-val');
+    expect(await store.getSecret('k1')).toBe('recovered-val');
+  });
+
+  it('8. concurrent failed and succeeding writes for same key resolve correctly without corruption (G6)', async () => {
+    const secretsPath = path.join(tmpDir, 'secrets-concurrent.json');
+    const store = new DesktopSecretStore({ storagePath: secretsPath, masterSecret: 'pass' });
+
+    await store.setSecret('target', 'v0');
+
+    let failCount = 1;
+    const origPersist = (store as any).persistToDisk.bind(store);
+    (store as any).persistToDisk = () => {
+      if (failCount > 0) {
+        failCount--;
+        throw new Error('Simulated transient failure');
+      }
+      return origPersist();
+    };
+
+    // Queue operation 1 (will fail) and operation 2 (will succeed) concurrently
+    const p1 = store.setSecret('target', 'v1-fail');
+    const p2 = store.setSecret('target', 'v2-success');
+
+    await expect(p1).rejects.toThrow('Simulated transient failure');
+    await expect(p2).resolves.toBeUndefined();
+
+    expect(await store.getSecret('target')).toBe('v2-success');
+
+    // Fresh store instance matches
+    const fresh = new DesktopSecretStore({ storagePath: secretsPath, masterSecret: 'pass' });
+    expect(await fresh.getSecret('target')).toBe('v2-success');
+  });
+
+  it('9. concurrent failed and succeeding writes for different keys preserve consistency (G6)', async () => {
+    const secretsPath = path.join(tmpDir, 'secrets-diff-keys.json');
+    const store = new DesktopSecretStore({ storagePath: secretsPath, masterSecret: 'pass' });
+
+    await store.setSecret('keyA', 'valA0');
+    await store.setSecret('keyB', 'valB0');
+
+    let failFirst = true;
+    const origPersist = (store as any).persistToDisk.bind(store);
+    (store as any).persistToDisk = () => {
+      if (failFirst) {
+        failFirst = false;
+        throw new Error('First op disk failure');
+      }
+      return origPersist();
+    };
+
+    const pA = store.setSecret('keyA', 'valA1');
+    const pB = store.setSecret('keyB', 'valB1');
+
+    await expect(pA).rejects.toThrow('First op disk failure');
+    await expect(pB).resolves.toBeUndefined();
+
+    // keyA rolled back to valA0, keyB committed valB1
+    expect(await store.getSecret('keyA')).toBe('valA0');
+    expect(await store.getSecret('keyB')).toBe('valB1');
+
+    const fresh = new DesktopSecretStore({ storagePath: secretsPath, masterSecret: 'pass' });
+    expect(await fresh.getSecret('keyA')).toBe('valA0');
+    expect(await fresh.getSecret('keyB')).toBe('valB1');
+  });
 });

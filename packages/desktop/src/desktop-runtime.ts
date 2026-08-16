@@ -31,9 +31,15 @@ export class DesktopVaultRuntime {
   private checkpointTimer: NodeJS.Timeout | null = null;
   private _reconciliationState: ReconciliationState = 'ready';
   private backgroundVerificationPromise: Promise<void> = Promise.resolve();
+  private verificationErrors: Array<{ path: string; error: string }> = [];
+  private pathWriteTimestamps: Map<string, number> = new Map();
 
   get reconciliationState(): ReconciliationState {
     return this._reconciliationState;
+  }
+
+  getVerificationErrors(): ReadonlyArray<{ path: string; error: string }> {
+    return [...this.verificationErrors];
   }
 
   async waitForVerification(): Promise<void> {
@@ -136,6 +142,7 @@ export class DesktopVaultRuntime {
    * Stage B (Background async): verifies full file hashes in background without blocking UI.
    */
   async reconcile(): Promise<void> {
+    this.verificationErrors = [];
     const entries = await this.storage.list('', true);
     const diskFiles = entries.filter(
       (e) => !e.isDirectory && (e.path.endsWith('.md') || e.path.endsWith('.markdown'))
@@ -163,7 +170,8 @@ export class DesktopVaultRuntime {
             size: snapshot.size ?? snapshot.version.size ?? 0,
           });
           changed = true;
-        } catch (err) {
+        } catch (err: any) {
+          this.verificationErrors.push({ path: diskPath, error: err?.message || String(err) });
           console.warn(`[DesktopVaultRuntime] Failed to index offline added file "${diskPath}":`, err);
         }
       }
@@ -175,7 +183,8 @@ export class DesktopVaultRuntime {
         try {
           await this.index.remove(dbPath);
           changed = true;
-        } catch (err) {
+        } catch (err: any) {
+          this.verificationErrors.push({ path: dbPath, error: err?.message || String(err) });
           console.warn(`[DesktopVaultRuntime] Failed to remove offline deleted file "${dbPath}":`, err);
         }
       }
@@ -204,7 +213,8 @@ export class DesktopVaultRuntime {
               await this.index.setSourceMetadata(pathKey, mtime, sz);
               changed = true;
             }
-          } catch (err) {
+          } catch (err: any) {
+            this.verificationErrors.push({ path: pathKey, error: err?.message || String(err) });
             console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
           }
         } else {
@@ -225,7 +235,7 @@ export class DesktopVaultRuntime {
       this._reconciliationState = 'verifying';
       this.backgroundVerificationPromise = this.runBackgroundVerification(candidatesForVerification);
     } else {
-      this._reconciliationState = 'verified';
+      this._reconciliationState = this.verificationErrors.length > 0 ? 'degraded' : 'verified';
     }
   }
 
@@ -240,6 +250,7 @@ export class DesktopVaultRuntime {
       while (idx < candidates.length) {
         const current = candidates[idx++];
         if (!current) break;
+        const readStart = Date.now();
         try {
           const snapshot = await this.storage.read(current.path);
           if (snapshot.version.hash !== current.manifestHash) {
@@ -251,10 +262,23 @@ export class DesktopVaultRuntime {
               snapshot.content,
               snapshot.version.hash
             );
+
+            // G5 ordering check: has the watcher or another write updated this path since readStart?
+            const lastWatcherUpdate = this.pathWriteTimestamps.get(current.path) ?? 0;
+            if (lastWatcherUpdate > readStart) {
+              // Newer write was processed by watcher; abort stale verifier upsert
+              continue;
+            }
+
             await this.index.upsert(parsed, { modifiedAt: mtime, size: sz });
             backgroundChanged = true;
           }
-        } catch {}
+        } catch (err: any) {
+          this.verificationErrors.push({
+            path: current.path,
+            error: err?.message || String(err),
+          });
+        }
       }
     };
 
@@ -264,13 +288,15 @@ export class DesktopVaultRuntime {
     if (backgroundChanged && this.databasePath) {
       await this.checkpoint();
     }
-    this._reconciliationState = 'verified';
+    this._reconciliationState = this.verificationErrors.length > 0 ? 'degraded' : 'verified';
   }
 
   private async handleWatcherEvent(event: WatcherEvent): Promise<void> {
     if (!event.path.endsWith('.md') && !event.path.endsWith('.markdown')) {
       return;
     }
+
+    this.pathWriteTimestamps.set(event.path, Date.now());
 
     try {
       if (event.type === 'deleted') {

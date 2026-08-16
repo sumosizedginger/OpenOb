@@ -10,6 +10,7 @@ export default defineConfig({
       'apps/**/*.{test,spec}.{ts,tsx}',
       'tests/**/*.{test,spec}.ts'
     ],
+    exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
   },
   resolve: {
     alias: {

@@ -9,7 +9,7 @@ import {
 } from '@okw/core';
 import { DefaultDocumentParser, toggleTaskAtLine, updateDocumentFrontmatter } from '@okw/markdown';
 import { MemoryDocumentIndex, rebuildVaultIndex, renameDocument } from '@okw/index';
-import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage } from '@okw/vault';
+import { MemoryVaultStorage, SafeWriter, BrowserFSAVaultStorage, NoteWriteCoordinator, NoteState } from '@okw/vault';
 
 export interface OpenTab {
   path: VaultPath;
@@ -191,6 +191,8 @@ export function useVault() {
   const [index] = useState<MemoryDocumentIndex>(() => new MemoryDocumentIndex());
   const [parser] = useState<DefaultDocumentParser>(() => new DefaultDocumentParser());
 
+  const coordinatorRef = useRef<NoteWriteCoordinator>(new NoteWriteCoordinator(storage, safeWriter));
+
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabPath, setActiveTabPath] = useState<VaultPath | null>(null);
@@ -198,10 +200,7 @@ export function useVault() {
   const [backlinks, setBacklinks] = useState<any[]>([]);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>('saved');
   const [conflictData, setConflictData] = useState<{ path: VaultPath; diskContent?: string } | null>(null);
-  const [saveGeneration, setSaveGeneration] = useState(0);
 
-  const isSavingRef = useRef(false);
-  const pendingSaveRef = useRef(false);
   const parseDebounceTimerRef = useRef<any>(null);
   const activeTabPathRef = useRef<VaultPath | null>(activeTabPath);
   activeTabPathRef.current = activeTabPath;
@@ -209,6 +208,31 @@ export function useVault() {
   openTabsRef.current = openTabs;
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
+
+  // Listen to authoritative coordinator state updates and reflect in React state (G1, G2)
+  useEffect(() => {
+    const unsubscribe = coordinatorRef.current.addListener((noteState: NoteState) => {
+      setOpenTabs((prev) =>
+        prev.map((t) => {
+          if (t.path !== noteState.path) return t;
+          const diskText = noteState.committedSnapshot?.textContent ?? '';
+          const isDirty = diskText !== noteState.bufferContent;
+          return {
+            ...t,
+            content: noteState.bufferContent,
+            isDirty,
+            initialSnapshot: noteState.committedSnapshot ?? t.initialSnapshot,
+          };
+        })
+      );
+
+      if (activeTabPathRef.current === noteState.path) {
+        setSaveStatus(noteState.saveStatus);
+        setConflictData(noteState.conflictData);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Refresh directory list & derived index
   const refreshVault = useCallback(async (currentStorage: VaultStorage = storage) => {
@@ -242,8 +266,10 @@ export function useVault() {
       try {
         const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
         const fsaStorage = new BrowserFSAVaultStorage(handle, handle.name);
+        const newWriter = new SafeWriter(fsaStorage);
         setStorage(fsaStorage);
-        setSafeWriter(new SafeWriter(fsaStorage));
+        setSafeWriter(newWriter);
+        coordinatorRef.current.setStorage(fsaStorage, newWriter);
         setOpenTabs([]);
         setActiveTabPath(null);
         await refreshVault(fsaStorage);
@@ -257,11 +283,9 @@ export function useVault() {
     }
   };
 
-  // Open a note into tabs
   const openNote = async (rawPath: VaultPath) => {
     const path = normalizeVaultPath(rawPath);
-    const existing = openTabs.find((t) => t.path === path);
-    if (existing) {
+    if (coordinatorRef.current.getNoteState(path)) {
       setActiveTabPath(path);
       return;
     }
@@ -270,6 +294,7 @@ export function useVault() {
       const snapshot = await storage.read(path);
       const content = snapshot.textContent || new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
       const parsed = await parser.parse(path, content, snapshot.version.hash);
+      coordinatorRef.current.initNote(path, snapshot, content);
 
       const newTab: OpenTab = {
         path,
@@ -279,7 +304,10 @@ export function useVault() {
         initialSnapshot: snapshot,
       };
 
-      setOpenTabs((prev) => [...prev, newTab]);
+      setOpenTabs((prev) => {
+        if (prev.some((t) => t.path === path)) return prev;
+        return [...prev, newTab];
+      });
       setActiveTabPath(path);
       setParsedDoc(parsed);
 
@@ -291,7 +319,6 @@ export function useVault() {
     }
   };
 
-  // Close a tab (with dirty-state confirmation, H-02)
   const closeTab = (path: VaultPath, force = false) => {
     const tabToClose = openTabs.find((t) => t.path === path);
     if (tabToClose?.isDirty && !force) {
@@ -300,6 +327,7 @@ export function useVault() {
       }
     }
 
+    coordinatorRef.current.removeNote(path);
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t.path !== path);
       if (activeTabPath === path) {
@@ -309,125 +337,52 @@ export function useVault() {
     });
   };
 
-  // Update specific tab content (C-01 fix: explicit path parameter)
   const updateContent = (targetPath: VaultPath, newContent: string) => {
+    coordinatorRef.current.setBuffer(targetPath, newContent);
     setOpenTabs((prev) =>
       prev.map((tab) => {
         if (tab.path === targetPath) {
-          const isDirty = tab.initialSnapshot
-            ? (tab.initialSnapshot.textContent || new TextDecoder('utf-8', { ignoreBOM: true }).decode(tab.initialSnapshot.content)) !== newContent
-            : true;
+          const state = coordinatorRef.current.getNoteState(targetPath);
+          const isDirty = state ? (state.committedSnapshot?.textContent ?? '') !== newContent : true;
           return { ...tab, content: newContent, isDirty };
         }
         return tab;
       })
     );
-    if (targetPath === activeTabPath) {
+    if (targetPath === activeTabPathRef.current) {
       setSaveStatus('modified');
     }
   };
 
-  // Toggle Markdown checkbox task at line with content-aware verification (P2-1)
   const toggleTask = (lineNumber: number, targetText?: string) => {
     if (!activeTab || !activeTabPath) return;
     const newContent = toggleTaskAtLine(activeTab.content, lineNumber, targetText);
     updateContent(activeTabPath, newContent);
   };
 
-  // Safe Save active note (C-02 in-flight lock, F1 & F2 concurrency fixes)
   const saveActiveNote = async (force = false) => {
     const currentPath = activeTabPathRef.current;
     if (!currentPath) return;
 
-    const currentTab = openTabsRef.current.find((t) => t.path === currentPath);
-    if (!currentTab) return;
-
-    if (isSavingRef.current) {
-      // Re-arm autosave / pending save opportunity so edits during slow save are never dropped (F1)
-      pendingSaveRef.current = true;
-      return;
-    }
-
-    const savingPath = currentPath;
-    const contentToSave = currentTab.content;
-    const expectedVersion = force ? undefined : currentTab.initialSnapshot?.version || null;
-
-    isSavingRef.current = true;
-    if (activeTabPathRef.current === savingPath) {
-      setSaveStatus('saving');
-    }
-
     try {
-      const res = await safeWriter.safeSave(savingPath, contentToSave, {
-        expectedVersion,
-        force,
-      });
-
-      let stillDirty = false;
-      // Update tab snapshot: clear isDirty ONLY if current content matches saved content (F1)
-      setOpenTabs((prev) =>
-        prev.map((tab) => {
-          if (tab.path !== savingPath) return tab;
-          const isStillMatching = tab.content === contentToSave;
-          stillDirty = !isStillMatching;
-          return {
-            ...tab,
-            isDirty: stillDirty,
-            initialSnapshot: res.snapshot,
-          };
-        })
-      );
-
-      const parsed = await parser.parse(savingPath, contentToSave, res.snapshot.version.hash);
-      await index.upsert(parsed);
-
-      // Guard with live active tab ref to avoid clobbering switched tab preview/backlinks (F2)
-      if (activeTabPathRef.current === savingPath) {
-        setParsedDoc(parsed);
-        const bl = await index.getBacklinks(savingPath);
-        if (activeTabPathRef.current === savingPath) {
-          setBacklinks(bl);
-          if (!stillDirty) {
-            setSaveStatus('saved');
-            setConflictData(null);
-          } else {
-            setSaveStatus('modified');
+      const snapshot = await coordinatorRef.current.save(currentPath, force);
+      if (snapshot) {
+        const state = coordinatorRef.current.getNoteState(currentPath);
+        const content = state ? state.bufferContent : '';
+        const parsed = await parser.parse(currentPath, content, snapshot.version.hash);
+        await index.upsert(parsed);
+        if (activeTabPathRef.current === currentPath) {
+          setParsedDoc(parsed);
+          const bl = await index.getBacklinks(currentPath);
+          if (activeTabPathRef.current === currentPath) {
+            setBacklinks(bl);
           }
         }
       }
-
-      // If user typed during save, re-arm autosave via saveGeneration trigger (F1)
-      if (stillDirty) {
-        setSaveGeneration((g) => g + 1);
-      }
     } catch (err: any) {
-      if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
-        if (activeTabPathRef.current === savingPath) {
-          setSaveStatus('conflict');
-        }
-        try {
-          const diskText = await storage.readText(savingPath);
-          setConflictData({ path: savingPath, diskContent: diskText });
-        } catch {
-          setConflictData({ path: savingPath });
-        }
-      } else {
-        console.error('Save failed:', err);
-        if (activeTabPathRef.current === savingPath) {
-          setSaveStatus('modified');
-        }
-      }
-    } finally {
-      isSavingRef.current = false;
-      if (pendingSaveRef.current) {
-        pendingSaveRef.current = false;
-        // Trigger pending save for any in-flight edits (F1)
-        saveActiveNote();
-      }
     }
   };
 
-  // Create a new note (L-02 fix: handles explicit note name or folder)
   const createNote = async (nameOrFolder: string = '') => {
     let targetPath: string;
 
@@ -448,100 +403,103 @@ export function useVault() {
       }
     }
 
-    if (!(await storage.exists(targetPath))) {
-      const noteTitle = targetPath.split('/').pop()?.replace(/\.md$/, '') || 'Untitled';
-      const defaultContent = `# ${noteTitle}\n\n`;
-      await storage.write(targetPath, null, defaultContent);
-    }
-
-    await refreshVault();
-    await openNote(targetPath);
-  };
-
-  // Create a new folder
-  const createFolder = async (parent: string = '') => {
-    let name = 'New Folder';
+    let candidate = targetPath;
     let counter = 1;
-    let targetPath = parent ? `${parent}/${name}` : name;
-
-    while (await storage.exists(targetPath)) {
-      name = `New Folder ${counter}`;
-      targetPath = parent ? `${parent}/${name}` : name;
+    while (openTabs.some((t) => t.path === candidate)) {
+      const base = targetPath.replace(/\.md$/, '');
+      candidate = `${base}-${counter}.md`;
       counter++;
     }
 
-    await storage.createFolder(targetPath);
-    await refreshVault();
+    try {
+      const initialContent = `# ${candidate.replace(/\.md$/, '').split('/').pop()}\n\n`;
+      const res = await safeWriter.safeSave(candidate, initialContent, { expectedVersion: null });
+      const parsed = await parser.parse(candidate, initialContent, res.snapshot.version.hash);
+      await index.upsert(parsed);
+
+      coordinatorRef.current.initNote(candidate, res.snapshot, initialContent);
+
+      const newTab: OpenTab = {
+        path: candidate,
+        title: parsed.title,
+        isDirty: false,
+        content: initialContent,
+        initialSnapshot: res.snapshot,
+      };
+
+      setOpenTabs((prev) => [...prev, newTab]);
+      setActiveTabPath(candidate);
+      setParsedDoc(parsed);
+      setBacklinks([]);
+      setSaveStatus('saved');
+      await refreshVault();
+    } catch (err) {
+      console.error(`Failed to create note "${candidate}":`, err);
+    }
   };
 
-  // Rename a note safely with automatic incoming link refactoring (F-010 / F-011, P4-1, P4-5, P4-7)
-  const renameNote = async (from: VaultPath, to: VaultPath) => {
-    const normTo = to.endsWith('.md') ? to : `${to}.md`;
-    try {
-      // 1. Save any dirty open tabs first to avoid data loss (P4-5)
-      for (const tab of openTabs) {
-        if (tab.isDirty) {
-          const res = await safeWriter.safeSave(tab.path, tab.content, {
-            expectedVersion: tab.initialSnapshot?.version,
-          });
-          tab.isDirty = false;
-          tab.initialSnapshot = res.snapshot;
-        }
+  const createFolder = async (folderPath?: string) => {
+    let targetPath: string;
+    if (folderPath && folderPath.trim().length > 0) {
+      targetPath = normalizeVaultPath(folderPath);
+    } else {
+      let counter = 1;
+      let candidate = 'New Folder';
+      while (await storage.exists(candidate)) {
+        candidate = `New Folder ${counter}`;
+        counter++;
       }
+      targetPath = candidate;
+    }
+    if (!targetPath) return;
+    try {
+      await storage.createFolder(targetPath);
+      await refreshVault();
+    } catch (err) {
+      console.error(`Failed to create folder "${targetPath}":`, err);
+    }
+  };
 
-      // 2. Perform safe rename refactoring
-      const res = await renameDocument(storage, index, parser, from, normTo, { updateLinks: true });
+  const renameNote = async (oldPath: VaultPath, newPath: VaultPath) => {
+    try {
+      await renameDocument(storage, index, parser, oldPath, newPath);
+      coordinatorRef.current.renameNote(oldPath, newPath);
 
-      // 3. Update tab paths and refresh snapshots to avoid phantom conflicts (P4-7)
-      const updatedOpenTabs = await Promise.all(
-        openTabs.map(async (tab) => {
-          if (tab.path === from) {
-            const snap = await storage.read(normTo);
-            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
+      setOpenTabs((prev) =>
+        prev.map((t) => {
+          if (t.path === oldPath) {
             return {
-              ...tab,
-              path: normTo,
-              title: normTo.replace(/\.md$/, ''),
-              content,
-              isDirty: false,
-              initialSnapshot: snap,
+              ...t,
+              path: newPath,
+              title: newPath.replace(/\.md$/, '').split('/').pop() || newPath,
             };
           }
-          if (res.updatedFiles.includes(tab.path)) {
-            const snap = await storage.read(tab.path);
-            const content = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
-            return {
-              ...tab,
-              content,
-              isDirty: false,
-              initialSnapshot: snap,
-            };
-          }
-          return tab;
+          return t;
         })
       );
-      setOpenTabs(updatedOpenTabs);
 
-      if (activeTabPath === from) {
-        setActiveTabPath(normTo);
+      if (activeTabPath === oldPath) {
+        setActiveTabPath(newPath);
       }
+
       await refreshVault();
-    } catch (err: any) {
-      console.error('Rename failed:', err);
-      alert(`Rename failed: ${err.message}`);
+    } catch (err) {
+      console.error(`Failed to rename "${oldPath}" to "${newPath}":`, err);
     }
   };
 
-  // Delete a note / folder
   const deletePath = async (path: VaultPath) => {
-    if (confirm(`Are you sure you want to delete "${path}"?`)) {
-      closeTab(path, true);
+    try {
       await storage.remove(path);
+      await index.remove(path);
+      coordinatorRef.current.removeNote(path);
+      closeTab(path, true);
       await refreshVault();
+    } catch (err) {
+      console.error(`Failed to delete "${path}":`, err);
     }
   };
 
-  // Debounced AST parsing & backlinks computation for active tab
   useEffect(() => {
     if (!activeTab || !activeTabPath) {
       setParsedDoc(null);
@@ -579,111 +537,36 @@ export function useVault() {
     };
   }, [activeTabPath, activeTab?.content]);
 
-  // Debounced Autosave Hook (H-02 fix, F1 saveGeneration trigger)
   useEffect(() => {
     if (!activeTab || !activeTab.isDirty) return;
 
     const autosaveTimer = setTimeout(() => {
       saveActiveNote();
-    }, 2000); // 2-second debounced autosave
+    }, 2000);
 
     return () => clearTimeout(autosaveTimer);
-  }, [activeTabPath, activeTab?.content, activeTab?.isDirty, saveGeneration]);
+  }, [activeTabPath, activeTab?.content, activeTab?.isDirty]);
 
-  // Update a note's frontmatter property (Phase 6 Notion views, P6-3 / P6-4, F3 post-await check)
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
-      const currentTabs = openTabsRef.current;
-      const openTab = currentTabs.find((t) => t.path === path);
-      if (openTab) {
-        const preEditContent = openTab.content;
-        const snap = openTab.initialSnapshot || (await storage.read(path));
-        const parsed = await parser.parse(path, preEditContent);
-        const currentProps = parsed.properties || {};
-        const newProps = { ...currentProps };
-        if (value === null || value === undefined) {
-          delete newProps[key];
-        } else {
-          newProps[key] = value;
-        }
-        const updated = updateDocumentFrontmatter(preEditContent, newProps);
-
-        // Perform version-checked save first before mutating buffer
-        const saveRes = await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
-
-        // Post-await commit check: did the user type into this tab while save was in-flight? (F3)
-        let diverged = false;
-        setOpenTabs((prev) =>
-          prev.map((t) => {
-            if (t.path !== path) return t;
-            if (t.content !== preEditContent) {
-              diverged = true;
-              // User typed: KEEP user's typed content, mark dirty, update snapshot
-              return {
-                ...t,
-                isDirty: true,
-                initialSnapshot: saveRes.snapshot,
-              };
-            }
-            return {
-              ...t,
-              content: updated,
-              isDirty: false,
-              initialSnapshot: saveRes.snapshot,
-            };
-          })
-        );
-
-        if (diverged) {
-          // Surface conflict so user's in-progress typing is not silently clobbered (F3)
-          setConflictData({
-            path,
-            diskContent: updated,
-          });
-          return;
-        }
-
-        const newParsed = await parser.parse(path, updated);
-        await index.upsert(newParsed);
+      await coordinatorRef.current.updateProperty(path, key, value, parser);
+      const state = coordinatorRef.current.getNoteState(path);
+      if (state && state.committedSnapshot) {
+        const parsed = await parser.parse(path, state.bufferContent, state.committedSnapshot.version.hash);
+        await index.upsert(parsed);
         if (activeTabPathRef.current === path) {
-          setParsedDoc(newParsed);
+          setParsedDoc(parsed);
           const bl = await index.getBacklinks(path);
           if (activeTabPathRef.current === path) {
             setBacklinks(bl);
           }
         }
-        return;
       }
-
-      const snap = await storage.read(path);
-      const text = typeof snap.content === 'string' ? snap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
-      const parsed = await parser.parse(path, text);
-      const currentProps = parsed.properties || {};
-      const newProps = { ...currentProps };
-      if (value === null || value === undefined) {
-        delete newProps[key];
-      } else {
-        newProps[key] = value;
-      }
-      const updated = updateDocumentFrontmatter(text, newProps);
-      await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
-      const newParsed = await parser.parse(path, updated);
-      await index.upsert(newParsed);
-    } catch (err: any) {
-      if (err?.name === 'ConflictError' || err?.message?.includes('Conflict')) {
-        const freshSnap = await storage.read(path);
-        const diskContent = typeof freshSnap.content === 'string' ? freshSnap.content : new TextDecoder('utf-8', { ignoreBOM: true }).decode(freshSnap.content);
-        setConflictData({
-          path,
-          diskContent,
-        });
-      } else {
-        console.error('Failed to update note property:', err);
-      }
+    } catch (err) {
+      console.error('Failed to update note property:', err);
     }
   };
 
-  // Create a note with predefined frontmatter properties
   const createNoteWithProperties = async (name: string, initialProps: Record<string, any>) => {
     const cleanName = name.trim();
     const noteTitle = cleanName.replace(/\.md$/, '');
@@ -697,65 +580,12 @@ export function useVault() {
     await openNote(targetPath);
   };
 
-  // Safely apply AI proposed edit with divergence detection and buffer/index reconciliation (F-028, P7-1, P7-3, F3)
   const applyAIProposedEdit = async (proposal: any): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const currentTabs = openTabsRef.current;
-      const openTab = currentTabs.find((t) => t.path === proposal.path);
-      if (openTab) {
-        const preEditContent = openTab.content;
-        // Pre-check: Has user edited buffer since proposal generation?
-        if (preEditContent.trim() !== proposal.originalContent.trim()) {
-          setConflictData({
-            path: proposal.path,
-            diskContent: preEditContent,
-          });
-          return {
-            success: false,
-            error: 'Conflict: Note buffer was modified after AI proposal was generated.',
-          };
-        }
-
-        const snap = openTab.initialSnapshot || (await storage.read(proposal.path));
-        const saveRes = await safeWriter.safeSave(proposal.path, proposal.proposedContent, {
-          expectedVersion: snap.version,
-        });
-
-        // Post-await commit check: did user type into buffer while save was in flight? (F3)
-        let diverged = false;
-        setOpenTabs((prev) =>
-          prev.map((t) => {
-            if (t.path !== proposal.path) return t;
-            if (t.content !== preEditContent) {
-              diverged = true;
-              // User typed during save: preserve human work, keep dirty, update snapshot
-              return {
-                ...t,
-                isDirty: true,
-                initialSnapshot: saveRes.snapshot,
-              };
-            }
-            return {
-              ...t,
-              content: proposal.proposedContent,
-              isDirty: false,
-              initialSnapshot: saveRes.snapshot,
-            };
-          })
-        );
-
-        if (diverged) {
-          setConflictData({
-            path: proposal.path,
-            diskContent: proposal.proposedContent,
-          });
-          return {
-            success: false,
-            error: 'Conflict: Note buffer was modified while AI proposed edit was being applied.',
-          };
-        }
-
-        const parsed = await parser.parse(proposal.path, proposal.proposedContent);
+    const res = await coordinatorRef.current.applyAI(proposal);
+    if (res.success) {
+      const state = coordinatorRef.current.getNoteState(proposal.path);
+      if (state && state.committedSnapshot) {
+        const parsed = await parser.parse(proposal.path, state.bufferContent, state.committedSnapshot.version.hash);
         await index.upsert(parsed);
         if (activeTabPathRef.current === proposal.path) {
           setParsedDoc(parsed);
@@ -764,47 +594,9 @@ export function useVault() {
             setBacklinks(bl);
           }
         }
-        return { success: true };
       }
-
-      // Non-active tab case: verify disk content
-      const snap = await storage.read(proposal.path);
-      const diskText =
-        typeof snap.content === 'string'
-          ? snap.content
-          : new TextDecoder('utf-8', { ignoreBOM: true }).decode(snap.content);
-
-      if (diskText.trim() !== proposal.originalContent.trim()) {
-        setConflictData({
-          path: proposal.path,
-          diskContent: diskText,
-        });
-        return {
-          success: false,
-          error: 'Conflict: Note on disk was modified after AI proposal was generated.',
-        };
-      }
-
-      await safeWriter.safeSave(proposal.path, proposal.proposedContent, {
-        expectedVersion: snap.version,
-      });
-      const parsed = await parser.parse(proposal.path, proposal.proposedContent);
-      await index.upsert(parsed);
-      return { success: true };
-    } catch (err: any) {
-      if (err?.name === 'ConflictError' || err?.message?.includes('Conflict')) {
-        const freshSnap = await storage.read(proposal.path);
-        const diskContent =
-          typeof freshSnap.content === 'string'
-            ? freshSnap.content
-            : new TextDecoder('utf-8', { ignoreBOM: true }).decode(freshSnap.content);
-        setConflictData({
-          path: proposal.path,
-          diskContent,
-        });
-      }
-      return { success: false, error: err.message };
     }
+    return res;
   };
 
   return {
@@ -833,6 +625,7 @@ export function useVault() {
     updateNoteProperty,
     createNoteWithProperties,
     applyAIProposedEdit,
+    atomicWrites: (storage as any).atomicWrites ?? true,
     dismissConflict: () => setConflictData(null),
     resolveConflictReload: async () => {
       if (activeTabPath) {

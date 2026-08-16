@@ -323,4 +323,96 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
 
     await runtime4.close();
   });
+
+  it('DesktopVaultRuntime G4: surfaces degraded reconciliation state and records verification errors on failure', async () => {
+    const dbPath = path.join(testVaultDir, 'test-degraded.sqlite');
+    fs.writeFileSync(path.join(testVaultDir, 'Valid.md'), '# Valid Note\n\nContent.', 'utf8');
+    fs.writeFileSync(path.join(testVaultDir, 'Broken.md'), '# Broken Note\n\nContent.', 'utf8');
+
+    const runtime = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    await runtime.waitForVerification();
+    expect(runtime.reconciliationState).toBe('verified');
+    expect(runtime.getVerificationErrors().length).toBe(0);
+    await runtime.close();
+
+    // Now corrupt or make Broken.md unreadable
+    // (mocking storage.read to throw on Broken.md during reconciliation)
+    const runtime2 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const origRead = runtime2.storage.read.bind(runtime2.storage);
+    runtime2.storage.read = async (p: string) => {
+      if (p === 'Broken.md') {
+        throw new Error('EACCES: permission denied, read "Broken.md"');
+      }
+      return origRead(p);
+    };
+
+    // Force reconciliation
+    await runtime2.reconcile();
+    await runtime2.waitForVerification();
+
+    expect(runtime2.reconciliationState).toBe('degraded');
+    const errors = runtime2.getVerificationErrors();
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((e) => e.path === 'Broken.md' && e.error.includes('EACCES'))).toBe(true);
+
+    await runtime2.close();
+  });
+
+  it('DesktopVaultRuntime G5: watcher update takes precedence over concurrent stale background verifier read', async () => {
+    const dbPath = path.join(testVaultDir, 'test-g5.sqlite');
+    fs.writeFileSync(path.join(testVaultDir, 'Race.md'), '# Initial Race Note', 'utf8');
+
+    const runtime = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+    await runtime.waitForVerification();
+    await runtime.close();
+
+    // Re-open with delayed storage read
+    const runtime2 = await DesktopVaultRuntime.create({
+      vaultPath: testVaultDir,
+      databasePath: dbPath,
+      masterSecret: 'test-pass',
+    });
+
+    const origRead = runtime2.storage.read.bind(runtime2.storage);
+    let delayTriggered = false;
+
+    runtime2.storage.read = async (p: string) => {
+      if (p === 'Race.md' && !delayTriggered) {
+        delayTriggered = true;
+        await new Promise((r) => setTimeout(r, 100)); // slow background verification read
+      }
+      return origRead(p);
+    };
+
+    // Trigger reconciliation
+    const reconPromise = runtime2.reconcile();
+
+    // While verifier is reading the old content, watcher simulates external update
+    await new Promise((r) => setTimeout(r, 20));
+    fs.writeFileSync(path.join(testVaultDir, 'Race.md'), '# Newer Watcher Content On Disk', 'utf8');
+    await (runtime2 as any).handleWatcherEvent({ type: 'modified', path: 'Race.md' });
+
+    await reconPromise;
+    await runtime2.waitForVerification();
+
+    // Verify index contains the NEWER watcher content and was not overwritten by stale verifier upsert
+    const manifest = await runtime2.index.getSourceManifest();
+    const raceDoc = (await runtime2.index.getAll()).find((d: any) => d.path === 'Race.md');
+    expect(raceDoc?.title).toBe('Newer Watcher Content On Disk');
+
+    await runtime2.close();
+  });
 });

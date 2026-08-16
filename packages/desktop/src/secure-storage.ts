@@ -60,42 +60,50 @@ export class DesktopSecretStore implements SecretStore {
 
   async setSecret(providerId: string, value: string): Promise<void> {
     const cleanSecret = value.trim();
-    const previousValue = this.memoryCache.get(providerId);
 
-    this.writeLock = this.writeLock.then(async () => {
-      if (!cleanSecret) {
-        this.memoryCache.delete(providerId);
-      } else {
-        this.memoryCache.set(providerId, cleanSecret);
-      }
-      try {
-        this.persistToDisk();
-      } catch (err) {
-        if (previousValue === undefined) {
+    const op = this.writeLock
+      .catch(() => {})
+      .then(async () => {
+        const previousValue = this.memoryCache.get(providerId);
+        if (!cleanSecret) {
           this.memoryCache.delete(providerId);
         } else {
-          this.memoryCache.set(providerId, previousValue);
+          this.memoryCache.set(providerId, cleanSecret);
         }
-        throw err;
-      }
-    });
-    return this.writeLock;
+        try {
+          this.persistToDisk();
+        } catch (err) {
+          if (previousValue === undefined) {
+            this.memoryCache.delete(providerId);
+          } else {
+            this.memoryCache.set(providerId, previousValue);
+          }
+          throw err;
+        }
+      });
+
+    this.writeLock = op.catch(() => {});
+    return op;
   }
 
   async clearSecret(providerId: string): Promise<void> {
-    const previousValue = this.memoryCache.get(providerId);
-    this.writeLock = this.writeLock.then(async () => {
-      this.memoryCache.delete(providerId);
-      try {
-        this.persistToDisk();
-      } catch (err) {
-        if (previousValue !== undefined) {
-          this.memoryCache.set(providerId, previousValue);
+    const op = this.writeLock
+      .catch(() => {})
+      .then(async () => {
+        const previousValue = this.memoryCache.get(providerId);
+        this.memoryCache.delete(providerId);
+        try {
+          this.persistToDisk();
+        } catch (err) {
+          if (previousValue !== undefined) {
+            this.memoryCache.set(providerId, previousValue);
+          }
+          throw err;
         }
-        throw err;
-      }
-    });
-    return this.writeLock;
+      });
+
+    this.writeLock = op.catch(() => {});
+    return op;
   }
 
   async hasSecret(providerId: string): Promise<boolean> {
