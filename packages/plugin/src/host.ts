@@ -14,7 +14,7 @@ export interface PluginRegistration {
 }
 
 /**
- * Sandboxed, crash-resilient Plugin Host (Constitution Law 20, F-007).
+ * Permission-gated, crash-resilient Plugin Host (Constitution Law 20, F-007).
  * Controls plugin lifecycle, capability gating, and error containment.
  */
 export class PluginHost {
@@ -23,11 +23,15 @@ export class PluginHost {
   private context: PluginHostContext;
 
   constructor(context: PluginHostContext) {
-    this.context = context;
+    this.context = { ...context };
   }
 
   updateContext(context: Partial<PluginHostContext>): void {
     this.context = { ...this.context, ...context };
+  }
+
+  getContext(): PluginHostContext {
+    return this.context;
   }
 
   registerPlugin(manifest: PluginManifest, factory: () => Plugin): void {
@@ -63,7 +67,7 @@ export class PluginHost {
 
       const api = createPluginAPI(
         reg.manifest,
-        this.context,
+        () => this.context,
         inst.registeredCommands,
         inst.registeredViews
       );

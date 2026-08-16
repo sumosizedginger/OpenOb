@@ -21,11 +21,23 @@ import {
 } from '@okw/core';
 
 function normalizeFsPath(p: string): string {
-  let norm = path.normalize(p).toLowerCase().replace(/\\/g, '/');
+  let norm = path.normalize(p).replace(/\\/g, '/');
   if (norm.startsWith('//?/')) {
     norm = norm.slice(4);
   }
+  if (process.platform === 'win32') {
+    norm = norm.toLowerCase();
+  }
+  while (norm.length > 1 && norm.endsWith('/')) {
+    norm = norm.slice(0, -1);
+  }
   return norm;
+}
+
+function isPathInside(childPath: string, parentPath: string): boolean {
+  const normChild = normalizeFsPath(childPath);
+  const normParent = normalizeFsPath(parentPath);
+  return normChild === normParent || normChild.startsWith(normParent + '/');
 }
 
 /**
@@ -46,40 +58,35 @@ export class NodeFsVaultStorage implements VaultStorage {
     const rootResolved = path.resolve(this.rootDir);
     const diskPath = path.resolve(this.rootDir, norm);
 
-    const normDisk = normalizeFsPath(diskPath);
-    const normRoot = normalizeFsPath(rootResolved);
-
-    if (!normDisk.startsWith(normRoot)) {
+    if (!isPathInside(diskPath, rootResolved)) {
       throw new SecurityError(`Path escapes vault root: "${rawPath}"`);
     }
 
-    // Check if target or any existing ancestor is a symlink pointing outside vault (SEC-02)
     try {
       const realDisk = await fs.realpath(diskPath);
       const realRoot = await fs.realpath(rootResolved);
-      const normRealDisk = normalizeFsPath(realDisk);
-      const normRealRoot = normalizeFsPath(realRoot);
 
-      if (!normRealDisk.startsWith(normRealRoot)) {
+      if (!isPathInside(realDisk, realRoot)) {
         throw new SecurityError(`Symlink traversal detected outside vault root: "${rawPath}"`);
       }
     } catch (err: any) {
       if (err instanceof SecurityError) {
         throw err;
       }
-      if (err.code !== 'ENOENT') {
-        // Ancestor check if path doesn't exist yet
+      if (err.code === 'ENOENT') {
+        // Target does not exist yet: check existing ancestors
+        const realRoot = await fs.realpath(rootResolved);
         let curr = path.dirname(diskPath);
-        while (normalizeFsPath(curr).startsWith(normRoot)) {
+        while (isPathInside(curr, rootResolved)) {
           try {
             const realCurr = await fs.realpath(curr);
-            const realRoot = await fs.realpath(rootResolved);
-            if (!normalizeFsPath(realCurr).startsWith(normalizeFsPath(realRoot))) {
+            if (!isPathInside(realCurr, realRoot)) {
               throw new SecurityError(`Ancestor symlink traversal detected: "${rawPath}"`);
             }
             break;
           } catch (ancestorErr: any) {
             if (ancestorErr instanceof SecurityError) throw ancestorErr;
+            if (curr === rootResolved || curr === path.dirname(curr)) break;
             curr = path.dirname(curr);
           }
         }
@@ -270,6 +277,14 @@ export class NodeFsVaultStorage implements VaultStorage {
         await fileHandle.close();
       }
 
+      // Re-verify parent directory containment immediately before atomic rename (TOCTOU protection)
+      const rootResolved = path.resolve(this.rootDir);
+      const realParent = await fs.realpath(parentDir);
+      const realRoot = await fs.realpath(rootResolved);
+      if (!isPathInside(realParent, realRoot)) {
+        throw new SecurityError(`Destination directory escaped vault root before rename: "${normPath}"`);
+      }
+
       // Atomic rename replaces target file safely
       await fs.rename(tmpDiskPath, diskPath);
 
@@ -288,6 +303,7 @@ export class NodeFsVaultStorage implements VaultStorage {
       try {
         await fs.unlink(tmpDiskPath);
       } catch {}
+      if (err instanceof SecurityError || err instanceof ConflictError) throw err;
       throw new StorageError(`Atomic write failed for "${normPath}": ${err.message}`, err);
     }
 
@@ -350,8 +366,8 @@ export class NodeFsVaultStorage implements VaultStorage {
   }
 
   async exists(rawPath: VaultPath): Promise<boolean> {
+    const diskPath = await this.resolveToDiskSafe(rawPath);
     try {
-      const diskPath = await this.resolveToDiskSafe(rawPath);
       await fs.access(diskPath);
       return true;
     } catch {

@@ -65,13 +65,15 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
 
     expect(await storeWrong.getSecret('openai')).toBeNull();
     expect(await storeWrong.hasSecret('openai')).toBe(false);
+    expect(storeWrong.getLoadError()).not.toBeNull();
+    expect(storeWrong.getLoadError()?.message).toContain('Failed to decrypt secret');
 
     // Assert raw file on disk has no plaintext
     const rawDisk = fs.readFileSync(secretsPath, 'utf8');
     expect(rawDisk).not.toContain('super-secret-key');
   });
 
-  it('4. tampered ciphertext fails authentication', async () => {
+  it('4. tampered ciphertext fails authentication and surfaces error', async () => {
     const secretsPath = path.join(tmpDir, 'secrets.json');
     const store = new DesktopSecretStore({
       storagePath: secretsPath,
@@ -80,9 +82,10 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
 
     await store.setSecret('openai', 'super-secret-key');
 
-    // Tamper with disk file
+    // Tamper with disk file records
     const raw = JSON.parse(fs.readFileSync(secretsPath, 'utf8'));
-    raw.openai.ciphertext = raw.openai.ciphertext.slice(0, -4) + '0000';
+    const records = raw.records || raw;
+    records.openai.ciphertext = records.openai.ciphertext.slice(0, -4) + '0000';
     fs.writeFileSync(secretsPath, JSON.stringify(raw));
 
     const freshStore = new DesktopSecretStore({
@@ -91,5 +94,35 @@ describe('DesktopSecretStore Hardening (P1-SECRET-001 / Law 17)', () => {
     });
 
     expect(await freshStore.getSecret('openai')).toBeNull();
+    expect(freshStore.getLoadError()).not.toBeNull();
+  });
+
+  it('5. uses unique random per-file salt and serializes concurrent setSecret operations', async () => {
+    const path1 = path.join(tmpDir, 'secrets1.json');
+    const path2 = path.join(tmpDir, 'secrets2.json');
+
+    const store1 = new DesktopSecretStore({ storagePath: path1, masterSecret: 'pass' });
+    const store2 = new DesktopSecretStore({ storagePath: path2, masterSecret: 'pass' });
+
+    await store1.setSecret('k1', 'v1');
+    await store2.setSecret('k1', 'v1');
+
+    const file1 = JSON.parse(fs.readFileSync(path1, 'utf8'));
+    const file2 = JSON.parse(fs.readFileSync(path2, 'utf8'));
+
+    expect(file1.salt).toBeDefined();
+    expect(file2.salt).toBeDefined();
+    expect(file1.salt).not.toEqual(file2.salt);
+
+    // Test concurrent writes
+    await Promise.all([
+      store1.setSecret('k2', 'v2'),
+      store1.setSecret('k3', 'v3'),
+      store1.setSecret('k4', 'v4'),
+    ]);
+
+    expect(await store1.getSecret('k2')).toBe('v2');
+    expect(await store1.getSecret('k3')).toBe('v3');
+    expect(await store1.getSecret('k4')).toBe('v4');
   });
 });

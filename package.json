@@ -9,7 +9,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspace=apps/web",
     "typecheck": "tsc --build",
     "test": "vitest run",
     "test:watch": "vitest",

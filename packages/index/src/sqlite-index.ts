@@ -1,6 +1,7 @@
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import {
   Backlink,
+  basenameVaultPath,
   dirnameVaultPath,
   DocumentIndex,
   joinVaultPath,
@@ -170,8 +171,77 @@ export class SqliteDocumentIndex implements DocumentIndex {
     this.db.run(sql, safeParams);
   }
 
-  private refreshLinkTargets(allDocs: ParsedDocument[]): void {
-    const resolver = new DefaultLinkResolver(() => allDocs);
+  private getResolverProjection(): { path: string; aliases: string[] }[] {
+    const docRows = this.db.exec('SELECT id, path FROM documents');
+    if (docRows.length === 0 || docRows[0].values.length === 0) return [];
+    const aliasMap = new Map<string, string[]>();
+    const aliasRows = this.db.exec('SELECT doc_id, alias FROM aliases');
+    if (aliasRows.length > 0) {
+      for (const val of aliasRows[0].values) {
+        const id = val[0] as string;
+        let arr = aliasMap.get(id);
+        if (!arr) {
+          arr = [];
+          aliasMap.set(id, arr);
+        }
+        arr.push(val[1] as string);
+      }
+    }
+    const list: { path: string; aliases: string[] }[] = [];
+    for (const val of docRows[0].values) {
+      const id = val[0] as string;
+      const p = val[1] as string;
+      list.push({
+        path: p,
+        aliases: aliasMap.get(id) || [],
+      });
+    }
+    return list;
+  }
+
+  private refreshAffectedLinks(affected: { path: string; title?: string; aliases?: string[] }): void {
+    const projection = this.getResolverProjection();
+    const resolver = new DefaultLinkResolver(() => projection as any);
+
+    const candidateNames = new Set<string>();
+    if (affected.path) {
+      candidateNames.add(affected.path);
+      candidateNames.add(basenameVaultPath(affected.path, '.md'));
+    }
+    if (affected.title) {
+      candidateNames.add(affected.title);
+    }
+    if (affected.aliases) {
+      for (const a of affected.aliases) {
+        if (a) candidateNames.add(a);
+      }
+    }
+
+    const nameArray = Array.from(candidateNames);
+    if (nameArray.length === 0) return;
+
+    const placeholders = nameArray.map(() => '?').join(',');
+    const query = `SELECT id, source_path, target_name FROM links WHERE target_path = ? OR target_path IS NULL OR target_name IN (${placeholders})`;
+    const stmt = this.db.prepare(query);
+    this.safeBind(stmt, [affected.path, ...nameArray]);
+
+    const updateStmt = this.db.prepare('UPDATE links SET target_path = ? WHERE id = ?');
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      const linkId = row.id as number;
+      const sourcePath = row.source_path as string;
+      const targetName = row.target_name as string;
+      const res = resolver.resolve(sourcePath, targetName);
+      const newTargetPath = res.resolved && res.targetPath ? res.targetPath : null;
+      updateStmt.run([newTargetPath, linkId]);
+    }
+    stmt.free();
+    updateStmt.free();
+  }
+
+  public refreshLinkTargets(allDocs?: ParsedDocument[]): void {
+    const projection = allDocs || this.getResolverProjection();
+    const resolver = new DefaultLinkResolver(() => projection as any);
     const updateStmt = this.db.prepare('UPDATE links SET target_path = ? WHERE id = ?');
     const linkRows = this.db.exec('SELECT id, source_path, target_name FROM links');
     if (linkRows.length > 0) {
@@ -256,10 +326,14 @@ export class SqliteDocumentIndex implements DocumentIndex {
         }
       }
 
-      // 6. Insert links
+      // 6. Insert links with direct link resolution (P4-3 fast incremental path)
+      const projection = this.getResolverProjection();
+      const resolver = new DefaultLinkResolver(() => projection as any);
       for (const link of doc.links) {
         const targetName = link.target || (link as any).rawTarget || link.raw;
         const raw = link.raw || `[[${targetName}]]`;
+        const res = resolver.resolve(doc.path, targetName);
+        const targetPath = res.resolved && res.targetPath ? res.targetPath : null;
 
         this.safeRun(
           `INSERT INTO links (source_doc_id, source_path, target_path, target_name, raw, display_text, subpath, line, is_embed)
@@ -267,7 +341,7 @@ export class SqliteDocumentIndex implements DocumentIndex {
           [
             doc.id,
             doc.path,
-            null,
+            targetPath,
             targetName,
             raw,
             link.displayText ?? null,
@@ -278,9 +352,8 @@ export class SqliteDocumentIndex implements DocumentIndex {
         );
       }
 
-      // 7. Authoritative link re-resolution across whole vault (P4-3)
-      const allDocs = await this.getAll();
-      this.refreshLinkTargets(allDocs);
+      // 7. Incremental link re-resolution for affected incoming links
+      this.refreshAffectedLinks(doc);
 
       this.db.run('COMMIT');
     } catch (err) {
@@ -292,6 +365,28 @@ export class SqliteDocumentIndex implements DocumentIndex {
   async remove(documentId: string): Promise<void> {
     this.db.run('BEGIN TRANSACTION');
     try {
+      // Look up target path and aliases before deletion
+      let removedPath: string = documentId;
+      let removedTitle: string | undefined;
+      const aliases: string[] = [];
+
+      const docStmt = this.db.prepare('SELECT id, path, title FROM documents WHERE id = ? OR path = ?');
+      this.safeBind(docStmt, [documentId, documentId]);
+      if (docStmt.step()) {
+        const docRow = docStmt.getAsObject();
+        const docId = docRow.id as string;
+        removedPath = docRow.path as string;
+        removedTitle = docRow.title as string;
+
+        const aliasStmt = this.db.prepare('SELECT alias FROM aliases WHERE doc_id = ?');
+        this.safeBind(aliasStmt, [docId]);
+        while (aliasStmt.step()) {
+          aliases.push(aliasStmt.getAsObject().alias as string);
+        }
+        aliasStmt.free();
+      }
+      docStmt.free();
+
       this.safeRun('DELETE FROM links WHERE source_doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM headings WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM tags WHERE doc_id = ?', [documentId]);
@@ -299,9 +394,8 @@ export class SqliteDocumentIndex implements DocumentIndex {
       this.safeRun('DELETE FROM aliases WHERE doc_id = ?', [documentId]);
       this.safeRun('DELETE FROM documents WHERE id = ? OR path = ?', [documentId, documentId]);
 
-      // Re-resolve remaining link targets across vault (P4-3)
-      const allDocs = await this.getAll();
-      this.refreshLinkTargets(allDocs);
+      // Re-resolve affected link targets across vault
+      this.refreshAffectedLinks({ path: removedPath, title: removedTitle, aliases });
 
       this.db.run('COMMIT');
     } catch (err) {
@@ -455,17 +549,134 @@ export class SqliteDocumentIndex implements DocumentIndex {
   }
 
   async getAll(): Promise<ParsedDocument[]> {
-    const res = this.db.exec('SELECT * FROM documents ORDER BY path ASC');
-    if (res.length === 0) return [];
+    const docRows = this.db.exec(
+      'SELECT id, path, title, hash, word_count, line_count, body FROM documents ORDER BY path ASC'
+    );
+    if (docRows.length === 0 || docRows[0].values.length === 0) return [];
 
-    const documents: ParsedDocument[] = [];
-    for (const values of res[0].values) {
-      const row: any = {};
-      res[0].columns.forEach((col, idx) => {
-        row[col] = values[idx];
-      });
-      documents.push(await this.hydrateDocument(row));
+    // Map doc_id -> relation collections (Batch Loaded)
+    const linksMap = new Map<string, ParsedLink[]>();
+    const headingsMap = new Map<string, ParsedHeading[]>();
+    const tagsMap = new Map<string, string[]>();
+    const propsMap = new Map<string, Record<string, any>>();
+    const aliasesMap = new Map<string, string[]>();
+
+    // 1. Batch load links (preserve line order)
+    const linkRes = this.db.exec(
+      'SELECT source_doc_id, raw, target_name, target_path, display_text, subpath, line, is_embed FROM links ORDER BY source_doc_id, line ASC'
+    );
+    if (linkRes.length > 0) {
+      for (const val of linkRes[0].values) {
+        const docId = val[0] as string;
+        let arr = linksMap.get(docId);
+        if (!arr) {
+          arr = [];
+          linksMap.set(docId, arr);
+        }
+        const linkObj: ParsedLink = {
+          raw: val[1] as string,
+          target: val[2] as string,
+          line: val[6] as number,
+          isEmbed: Boolean(val[7]),
+        };
+        if (val[4]) (linkObj as any).displayText = val[4] as string;
+        if (val[5]) (linkObj as any).subpath = val[5] as string;
+        arr.push(linkObj);
+      }
     }
+
+    // 2. Batch load headings
+    const headRes = this.db.exec(
+      'SELECT doc_id, level, text, slug, line FROM headings ORDER BY doc_id, line ASC'
+    );
+    if (headRes.length > 0) {
+      for (const val of headRes[0].values) {
+        const docId = val[0] as string;
+        let arr = headingsMap.get(docId);
+        if (!arr) {
+          arr = [];
+          headingsMap.set(docId, arr);
+        }
+        arr.push({
+          level: val[1] as number,
+          text: val[2] as string,
+          slug: val[3] as string,
+          line: val[4] as number,
+        });
+      }
+    }
+
+    // 3. Batch load tags (preserve insertion order)
+    const tagRes = this.db.exec('SELECT doc_id, tag FROM tags ORDER BY doc_id, id ASC');
+    if (tagRes.length > 0) {
+      for (const val of tagRes[0].values) {
+        const docId = val[0] as string;
+        let arr = tagsMap.get(docId);
+        if (!arr) {
+          arr = [];
+          tagsMap.set(docId, arr);
+        }
+        arr.push(val[1] as string);
+      }
+    }
+
+    // 4. Batch load properties
+    const propRes = this.db.exec('SELECT doc_id, key, value_json FROM properties ORDER BY doc_id');
+    if (propRes.length > 0) {
+      for (const val of propRes[0].values) {
+        const docId = val[0] as string;
+        let obj = propsMap.get(docId);
+        if (!obj) {
+          obj = {};
+          propsMap.set(docId, obj);
+        }
+        try {
+          obj[val[1] as string] = JSON.parse(val[2] as string);
+        } catch {}
+      }
+    }
+
+    // 5. Batch load aliases (preserve insertion order)
+    const aliasRes = this.db.exec('SELECT doc_id, alias FROM aliases ORDER BY doc_id, id ASC');
+    if (aliasRes.length > 0) {
+      for (const val of aliasRes[0].values) {
+        const docId = val[0] as string;
+        let arr = aliasesMap.get(docId);
+        if (!arr) {
+          arr = [];
+          aliasesMap.set(docId, arr);
+        }
+        arr.push(val[1] as string);
+      }
+    }
+
+    // 6. Assemble documents
+    const documents: ParsedDocument[] = [];
+    for (const values of docRows[0].values) {
+      const id = values[0] as string;
+      const path = values[1] as string;
+      const title = values[2] as string;
+      const hash = (values[3] as string) || '';
+      const wordCount = (values[4] as number) || 0;
+      const lineCount = (values[5] as number) || 1;
+      const body = (values[6] as string) || '';
+
+      documents.push({
+        id,
+        path,
+        title,
+        aliases: aliasesMap.get(id) || [],
+        headings: headingsMap.get(id) || [],
+        links: linksMap.get(id) || [],
+        tags: tagsMap.get(id) || [],
+        properties: propsMap.get(id) || {},
+        textContent: body,
+        sourceHash: hash,
+        lineCount,
+        wordCount,
+      });
+    }
+
     return documents;
   }
 

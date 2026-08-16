@@ -14,23 +14,44 @@ interface EncryptedPayload {
   readonly ciphertext: string;
 }
 
+interface SecretFileFormat {
+  readonly version: number;
+  readonly salt: string;
+  readonly records: Record<string, EncryptedPayload>;
+}
+
 export class DesktopSecretStore implements SecretStore {
   private readonly storagePath: string | null;
-  private readonly masterKey: Buffer;
+  private readonly masterSecret: string;
+  private salt: string;
+  private masterKey: Buffer;
   private memoryCache: Map<string, string> = new Map();
+  private lastLoadError: Error | null = null;
+  private writeLock: Promise<void> = Promise.resolve();
 
   constructor(options: DesktopSecretStoreOptions) {
     if (!options?.masterSecret || typeof options.masterSecret !== 'string' || options.masterSecret.trim().length === 0) {
       throw new Error('DesktopSecretStore requires a non-empty masterSecret passphrase');
     }
 
+    this.masterSecret = options.masterSecret;
     this.storagePath = options.storagePath ? path.resolve(options.storagePath) : null;
 
-    // Derive 256-bit key using PBKDF2 with system salt
-    const salt = Buffer.from('okw-desktop-key-salt-v1', 'utf8');
-    this.masterKey = crypto.pbkdf2Sync(options.masterSecret, salt, 100000, 32, 'sha256');
+    // Generate fresh random 16-byte salt (will be overwritten if existing file has its own salt)
+    this.salt = crypto.randomBytes(16).toString('hex');
+    this.masterKey = this.deriveKey(this.salt);
 
     this.loadFromDisk();
+  }
+
+  private deriveKey(saltHex: string): Buffer {
+    const saltBuf = Buffer.from(saltHex, 'hex');
+    // PBKDF2 with 600,000 iterations (OWASP recommendation for SHA-256)
+    return crypto.pbkdf2Sync(this.masterSecret, saltBuf, 600000, 32, 'sha256');
+  }
+
+  getLoadError(): Error | null {
+    return this.lastLoadError;
   }
 
   async getSecret(providerId: string): Promise<string | null> {
@@ -39,17 +60,23 @@ export class DesktopSecretStore implements SecretStore {
 
   async setSecret(providerId: string, value: string): Promise<void> {
     const cleanSecret = value.trim();
-    if (!cleanSecret) {
-      await this.clearSecret(providerId);
-      return;
-    }
-    this.memoryCache.set(providerId, cleanSecret);
-    this.persistToDisk();
+    this.writeLock = this.writeLock.then(async () => {
+      if (!cleanSecret) {
+        this.memoryCache.delete(providerId);
+      } else {
+        this.memoryCache.set(providerId, cleanSecret);
+      }
+      this.persistToDisk();
+    });
+    return this.writeLock;
   }
 
   async clearSecret(providerId: string): Promise<void> {
-    this.memoryCache.delete(providerId);
-    this.persistToDisk();
+    this.writeLock = this.writeLock.then(async () => {
+      this.memoryCache.delete(providerId);
+      this.persistToDisk();
+    });
+    return this.writeLock;
   }
 
   async hasSecret(providerId: string): Promise<boolean> {
@@ -101,36 +128,62 @@ export class DesktopSecretStore implements SecretStore {
 
     try {
       const raw = fs.readFileSync(this.storagePath, 'utf8');
-      const records: Record<string, EncryptedPayload> = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+
+      let records: Record<string, EncryptedPayload> = {};
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.salt && parsed.records) {
+          // New format with per-file random salt
+          this.salt = parsed.salt;
+          this.masterKey = this.deriveKey(this.salt);
+          records = parsed.records;
+        } else {
+          // Legacy format fallback
+          records = parsed;
+        }
+      }
+
       for (const [k, encrypted] of Object.entries(records)) {
         try {
           const decrypted = this.decrypt(encrypted);
           this.memoryCache.set(k, decrypted);
-        } catch {
-          // Authentication error or corrupted entry
+        } catch (err: any) {
+          this.lastLoadError = new Error(`Failed to decrypt secret "${k}": invalid passphrase or corrupted record.`);
         }
       }
-    } catch {
-      // File read error
+    } catch (err: any) {
+      this.lastLoadError = new Error(`Failed to read secrets file: ${err.message}`);
     }
   }
 
   private persistToDisk(): void {
     if (!this.storagePath) return;
 
+    const dir = path.dirname(this.storagePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const records: Record<string, EncryptedPayload> = {};
+    for (const [k, v] of this.memoryCache.entries()) {
+      records[k] = this.encrypt(v);
+    }
+
+    const payload: SecretFileFormat = {
+      version: 1,
+      salt: this.salt,
+      records,
+    };
+
+    // Atomic Temporary Write + Rename
+    const tmpPath = `${this.storagePath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     try {
-      const dir = path.dirname(this.storagePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const records: Record<string, EncryptedPayload> = {};
-      for (const [k, v] of this.memoryCache.entries()) {
-        records[k] = this.encrypt(v);
-      }
-
-      fs.writeFileSync(this.storagePath, JSON.stringify(records, null, 2), 'utf8');
+      fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf8');
+      fs.renameSync(tmpPath, this.storagePath);
     } catch (err) {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {}
       console.error('Failed to persist secrets to disk:', err);
     }
   }

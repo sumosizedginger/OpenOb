@@ -166,37 +166,37 @@ export class DesktopVaultRuntime {
       }
     }
 
-    // 3. paths existing in both => compare persisted size/mtime
+    // 3. paths existing in both => verify content hash and stat changes (P2-REC-001)
     for (const [pathKey, manifest] of dbMap) {
       const diskEntry = diskMap.get(pathKey);
       if (diskEntry) {
         const statChanged =
           diskEntry.size !== manifest.size || diskEntry.modifiedAt !== manifest.modifiedAt;
-        if (statChanged) {
-          try {
-            const snapshot = await this.storage.read(pathKey);
-            const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
-            const sz = snapshot.size ?? snapshot.version.size ?? 0;
-            if (snapshot.version.hash !== manifest.hash) {
-              // Content changed: reparse and upsert
-              const parsed = await this.parser.parse(
-                pathKey,
-                snapshot.content,
-                snapshot.version.hash
-              );
-              await this.index.upsert(parsed, {
-                modifiedAt: mtime,
-                size: sz,
-              });
-              changed = true;
-            } else {
-              // Content hash unchanged: update stat metadata only
-              await this.index.setSourceMetadata(pathKey, mtime, sz);
-              changed = true;
-            }
-          } catch (err) {
-            console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
+        try {
+          // Verify hash to guarantee zero silent change drops on coarse-timestamp systems (FAT/exFAT/rsync -t/Dropbox)
+          const snapshot = await this.storage.read(pathKey);
+          const mtime = snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0;
+          const sz = snapshot.size ?? snapshot.version.size ?? 0;
+
+          if (snapshot.version.hash !== manifest.hash) {
+            // Content changed: reparse and upsert
+            const parsed = await this.parser.parse(
+              pathKey,
+              snapshot.content,
+              snapshot.version.hash
+            );
+            await this.index.upsert(parsed, {
+              modifiedAt: mtime,
+              size: sz,
+            });
+            changed = true;
+          } else if (statChanged) {
+            // Content hash unchanged: update stat metadata only
+            await this.index.setSourceMetadata(pathKey, mtime, sz);
+            changed = true;
           }
+        } catch (err) {
+          console.warn(`[DesktopVaultRuntime] Failed to reconcile modified file "${pathKey}":`, err);
         }
       }
     }

@@ -193,4 +193,61 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
     const createdNote = await storage.read(`Daily/${today}.md`);
     expect(new TextDecoder().decode(createdNote.content)).toContain(`# Daily Note: ${today}`);
   });
+
+  it('P1-UI-001: enabled plugins dynamically observe updated context (no mount-time freezing)', async () => {
+    const storageA = new MemoryVaultStorage();
+    const storageB = new MemoryVaultStorage();
+    const indexA = new MemoryDocumentIndex();
+    const indexB = new MemoryDocumentIndex();
+
+    let capturedAPI: PluginAPI | null = null;
+    const dynamicManifest: PluginManifest = {
+      id: 'dynamic-context-plugin',
+      name: 'Dynamic Context Plugin',
+      version: '1.0.0',
+      apiVersion: '1.x',
+      permissions: ['vault.read', 'vault.write', 'workspace.modify'],
+    };
+
+    class ContextTestPlugin implements Plugin {
+      async onload(api: PluginAPI) {
+        capturedAPI = api;
+      }
+      onunload() {}
+    }
+
+    const host = new PluginHost({
+      storage: storageA,
+      index: indexA,
+      activeNotePath: 'Initial.md',
+      openNote: async () => {},
+      showNotice: () => {},
+    });
+
+    host.registerPlugin(dynamicManifest, () => new ContextTestPlugin());
+    await host.enablePlugin(dynamicManifest.id);
+
+    expect(capturedAPI).not.toBeNull();
+
+    // 1. Initial write lands in storageA
+    await capturedAPI!.vault.write('TestA.md', 'Content in A');
+    expect(await storageA.exists('TestA.md')).toBe(true);
+    expect(await storageB.exists('TestA.md')).toBe(false);
+    expect(capturedAPI!.workspace.getActiveNotePath()).toBe('Initial.md');
+
+    // 2. Switch context to storageB (simulating real vault opening in UI)
+    host.updateContext({
+      storage: storageB,
+      index: indexB,
+      activeNotePath: 'ActiveInB.md',
+    });
+
+    // 3. Write through previously enabled plugin MUST land in storageB, not storageA
+    await capturedAPI!.vault.write('TestB.md', 'Content in B');
+    expect(await storageB.exists('TestB.md')).toBe(true);
+    expect(await storageA.exists('TestB.md')).toBe(false);
+
+    // 4. Workspace active note path MUST reflect updated context
+    expect(capturedAPI!.workspace.getActiveNotePath()).toBe('ActiveInB.md');
+  });
 });

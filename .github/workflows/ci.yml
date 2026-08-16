@@ -31,8 +31,8 @@ jobs:
         run: |
           echo "Checking for illegal cross-package internal imports..."
           ! grep -rn --include="*.ts" --include="*.tsx" "@okw/[a-z-]*/src" packages/ apps/
-          echo "Checking for forbidden dangerouslySetInnerHTML usages..."
-          ! grep -rn --include="*.ts" --include="*.tsx" "dangerouslySetInnerHTML" apps/ packages/
+          echo "Checking for forbidden dangerouslySetInnerHTML usages in production code..."
+          ! grep -rn --include="*.ts" --include="*.tsx" --exclude-dir="__tests__" "dangerouslySetInnerHTML" apps/ packages/
 
       - name: Typecheck
         run: npm run typecheck

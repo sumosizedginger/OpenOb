@@ -127,7 +127,7 @@ Mitigation: scoped retrieval; bounded chunks; user-visible scope.
 
 ### F-019 Malicious Markdown rendering
 
-Mitigation: sanitizer; restricted URL/HTML policy.
+Mitigation: Preview renderer maps structured Markdown nodes to native React JSX elements with standard text escaping; raw HTML is rendered as plain text without execution; prohibition of `dangerouslySetInnerHTML` in CI (see `F-035`).
 
 ### F-020 Migration breaks old vaults/plugins
 

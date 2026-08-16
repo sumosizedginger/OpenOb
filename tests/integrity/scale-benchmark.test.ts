@@ -80,10 +80,11 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
     const n = 10000;
     const docs: any[] = [];
     for (let i = 1; i <= n; i++) {
+      const docPath = `cat_${i % 20}/Note_${String(i).padStart(5, '0')}.md`;
       const target = `Note_${((i % 50) + 1).toString().padStart(5, '0')}`;
       docs.push({
-        id: `cat_${i % 20}/note_${i}.md`,
-        path: `cat_${i % 20}/note_${i}.md`,
+        id: docPath,
+        path: docPath,
         title: `Note ${i}`,
         sourceHash: `hash-${i}`,
         lineCount: 12,
@@ -112,10 +113,41 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
     const searchRes = await idx.query({ query: 'Note 5000', limit: 10 });
     const searchMs = Date.now() - t1;
 
+    // 3. Single note upsert into 10,000-document index (P1-IDX-001 budget < 500 ms)
+    const t2 = Date.now();
+    await idx.upsert({
+      id: 'cat_0/Note_05000.md',
+      path: 'cat_0/Note_05000.md',
+      title: 'Note 5000 Updated',
+      sourceHash: 'hash-5000-v2',
+      lineCount: 15,
+      wordCount: 75,
+      properties: { status: 'active', index: 5000, version: 2 },
+      aliases: ['N5000', 'Alias5000'],
+      tags: ['cat_0', 'benchmark', 'updated'],
+      headings: [
+        { level: 1, text: 'Note 5000 Updated', slug: 'note-5000-updated', line: 1 },
+      ],
+      links: [
+        { raw: '[[Note_00001]]', target: 'Note_00001', line: 3, isEmbed: false },
+      ],
+      textContent: 'Note 5000 updated content referencing [[Note_00001]].',
+    });
+    const upsertMs = Date.now() - t2;
+
+    // 4. Graph build over 10,000 documents (P1-GRAPH-001 budget < 10,000 ms)
+    const t3 = Date.now();
+    const graphData = await buildGraphData(idx);
+    const graphMs = Date.now() - t3;
+
     idx.close();
 
     expect(rebuildMs).toBeLessThan(5000);
     expect(searchMs).toBeLessThan(500);
+    expect(upsertMs).toBeLessThan(500);
+    expect(graphMs).toBeLessThan(10000);
+    expect(graphData.nodes.length).toBe(10000);
+    expect(graphData.edges.length).toBeGreaterThan(5000);
     expect(searchRes.length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -39,4 +39,42 @@ describe('Symlink Security & Boundary Isolation (SEC-02)', () => {
     // Attempting to read through symlink should be blocked
     await expect(vault.read('external_link/secret.txt')).rejects.toThrow(SecurityError);
   });
+
+  it('rejects reading and writing via symlink targeting prefix-sharing sibling (P1-FS-001)', async () => {
+    // Sibling directory sharing vault prefix: e.g. <tmpVaultDir>-evil
+    const siblingEvilDir = `${tmpVaultDir}-evil`;
+    await fs.mkdir(siblingEvilDir, { recursive: true });
+    await fs.writeFile(path.join(siblingEvilDir, 'leak.md'), '# SECRET OUTSIDE VAULT', 'utf8');
+
+    try {
+      const vault = new NodeFsVaultStorage(tmpVaultDir);
+
+      // Create a link inside the vault targeting the prefix-sharing sibling
+      const linkInside = path.join(tmpVaultDir, 'escape');
+      try {
+        await fs.symlink(siblingEvilDir, linkInside, 'junction');
+      } catch {
+        return; // Skip if OS denies junction creation
+      }
+
+      // 1. Reading through prefix-sharing link MUST throw SecurityError
+      await expect(vault.read('escape/leak.md')).rejects.toThrow(SecurityError);
+
+      // 2. Writing through prefix-sharing link MUST throw SecurityError
+      await expect(vault.write('escape/attack.md', null, 'MALICIOUS_CONTENT')).rejects.toThrow(SecurityError);
+
+      // 3. Stat through prefix-sharing link MUST throw SecurityError
+      await expect(vault.stat('escape/leak.md')).rejects.toThrow(SecurityError);
+
+      // 4. Exists through prefix-sharing link MUST throw SecurityError
+      await expect(vault.exists('escape/leak.md')).rejects.toThrow(SecurityError);
+
+      // Verify external file was never written
+      expect(await fs.access(path.join(siblingEvilDir, 'attack.md')).then(() => true).catch(() => false)).toBe(false);
+    } finally {
+      try {
+        await fs.rm(siblingEvilDir, { recursive: true, force: true });
+      } catch {}
+    }
+  });
 });

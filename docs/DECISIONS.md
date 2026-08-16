@@ -19,8 +19,8 @@ Strict 4-level resolution priority:
 3. Unique basename (shortest path wins)
 4. Explicit aliases
 
-## D-005 Plugin Sandbox & Permission Model
-Plugins execute in an isolated Web Worker or sandboxed iframe. Zero direct access to Node.js `fs`, raw DOM, or network unless explicitly granted by capability manifest.
+## D-005 Plugin Permission Model & Capability Gating
+First-party plugins execute through a capability-gated API facade (`PluginAPI`). All permissions (`vault.read`, `vault.write`, `search.query`, `workspace.modify`, `ai.use`) are explicitly declared and verified against immutable permission sets (`F-006`, `F-030`). Full execution isolation (Web Worker / iframe boundary) is planned for third-party plugin support (`F-032`).
 
 ## D-006 AI Provider Abstraction
 AI features interact with an abstract `AIProvider` contract. No hardcoded OpenAI/Anthropic SDKs in core. Local models (Ollama, LM Studio) and cloud models implement the same interface.
@@ -100,7 +100,7 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 
 **Decision:** The entire Open Knowledge Workspace system across storage, parsing, indexing, search, graph visualization, Notion-like views, Local & Cloud AI, and first-party Plugin SDK is consolidated into a single unified architecture. The browser-based Public Alpha utilizes the lightweight `MemoryDocumentIndex` for instant zero-wasm startup. The SQLite relational engine (`SqliteDocumentIndex`) is delivered as an in-memory WASM `sql.js` engine, integration-tested and verified with exact doc-by-doc rebuild parity from canonical Markdown files. All derived states remain 100% disposable and reconstructible from canonical Markdown files. All write mutations enforce optimistic concurrency control, and all first-party plugin capabilities adhere to strict permission gating and exception containment.
 
-**Reason:** Establishes architectural stability, verified zero-data-loss durability, and readiness for real-world dogfooding and public alpha release.
+**Reason:** Establishes architectural stability, crash-safe atomic persistence, and readiness for real-world dogfooding and public alpha release.
 
 ## D-022 Desktop Runtime Library, Native Vault Watcher & Authenticated Secret Store
 

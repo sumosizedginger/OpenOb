@@ -278,11 +278,15 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
     const searchResB = await runtime2.index.query({ query: 'UniqueKeywordForFileB' });
     expect(searchResB.length).toBe(0);
 
-    // 4. Test offline edit where length stays the same but content changes
+    // 4. Test offline edit where byte length and mtime stay identical (P2-REC-001 / P2-TEST-001)
+    const statBefore = fs.statSync(path.join(testVaultDir, 'FileC.md'));
     await runtime2.close();
 
-    // Change FileC with exact same byte length
-    fs.writeFileSync(path.join(testVaultDir, 'FileC.md'), '# File C\n\nBrand new file REPLACED offline.', 'utf8');
+    // Write content with exact same byte length (42 bytes: 'created' -> 'altered')
+    const sameSizeContent = '# File C\n\nBrand new file altered offline.';
+    expect(Buffer.byteLength(sameSizeContent)).toBe(statBefore.size);
+    fs.writeFileSync(path.join(testVaultDir, 'FileC.md'), sameSizeContent, 'utf8');
+    fs.utimesSync(path.join(testVaultDir, 'FileC.md'), statBefore.atime, statBefore.mtime);
 
     const runtime3 = await DesktopVaultRuntime.create({
       vaultPath: testVaultDir,
@@ -290,9 +294,9 @@ describe('Phase 12 Exit Gate: Desktop Wrapper & Native Shell Architecture (D-022
       masterSecret: 'test-pass',
     });
 
-    const searchResReplaced = await runtime3.index.query({ query: 'REPLACED' });
-    expect(searchResReplaced.length).toBe(1);
-    expect(searchResReplaced[0].path).toBe('FileC.md');
+    const searchResAltered = await runtime3.index.query({ query: 'altered' });
+    expect(searchResAltered.length).toBe(1);
+    expect(searchResAltered[0].path).toBe('FileC.md');
 
     // 5. Test mtime touch with same content hash (updates stat metadata only)
     const snapBefore = (await runtime3.index.getSourceManifest()).find((m: any) => m.path === 'FileC.md')!;

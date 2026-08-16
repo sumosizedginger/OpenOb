@@ -332,40 +332,49 @@ export function useVault() {
   const saveActiveNote = async (force = false) => {
     if (!activeTab || !activeTabPath || isSavingRef.current) return;
 
+    const savingPath = activeTabPath;
+    const contentToSave = activeTab.content;
+    const expectedVersion = force ? undefined : activeTab.initialSnapshot?.version || null;
+
     isSavingRef.current = true;
     setSaveStatus('saving');
     try {
-      const expectedVersion = force ? undefined : activeTab.initialSnapshot?.version || null;
-      const res = await safeWriter.safeSave(activeTabPath, activeTab.content, {
+      const res = await safeWriter.safeSave(savingPath, contentToSave, {
         expectedVersion,
         force,
       });
 
-      // Update tab snapshot
+      // Update tab snapshot: clear isDirty ONLY if current content matches saved content (P2-UI-002)
       setOpenTabs((prev) =>
-        prev.map((tab) =>
-          tab.path === activeTabPath
-            ? { ...tab, isDirty: false, initialSnapshot: res.snapshot }
-            : tab
-        )
+        prev.map((tab) => {
+          if (tab.path !== savingPath) return tab;
+          const isStillMatching = tab.content === contentToSave;
+          return {
+            ...tab,
+            isDirty: !isStillMatching,
+            initialSnapshot: res.snapshot,
+          };
+        })
       );
 
-      const parsed = await parser.parse(activeTabPath, activeTab.content, res.snapshot.version.hash);
+      const parsed = await parser.parse(savingPath, contentToSave, res.snapshot.version.hash);
       await index.upsert(parsed);
-      setParsedDoc(parsed);
 
-      const bl = await index.getBacklinks(activeTabPath);
-      setBacklinks(bl);
-      setSaveStatus('saved');
-      setConflictData(null);
+      if (activeTabPath === savingPath) {
+        setParsedDoc(parsed);
+        const bl = await index.getBacklinks(savingPath);
+        setBacklinks(bl);
+        setSaveStatus('saved');
+        setConflictData(null);
+      }
     } catch (err: any) {
       if (err.code === 'CONFLICT' || err.name === 'ConflictError') {
         setSaveStatus('conflict');
         try {
-          const diskText = await storage.readText(activeTabPath);
-          setConflictData({ path: activeTabPath, diskContent: diskText });
+          const diskText = await storage.readText(savingPath);
+          setConflictData({ path: savingPath, diskContent: diskText });
         } catch {
-          setConflictData({ path: activeTabPath });
+          setConflictData({ path: savingPath });
         }
       } else {
         console.error('Save failed:', err);
@@ -545,11 +554,14 @@ export function useVault() {
         // Perform version-checked save first before mutating buffer
         const saveRes = await safeWriter.safeSave(path, updated, { expectedVersion: snap.version });
 
-        // Reconcile tab state (P6-3 & P6-4)
-        openTab.content = updated;
-        openTab.isDirty = false;
-        openTab.initialSnapshot = saveRes.snapshot;
-        setOpenTabs([...openTabs]);
+        // Reconcile tab state functionally without in-place array clobber (P2-UI-003)
+        setOpenTabs((prev) =>
+          prev.map((t) =>
+            t.path === path
+              ? { ...t, content: updated, isDirty: false, initialSnapshot: saveRes.snapshot }
+              : t
+          )
+        );
 
         const newParsed = await parser.parse(path, updated);
         await index.upsert(newParsed);
@@ -620,11 +632,19 @@ export function useVault() {
           expectedVersion: snap.version,
         });
 
-        // Reconcile tab state
-        openTab.content = proposal.proposedContent;
-        openTab.isDirty = false;
-        openTab.initialSnapshot = saveRes.snapshot;
-        setOpenTabs([...openTabs]);
+        // Reconcile tab state functionally without in-place array clobber (P2-UI-003)
+        setOpenTabs((prev) =>
+          prev.map((t) =>
+            t.path === proposal.path
+              ? {
+                  ...t,
+                  content: proposal.proposedContent,
+                  isDirty: false,
+                  initialSnapshot: saveRes.snapshot,
+                }
+              : t
+          )
+        );
 
         // Re-parse and upsert to index
         const parsed = await parser.parse(proposal.path, proposal.proposedContent);

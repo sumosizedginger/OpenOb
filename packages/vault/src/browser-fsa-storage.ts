@@ -123,7 +123,12 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     }
   }
 
-  readonly atomicWrites: boolean = true;
+  get atomicWrites(): boolean {
+    return (
+      typeof FileSystemHandle !== 'undefined' &&
+      typeof (FileSystemHandle.prototype as any)?.move === 'function'
+    );
+  }
 
   async read(rawPath: VaultPath): Promise<FileSnapshot> {
     const norm = normalizeVaultPath(rawPath);
@@ -161,39 +166,53 @@ export class BrowserFSAVaultStorage implements VaultStorage {
     content: Uint8Array | string
   ): Promise<WriteResult> {
     const norm = normalizeVaultPath(rawPath);
-    let existingFile: File | null = null;
-    let existingHash: string | null = null;
-    let previousVersion: FileVersion | null = null;
+    let existingVersion: FileVersion | null = null;
+    let existingContent: Uint8Array | undefined;
 
     try {
-      const { handle } = await this.getHandleForPath(norm, false, false);
-      const file: File = await handle.getFile();
-      existingFile = file;
-      const existingBytes = new Uint8Array(await file.arrayBuffer());
-      existingHash = computeContentHash(existingBytes);
-      previousVersion = {
-        token: createVersionToken(existingHash, file.lastModified, file.size),
-        hash: existingHash,
-        modifiedAt: file.lastModified,
-        size: file.size,
-      };
-    } catch {}
+      const existing = await this.read(norm);
+      existingVersion = existing.version;
+      existingContent = existing.content;
+    } catch (err: any) {
+      if (err.name !== 'NotFoundError' && err.code !== 'ENOENT') {
+        // Unexpected read error
+      }
+    }
 
-    // Concurrency / Conflict Check (F-001)
+    // Version Concurrency Check (F-001 mitigation)
     if (expectedVersion !== undefined) {
       if (expectedVersion === null) {
-        if (existingFile) {
-          throw new ConflictError(norm, null, previousVersion, undefined, `File "${norm}" already exists.`);
+        if (existingVersion !== null) {
+          throw new ConflictError(
+            norm,
+            null,
+            existingVersion,
+            existingContent,
+            `Cannot create "${norm}": file already exists in vault.`
+          );
         }
       } else {
-        if (!existingFile || !previousVersion) {
-          throw new ConflictError(norm, expectedVersion, null, undefined, `File "${norm}" was deleted externally.`);
+        if (existingVersion === null) {
+          throw new ConflictError(
+            norm,
+            expectedVersion,
+            null,
+            undefined,
+            `Cannot write "${norm}": file does not exist in vault.`
+          );
         }
-        const tokenMatches = previousVersion.token === expectedVersion.token;
-        const hashMatches = previousVersion.hash === expectedVersion.hash;
+
+        const tokenMatches = existingVersion.token === expectedVersion.token;
+        const hashMatches = existingVersion.hash === expectedVersion.hash;
 
         if (!tokenMatches && !hashMatches) {
-          throw new ConflictError(norm, expectedVersion, previousVersion, undefined, `Conflict on "${norm}": modified externally.`);
+          throw new ConflictError(
+            norm,
+            expectedVersion,
+            existingVersion,
+            existingContent,
+            `Conflict on "${norm}": file was modified externally.`
+          );
         }
       }
     }
@@ -218,7 +237,10 @@ export class BrowserFSAVaultStorage implements VaultStorage {
         await (tempHandle as any).move(filename);
         targetHandle = await parentDirHandle.getFileHandle(filename, { create: false });
       } else {
-        // Fallback for browsers without FileSystemHandle.move()
+        // Fallback for browsers without FileSystemHandle.move() (P2-FSA-001)
+        console.warn(
+          `[BrowserFsaVaultStorage] FileSystemHandle.move() is not supported in this browser runtime. Falling back to direct in-place write for "${norm}". Atomic temp-and-swap guarantees are unavailable.`
+        );
         try {
           await parentDirHandle.removeEntry(tempName);
         } catch {}
@@ -252,14 +274,14 @@ export class BrowserFSAVaultStorage implements VaultStorage {
       size: updatedFile.size,
     };
 
-    const wasCreated = !existingFile;
+    const wasCreated = !existingVersion;
     this.notify({
       type: wasCreated ? 'created' : 'modified',
       path: norm,
       timestamp: Date.now(),
     });
 
-    return { snapshot, previousVersion, wasCreated };
+    return { snapshot, previousVersion: existingVersion, wasCreated };
   }
 
   async stat(rawPath: VaultPath): Promise<FileStat | null> {
