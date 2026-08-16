@@ -12,6 +12,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "typeRoots": ["./node_modules/@types"]
   }
 }

@@ -70,22 +70,26 @@ All external access passes through `OpenObWorkspace`, preventing multi-writer di
 - **MCP Tool Definitions & Dispatcher:**
   - `openob_workspace_info`, `openob_list_entries`, `openob_read_note`, `openob_search`, `openob_get_backlinks`, `openob_get_properties`.
 
-### B. `apps/gateway` (Local Gateway HTTP Server & CLI)
+### B. `apps/gateway` (Local Gateway HTTP Server, Launcher & CLI)
 
 - **Loopback HTTP Server (`127.0.0.1`):**
   - Standard zero-dependency Node HTTP service.
-  - Bearer token authentication (`Authorization: Bearer <TOKEN>` or `X-OpenOb-Token: <TOKEN>`).
+  - Constant-time Bearer token authentication (`crypto.timingSafeEqual`).
+  - Public unauthenticated `/health` endpoint returning vault identity.
   - Client identity extraction (`X-OpenOb-Client-Id`, `X-Request-Id`).
   - Read-only REST routes (`GET /health`, `/api/v1/workspace`, `/api/v1/entries`, `/api/v1/notes/:path`, `/api/v1/search`, `/api/v1/notes/:path/backlinks`, `/api/v1/notes/:path/links`, `/api/v1/notes/:path/properties`, `/api/v1/notes/:path/graph-neighbors`).
   - Non-GET mutating requests rejected with `405 UNSUPPORTED`.
-- **Local CLI Runner:**
-  - `openob info [--json]`, `openob list [path] [--json]`, `openob read <path> [--json]`, `openob search <query> [--json]`, `openob backlinks <path> [--json]`.
+  - Suffix route disambiguation prioritizing existing direct note files over subaction matching.
+- **Runnable Process Launchers & Executables:**
+  - `openob-gateway` (`apps/gateway/src/bin/gateway.ts`): Standalone process launcher initializing storage, one-time index rebuild, and loopback HTTP server with clean SIGINT/SIGTERM shutdown.
+  - `openob` (`apps/gateway/src/bin/cli.ts`): Standalone CLI executable routing commands (`info`, `list`, `read`, `search`, `backlinks`) with dedicated `stdout` (data) and `stderr` (diagnostic/log) streaming.
 
-### C. Architectural Documentation
+### C. Architectural Documentation & Hardening
 
-- `EXTERNAL_ACCESS.md`: Comprehensive reference guide.
+- `EXTERNAL_ACCESS.md`: Comprehensive reference guide (auth model, tokenless loopback behavior, MCP transport deferral notice, stream conventions).
 - `ARCHITECTURE.md`: Updated with workspace service and gateway layout.
 - `DECISIONS.md`: Added `D-023` decision record.
+- **Error Redaction (E1):** Full redaction of implementation-sensitive absolute filesystem paths and raw stacks from API error responses.
 
 ---
 
@@ -96,7 +100,7 @@ All external access passes through `OpenObWorkspace`, preventing multi-writer di
 | `npm run format:check` | **PASS** | Prettier code style validated                                 |
 | `npm run lint`         | **PASS** | ESLint clean (0 errors, 4 pre-existing warnings)              |
 | `npm run typecheck`    | **PASS** | `tsc --build` clean across all packages and apps (0 errors)   |
-| `npm test` (vitest)    | **PASS** | **47 test files / 209 unit & integration tests PASS** (6.64s) |
+| `npm test` (vitest)    | **PASS** | **47 test files / 212 unit & integration tests PASS** (6.64s) |
 | `npm run build`        | **PASS** | Production Vite web application bundle compiled               |
 | `npm run test:e2e`     | **PASS** | **9/9 Playwright E2E browser tests PASS** (22.8s)             |
 | `npm run verify`       | **PASS** | Format, lint, typecheck, unit tests, and build                |

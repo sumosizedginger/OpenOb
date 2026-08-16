@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { AddressInfo } from 'node:net';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { ClientContext, OpenObWorkspace, toApiError, UnauthorizedError } from '@okw/workspace';
 
 export interface GatewayOptions {
@@ -74,7 +74,16 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         clientToken = customTokenHeader.trim();
       }
 
-      if (!clientToken || clientToken !== token) {
+      let isAuthorized = false;
+      if (clientToken && typeof clientToken === 'string') {
+        const expectedBuf = Buffer.from(token);
+        const actualBuf = Buffer.from(clientToken);
+        if (expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf)) {
+          isAuthorized = true;
+        }
+      }
+
+      if (!isAuthorized) {
         const err = toApiError(new UnauthorizedError());
         res.statusCode = err.status;
         res.end(JSON.stringify(err.body));
@@ -186,42 +195,53 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         }
 
         // Subaction routes: /backlinks, /links, /properties, /graph-neighbors
-        if (decodedSegment.endsWith('/backlinks')) {
-          const notePath = decodedSegment.slice(0, -'/backlinks'.length);
-          const backlinks = await workspace.getBacklinks(notePath, clientContext);
-          res.statusCode = 200;
-          res.end(JSON.stringify(backlinks));
-          return;
-        }
+        const subactions = [
+          {
+            suffix: '/backlinks',
+            handler: (p: string) => workspace.getBacklinks(p, clientContext),
+          },
+          {
+            suffix: '/links',
+            handler: (p: string) => workspace.getOutgoingLinks(p, clientContext),
+          },
+          {
+            suffix: '/properties',
+            handler: (p: string) => workspace.getProperties(p, clientContext),
+          },
+          {
+            suffix: '/graph-neighbors',
+            handler: (p: string) => {
+              const maxDepthParam = parsedUrl.searchParams.get('maxDepth');
+              const maxDepth = maxDepthParam ? parseInt(maxDepthParam, 10) : undefined;
+              return workspace.getGraphNeighbors(
+                p,
+                { maxDepth: isNaN(maxDepth!) ? undefined : maxDepth },
+                clientContext
+              );
+            },
+          },
+        ];
 
-        if (decodedSegment.endsWith('/links')) {
-          const notePath = decodedSegment.slice(0, -'/links'.length);
-          const links = await workspace.getOutgoingLinks(notePath, clientContext);
-          res.statusCode = 200;
-          res.end(JSON.stringify(links));
-          return;
-        }
+        const matchedSubaction = subactions.find((s) => decodedSegment.endsWith(s.suffix));
 
-        if (decodedSegment.endsWith('/properties')) {
-          const notePath = decodedSegment.slice(0, -'/properties'.length);
-          const props = await workspace.getProperties(notePath, clientContext);
-          res.statusCode = 200;
-          res.end(JSON.stringify(props));
-          return;
-        }
+        if (matchedSubaction) {
+          const targetNotePath = decodedSegment.slice(0, -matchedSubaction.suffix.length);
 
-        if (decodedSegment.endsWith('/graph-neighbors')) {
-          const notePath = decodedSegment.slice(0, -'/graph-neighbors'.length);
-          const maxDepthParam = parsedUrl.searchParams.get('maxDepth');
-          const maxDepth = maxDepthParam ? parseInt(maxDepthParam, 10) : undefined;
-          const neighbors = await workspace.getGraphNeighbors(
-            notePath,
-            { maxDepth: isNaN(maxDepth!) ? undefined : maxDepth },
-            clientContext
-          );
-          res.statusCode = 200;
-          res.end(JSON.stringify(neighbors));
-          return;
+          // Disambiguation: Check if the full decodedSegment is an existing note file
+          let isDirectNote = false;
+          try {
+            const meta = await workspace.getNoteMetadata(decodedSegment);
+            if (meta) isDirectNote = true;
+          } catch {
+            isDirectNote = false;
+          }
+
+          if (!isDirectNote) {
+            const subactionResult = await matchedSubaction.handler(targetNotePath);
+            res.statusCode = 200;
+            res.end(JSON.stringify(subactionResult));
+            return;
+          }
         }
 
         // Default: Read note

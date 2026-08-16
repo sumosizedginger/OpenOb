@@ -113,7 +113,9 @@ export function toApiError(
       status: 500,
       body: {
         code: 'STORAGE_ERROR',
-        message: err.message,
+        message: fallbackPath
+          ? `Storage error while accessing "${fallbackPath}"`
+          : 'A storage error occurred during file operations',
         path: fallbackPath,
       },
     };
@@ -141,12 +143,11 @@ export function toApiError(
     };
   }
 
-  const message = err instanceof Error ? err.message : String(err);
   return {
     status: 500,
     body: {
       code: 'INTERNAL_ERROR',
-      message: message || 'An internal error occurred',
+      message: 'An internal error occurred',
       path: fallbackPath,
     },
   };

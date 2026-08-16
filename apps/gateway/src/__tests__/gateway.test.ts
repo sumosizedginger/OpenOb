@@ -51,11 +51,17 @@ Unicode test content with spaces and symbols.
 Linked from nowhere.
 `;
 
+    const subBacklinksNote = `# Subfolder Backlinks Note
+
+This note is literally named backlinks inside a subfolder.
+`;
+
     const s1 = (await storage.write('Welcome.md', null, welcome)).snapshot;
     const s2 = (await storage.write('Folder/Sub Note.md', null, subNote)).snapshot;
     const s3 = (await storage.write('Notes/日本語.md', null, unicodeNote)).snapshot;
     const s4 = (await storage.write('Folder With Spaces/Note Space.md', null, noteWithSpaces))
       .snapshot;
+    const s5 = (await storage.write('Sub/backlinks.md', null, subBacklinksNote)).snapshot;
 
     await index.upsert(await parser.parse('Welcome.md', s1.textContent!, s1.version.hash));
     await index.upsert(await parser.parse('Folder/Sub Note.md', s2.textContent!, s2.version.hash));
@@ -63,6 +69,7 @@ Linked from nowhere.
     await index.upsert(
       await parser.parse('Folder With Spaces/Note Space.md', s4.textContent!, s4.version.hash)
     );
+    await index.upsert(await parser.parse('Sub/backlinks.md', s5.textContent!, s5.version.hash));
 
     workspace = new OpenObWorkspace({
       storage,
@@ -142,7 +149,7 @@ Linked from nowhere.
     const data = await res.json();
     expect(data.name).toBe('gateway-vault');
     expect(data.apiVersion).toBe('v1');
-    expect(data.noteCount).toBe(4);
+    expect(data.noteCount).toBe(5);
     expect(data.readOnly).toBe(true);
     expect(data.capabilities).toContain('workspace.read');
   });
@@ -325,5 +332,102 @@ Linked from nowhere.
     expect(res3.status).toBe(200);
     const d3 = Date.now() - t2;
     expect(d3).toBeLessThan(50);
+  });
+
+  it('14. E1: Error responses never leak absolute filesystem paths or raw stacks', async () => {
+    // Construct workspace with a failing storage that returns absolute paths in error messages
+    const failingStorage = {
+      name: 'failing-vault',
+      async list() {
+        return [];
+      },
+      async read() {
+        throw new Error(
+          "Failed to read 'Welcome.md': EACCES: permission denied, open 'C:\\Users\\Secret\\Vault\\Welcome.md'"
+        );
+      },
+      async readText() {
+        throw new Error('EACCES open /root/secrets/vault/Welcome.md');
+      },
+      async write() {
+        throw new Error('Storage write disabled');
+      },
+      async remove() {
+        throw new Error('Storage remove disabled');
+      },
+      async exists() {
+        return true;
+      },
+      async stat() {
+        return null;
+      },
+      async rename() {},
+      on() {
+        return () => {};
+      },
+    };
+
+    const failingWorkspace = new OpenObWorkspace({
+      storage: failingStorage as any,
+      index: new MemoryDocumentIndex(),
+      parser: new DefaultDocumentParser(),
+      vaultName: 'failing-vault',
+    });
+
+    const failingGateway = await startGateway({
+      workspace: failingWorkspace,
+      port: 0,
+    });
+
+    try {
+      const res = await fetch(`${failingGateway.url}/api/v1/notes/Welcome.md`);
+      expect(res.status).toBe(500);
+      const data = await res.json();
+
+      expect(data.code).toBe('INTERNAL_ERROR');
+      // Assert absolute paths and stack traces are completely absent
+      const rawBody = JSON.stringify(data);
+      expect(rawBody).not.toContain('C:\\Users');
+      expect(rawBody).not.toContain('/root/secrets');
+      expect(rawBody).not.toContain('EACCES');
+      expect(data.message).toBe('An internal error occurred');
+    } finally {
+      await failingGateway.stop();
+    }
+  });
+
+  it('15. E4: Note named like subactions (Sub/backlinks.md) is read as note, while Welcome.md/backlinks reads backlinks', async () => {
+    // 1. Read note literally named Sub/backlinks.md
+    const noteRes = await apiFetch(`/api/v1/notes/${encodeURIComponent('Sub/backlinks.md')}`);
+    expect(noteRes.status).toBe(200);
+    const noteData = await noteRes.json();
+    expect(noteData.path).toBe('Sub/backlinks.md');
+    expect(noteData.textContent).toContain('This note is literally named backlinks');
+
+    // 2. Query backlinks of Welcome.md
+    const backlinksRes = await apiFetch('/api/v1/notes/Welcome.md/backlinks');
+    expect(backlinksRes.status).toBe(200);
+    const backlinksData = await backlinksRes.json();
+    expect(backlinksData).toHaveLength(1);
+    expect(backlinksData[0].sourcePath).toBe('Folder/Sub Note.md');
+  });
+
+  it('16. E2: Gateway CLI argument parsing parses vault, port, and token correctly', async () => {
+    const { parseGatewayArgs } = await import('../bin/gateway.js');
+    const parsed = parseGatewayArgs([
+      '--vault',
+      './test-vault-dir',
+      '--port',
+      '5555',
+      '--host',
+      '127.0.0.1',
+      '--token',
+      'custom-secret-token',
+    ]);
+
+    expect(parsed.vaultPath).toBe('./test-vault-dir');
+    expect(parsed.port).toBe(5555);
+    expect(parsed.host).toBe('127.0.0.1');
+    expect(parsed.token).toBe('custom-secret-token');
   });
 });

@@ -40,6 +40,15 @@ function isPathInside(childPath: string, parentPath: string): boolean {
   return normChild === normParent || normChild.startsWith(normParent + '/');
 }
 
+function sanitizeFsErrorMessage(err: any): string {
+  if (!err) return 'storage failure';
+  const msg = err.message || err.code || 'storage failure';
+  return String(msg)
+    .replace(/,\s*open\s*['"][^'"]+['"]/gi, '')
+    .replace(/['"][A-Za-z]:\\[^'"]+['"]/g, "''")
+    .replace(/['"]\/[^'"]+['"]/g, "''");
+}
+
 /**
  * Node.js filesystem implementation of VaultStorage.
  * Uses atomic temporary writes with fsync, strict boundary checks,
@@ -98,31 +107,35 @@ export class NodeFsVaultStorage implements VaultStorage {
 
   async list(rawPath: VaultPath = '', recursive = false): Promise<VaultEntry[]> {
     const dir = normalizeVaultPath(rawPath);
-    const diskPath = await this.resolveToDiskSafe(dir);
+    const diskDir = await this.resolveToDiskSafe(dir);
 
     try {
-      const entries = await fs.readdir(diskPath, { withFileTypes: true });
-      const results: VaultEntry[] = [];
+      const entries: VaultEntry[] = [];
+      const dirEntries = await fs.readdir(diskDir, { withFileTypes: true });
 
-      for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue;
+      for (const ent of dirEntries) {
+        if (ent.name.startsWith('.okw.tmp.') || ent.name.startsWith('.lock.')) {
+          continue;
+        }
 
-        const relPath = dir ? `${dir}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          results.push({
-            path: relPath,
-            name: entry.name,
+        const entryVaultPath = dir ? `${dir}/${ent.name}` : ent.name;
+
+        if (ent.isDirectory()) {
+          entries.push({
+            name: ent.name,
+            path: entryVaultPath,
             isDirectory: true,
           });
+
           if (recursive) {
-            const sub = await this.list(relPath, true);
-            results.push(...sub);
+            const subEntries = await this.list(entryVaultPath, true);
+            entries.push(...subEntries);
           }
-        } else if (entry.isFile()) {
-          const stats = await fs.stat(path.join(diskPath, entry.name));
-          results.push({
-            path: relPath,
-            name: entry.name,
+        } else if (ent.isFile()) {
+          const stats = await fs.stat(path.join(diskDir, ent.name));
+          entries.push({
+            name: ent.name,
+            path: entryVaultPath,
             isDirectory: false,
             size: stats.size,
             modifiedAt: stats.mtimeMs,
@@ -130,7 +143,7 @@ export class NodeFsVaultStorage implements VaultStorage {
         }
       }
 
-      return results.sort((a, b) => {
+      return entries.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) {
           return a.isDirectory ? -1 : 1;
         }
@@ -141,7 +154,10 @@ export class NodeFsVaultStorage implements VaultStorage {
       if (err.code === 'ENOENT') {
         return [];
       }
-      throw new StorageError(`Failed to list directory "${rawPath}": ${err.message}`, err);
+      throw new StorageError(
+        `Failed to list directory "${rawPath}": ${sanitizeFsErrorMessage(err)}`,
+        err
+      );
     }
   }
 
@@ -173,7 +189,7 @@ export class NodeFsVaultStorage implements VaultStorage {
       if (err.code === 'ENOENT') {
         throw new NotFoundError(rawPath);
       }
-      throw new StorageError(`Failed to read "${rawPath}": ${err.message}`, err);
+      throw new StorageError(`Failed to read "${rawPath}": ${sanitizeFsErrorMessage(err)}`, err);
     }
   }
 
@@ -186,7 +202,7 @@ export class NodeFsVaultStorage implements VaultStorage {
       if (err.code === 'ENOENT') {
         throw new NotFoundError(rawPath);
       }
-      throw new StorageError(`Failed to read "${rawPath}": ${err.message}`, err);
+      throw new StorageError(`Failed to read "${rawPath}": ${sanitizeFsErrorMessage(err)}`, err);
     }
   }
 

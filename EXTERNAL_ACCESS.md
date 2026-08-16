@@ -90,6 +90,13 @@ All endpoints bind strictly to loopback (`127.0.0.1`) by default. In Phase 1, th
 | `GET`  | `/api/v1/notes/:path/properties`                     | Retrieve YAML frontmatter properties                  | Yes           |
 | `GET`  | `/api/v1/notes/:path/graph-neighbors`                | Retrieve local 1-hop graph structure                  | Yes           |
 
+### Route Disambiguation
+
+For endpoints ending with subaction suffixes (`/backlinks`, `/links`, `/properties`, `/graph-neighbors`):
+
+- If the requested path resolves to an existing note file (e.g. `Sub/backlinks.md` or `Sub/backlinks`), the gateway prioritizes reading the direct note file.
+- Otherwise, the path prefix before the suffix is treated as the target note for the subaction (e.g. `/api/v1/notes/Welcome.md/backlinks`).
+
 ---
 
 ## 5. Authentication & Capability Model
@@ -101,7 +108,23 @@ When a token is configured or generated on startup, all `/api/v1/*` endpoints re
 - `Authorization: Bearer <TOKEN>`
 - or `X-OpenOb-Token: <TOKEN>`
 
-Requests without valid credentials receive `401 UNAUTHORIZED`.
+Authentication performs constant-time buffer comparison (`crypto.timingSafeEqual`) to prevent timing side-channels. Requests without valid credentials receive `401 UNAUTHORIZED`.
+
+> [!NOTE]
+> If started without a token option or `OPENOB_TOKEN` environment variable, the gateway generates a secure random 32-byte hex token on startup and prints it to `stderr`. If explicitly running in tokenless mode, all loopback callers on `127.0.0.1` are trusted.
+
+### Public Health Endpoint
+
+`GET /health` is public and unauthenticated, returning server status, read-only state, and vault identity:
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "readOnly": true,
+  "vault": "my-vault"
+}
+```
 
 ### Capability Scopes (Phase 1 vs Future)
 
@@ -126,7 +149,7 @@ Callers can supply an optional client identifier:
 
 ## 6. Model Context Protocol (MCP) Adapter
 
-`@okw/workspace` provides protocol-neutral tool definitions and dispatchers for the Model Context Protocol:
+`@okw/workspace` provides protocol-neutral tool definitions and an in-process dispatcher (`handleMcpToolCall`):
 
 - `openob_workspace_info`: Retrieve workspace status and note count.
 - `openob_list_entries`: List files and subfolders.
@@ -135,23 +158,39 @@ Callers can supply an optional client identifier:
 - `openob_get_backlinks`: Retrieve incoming backlinks.
 - `openob_get_properties`: Retrieve structured YAML properties.
 
+> [!NOTE]
+> Phase 1 delivers the protocol-neutral tool declarations and dispatcher function; the live MCP server transport (stdio/SSE) is deferred to a future phase.
+
 The MCP layer is a thin adapter over `OpenObWorkspace` and contains zero independent storage or index logic.
 
 ---
 
-## 7. Local CLI Tool
+## 7. Local CLI Tool & Executable Launcher
 
-The `@okw/gateway` package includes a minimal read-only CLI:
+The `@okw/gateway` package includes runnable executables:
+
+### Running the Gateway Process
 
 ```bash
-openob info [--json]
-openob list [subpath] [--json]
-openob read <path> [--json]
-openob search <query> [--json]
-openob backlinks <path> [--json]
+# Start gateway over a local vault
+npx openob-gateway /path/to/vault --port 4200 --token <my-token>
 ```
 
----
+### Running CLI Commands
+
+```bash
+npx openob info --vault /path/to/vault [--json]
+npx openob list [subpath] --vault /path/to/vault [--json]
+npx openob read <path> --vault /path/to/vault [--json]
+npx openob search <query> --vault /path/to/vault [--json]
+npx openob backlinks <path> --vault /path/to/vault [--json]
+```
+
+**Stream Conventions for Agents:**
+
+- **`stdout`**: Clean, machine-readable JSON data (when `--json` is supplied) or standard text command results.
+- **`stderr`**: Startup logs, token notifications, and diagnostic error messages.
+- Nonzero exit codes (`exit 1`) are returned on failure.
 
 ## 8. Separation from `sumo-sized-api`
 
