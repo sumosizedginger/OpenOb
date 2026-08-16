@@ -43,11 +43,11 @@ export interface OpenObWorkspaceOptions {
  * this service layer, guaranteeing single-writer consistency and strict data integrity.
  */
 export class OpenObWorkspace {
-  public readonly storage: VaultStorage;
-  public readonly index: DocumentIndex;
-  public readonly parser: DocumentParser;
-  public readonly safeWriter: SafeWriter;
-  public readonly coordinator: NoteWriteCoordinator;
+  private readonly storage: VaultStorage;
+  private readonly index: DocumentIndex;
+  private readonly parser: DocumentParser;
+  private readonly safeWriter: SafeWriter;
+  private readonly coordinator: NoteWriteCoordinator;
   public readonly vaultName: string;
   public readonly readOnly: boolean;
 

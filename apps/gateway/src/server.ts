@@ -269,11 +269,40 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
   return server;
 }
 
+const ALLOWED_LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
+
+/**
+ * Checks if a host string refers to a local loopback interface.
+ */
+export function isLoopbackHost(host: string): boolean {
+  if (!host) return false;
+  const trimmed = host.trim().toLowerCase();
+  if (ALLOWED_LOOPBACK_HOSTS.has(trimmed)) return true;
+  // Match standard 127.x.x.x loopback block
+  if (/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Asserts that the host is strictly a loopback address.
+ */
+export function assertLoopbackHost(host: string): void {
+  if (!isLoopbackHost(host)) {
+    throw new Error(
+      `Gateway can only bind to loopback interfaces (127.0.0.1, ::1, localhost). Non-loopback host "${host}" is rejected for security.`
+    );
+  }
+}
+
 /**
  * Starts the OpenOb Gateway on a loopback interface.
  */
 export async function startGateway(options: GatewayOptions): Promise<RunningGateway> {
   const host = options.host ?? '127.0.0.1'; // Binds STRICTLY to loopback by default
+  assertLoopbackHost(host);
+
   const port = options.port ?? 4200;
 
   const server = createGatewayServer(options);

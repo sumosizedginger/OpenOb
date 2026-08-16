@@ -6,7 +6,7 @@ import { NodeFsVaultStorage } from '@okw/vault';
 import { MemoryDocumentIndex, rebuildVaultIndex } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 import { OpenObWorkspace } from '@okw/workspace';
-import { startGateway } from '../server.js';
+import { assertLoopbackHost, startGateway } from '../server.js';
 
 export interface GatewayCliOptions {
   vaultPath: string;
@@ -45,6 +45,14 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
 
 export async function runGatewayProcess(argv: string[] = process.argv.slice(2)): Promise<void> {
   const options = parseGatewayArgs(argv);
+
+  // Validate host loopback binding
+  try {
+    assertLoopbackHost(options.host);
+  } catch (err: any) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(1);
+  }
 
   // Validate vault path
   const resolvedVault = path.resolve(options.vaultPath);
@@ -110,7 +118,12 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`) {
+import { fileURLToPath } from 'node:url';
+
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()
+) {
   runGatewayProcess().catch((err) => {
     process.stderr.write(`[OpenOb Gateway] Fatal error: ${err?.message || String(err)}\n`);
     process.exit(1);

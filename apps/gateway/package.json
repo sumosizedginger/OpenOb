@@ -19,6 +19,7 @@
     "@okw/workspace": "*"
   },
   "scripts": {
+    "build": "tsc --build",
     "typecheck": "tsc --noEmit"
   }
 }

@@ -1,8 +1,17 @@
 import { VaultEntry } from '@okw/core';
-import { BacklinkDTO, OpenObWorkspace, SearchResultMatch } from '@okw/workspace';
+import {
+  BacklinkDTO,
+  NoteReadResult,
+  OpenObWorkspace,
+  SearchResultDTO,
+  SearchResultMatch,
+  WorkspaceInfo,
+} from '@okw/workspace';
 
 export interface CliOptions {
-  readonly workspace: OpenObWorkspace;
+  readonly workspace?: OpenObWorkspace;
+  readonly url?: string;
+  readonly token?: string;
   readonly args: string[];
 }
 
@@ -11,7 +20,24 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
   const isJson = args.includes('--json');
   const filteredArgs = args.filter((a) => a !== '--json');
 
-  const command = filteredArgs[0];
+  // If a direct in-memory workspace was provided, run against it (e.g. unit tests)
+  if (workspace) {
+    return runCliDirect(workspace, filteredArgs, isJson);
+  }
+
+  // Otherwise, connect via REST client to the running gateway (Gateway-Managed Mode)
+  const baseUrl = options.url || process.env.OPENOB_URL || 'http://127.0.0.1:4200';
+  const token = options.token || process.env.OPENOB_TOKEN;
+
+  return runCliRemote(baseUrl, token, filteredArgs, isJson);
+}
+
+async function runCliDirect(
+  workspace: OpenObWorkspace,
+  args: string[],
+  isJson: boolean
+): Promise<{ exitCode: number; output: string }> {
+  const command = args[0];
 
   try {
     switch (command) {
@@ -24,7 +50,7 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
       }
 
       case 'list': {
-        const subPath = filteredArgs[1] ?? '';
+        const subPath = args[1] ?? '';
         const entries = await workspace.listEntries(subPath);
         const output = isJson
           ? JSON.stringify(entries, null, 2)
@@ -35,7 +61,7 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
       }
 
       case 'read': {
-        const path = filteredArgs[1];
+        const path = args[1];
         if (!path) {
           return { exitCode: 1, output: 'Error: Missing path argument. Usage: openob read <path>' };
         }
@@ -45,7 +71,7 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
       }
 
       case 'search': {
-        const query = filteredArgs[1];
+        const query = args[1];
         if (!query) {
           return {
             exitCode: 1,
@@ -61,7 +87,7 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
       }
 
       case 'backlinks': {
-        const path = filteredArgs[1];
+        const path = args[1];
         if (!path) {
           return {
             exitCode: 1,
@@ -85,11 +111,142 @@ export async function runCli(options: CliOptions): Promise<{ exitCode: number; o
         const helpText = `OpenOb Local CLI (Read-Only)
 
 Usage:
-  openob info [--json]
-  openob list [subpath] [--json]
-  openob read <path> [--json]
-  openob search <query> [--json]
-  openob backlinks <path> [--json]
+  openob info [--json] [--url <url>] [--token <token>]
+  openob list [subpath] [--json] [--url <url>] [--token <token>]
+  openob read <path> [--json] [--url <url>] [--token <token>]
+  openob search <query> [--json] [--url <url>] [--token <token>]
+  openob backlinks <path> [--json] [--url <url>] [--token <token>]
+`;
+        return { exitCode: command ? 1 : 0, output: helpText };
+      }
+    }
+  } catch (err: any) {
+    const errorMsg = isJson
+      ? JSON.stringify({ error: err?.message || String(err) }, null, 2)
+      : `Error: ${err?.message || String(err)}`;
+    return { exitCode: 1, output: errorMsg };
+  }
+}
+
+async function runCliRemote(
+  baseUrl: string,
+  token: string | undefined,
+  args: string[],
+  isJson: boolean
+): Promise<{ exitCode: number; output: string }> {
+  const command = args[0];
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'openob-cli/0.1.0',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+
+  async function remoteFetch(apiPath: string): Promise<any> {
+    const targetUrl = `${cleanBase}${apiPath}`;
+    let res: Response;
+    try {
+      res = await fetch(targetUrl, { headers });
+    } catch (err: any) {
+      throw new Error(
+        `Unable to connect to OpenOb Gateway at "${cleanBase}". Is the gateway running?\n(Start it with: npx openob-gateway <vault-path>)`,
+        { cause: err }
+      );
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const errMsg = data?.message || `HTTP ${res.status} ${res.statusText}`;
+      throw new Error(errMsg);
+    }
+    return data;
+  }
+
+  try {
+    switch (command) {
+      case 'info': {
+        const info: WorkspaceInfo = await remoteFetch('/api/v1/workspace');
+        const output = isJson
+          ? JSON.stringify(info, null, 2)
+          : `Vault: ${info.name}\nNotes: ${info.noteCount}\nStorage: ${info.storageType}\nAPI: ${info.apiVersion}\nRead-Only: ${info.readOnly}`;
+        return { exitCode: 0, output };
+      }
+
+      case 'list': {
+        const subPath = args[1] ?? '';
+        const queryParam = subPath ? `?path=${encodeURIComponent(subPath)}` : '';
+        const entries: VaultEntry[] = await remoteFetch(`/api/v1/entries${queryParam}`);
+        const output = isJson
+          ? JSON.stringify(entries, null, 2)
+          : entries
+              .map((e: VaultEntry) => `${e.isDirectory ? '[DIR] ' : '      '}${e.path}`)
+              .join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'read': {
+        const path = args[1];
+        if (!path) {
+          return { exitCode: 1, output: 'Error: Missing path argument. Usage: openob read <path>' };
+        }
+        const note: NoteReadResult = await remoteFetch(`/api/v1/notes/${encodeURIComponent(path)}`);
+        const output = isJson ? JSON.stringify(note, null, 2) : note.textContent;
+        return { exitCode: 0, output };
+      }
+
+      case 'search': {
+        const query = args[1];
+        if (!query) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing query argument. Usage: openob search <query>',
+          };
+        }
+        const result: SearchResultDTO = await remoteFetch(
+          `/api/v1/search?q=${encodeURIComponent(query)}`
+        );
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Found ${result.total} matches for "${query}":\n` +
+            result.matches.map((m: SearchResultMatch) => `  - ${m.path}: ${m.title}`).join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'backlinks': {
+        const path = args[1];
+        if (!path) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing path argument. Usage: openob backlinks <path>',
+          };
+        }
+        const backlinks: BacklinkDTO[] = await remoteFetch(
+          `/api/v1/notes/${encodeURIComponent(path)}/backlinks`
+        );
+        const output = isJson
+          ? JSON.stringify(backlinks, null, 2)
+          : `Backlinks to ${path} (${backlinks.length}):\n` +
+            backlinks
+              .map((b: BacklinkDTO) => `  - from ${b.sourcePath} (line ${b.line}): ${b.rawLink}`)
+              .join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'help':
+      case '--help':
+      case '-h':
+      default: {
+        const helpText = `OpenOb Local CLI (Read-Only)
+
+Usage:
+  openob info [--json] [--url <url>] [--token <token>]
+  openob list [subpath] [--json] [--url <url>] [--token <token>]
+  openob read <path> [--json] [--url <url>] [--token <token>]
+  openob search <query> [--json] [--url <url>] [--token <token>]
+  openob backlinks <path> [--json] [--url <url>] [--token <token>]
 `;
         return { exitCode: command ? 1 : 0, output: helpText };
       }

@@ -430,4 +430,152 @@ This note is literally named backlinks inside a subfolder.
     expect(parsed.host).toBe('127.0.0.1');
     expect(parsed.token).toBe('custom-secret-token');
   });
+
+  it('17. Enforce Loopback-Only: non-loopback hosts (0.0.0.0, ::, LAN) are rejected', async () => {
+    // 0.0.0.0
+    await expect(
+      startGateway({
+        workspace,
+        host: '0.0.0.0',
+        port: 0,
+      })
+    ).rejects.toThrow(/Gateway can only bind to loopback interfaces/);
+
+    // :: (all IPv6)
+    await expect(
+      startGateway({
+        workspace,
+        host: '::',
+        port: 0,
+      })
+    ).rejects.toThrow(/Gateway can only bind to loopback interfaces/);
+
+    // Non-loopback LAN IP
+    await expect(
+      startGateway({
+        workspace,
+        host: '192.168.1.100',
+        port: 0,
+      })
+    ).rejects.toThrow(/Gateway can only bind to loopback interfaces/);
+
+    // 10.0.0.1
+    await expect(
+      startGateway({
+        workspace,
+        host: '10.0.0.1',
+        port: 0,
+      })
+    ).rejects.toThrow(/Gateway can only bind to loopback interfaces/);
+  });
+
+  it('18. Remote CLI Mode: CLI communicates strictly via REST with running gateway', async () => {
+    // Info via REST
+    const infoRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['info', '--json'],
+    });
+    expect(infoRes.exitCode).toBe(0);
+    const infoData = JSON.parse(infoRes.output);
+    expect(infoData.name).toBe('gateway-vault');
+    expect(infoData.readOnly).toBe(true);
+
+    // List via REST
+    const listRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['list'],
+    });
+    expect(listRes.exitCode).toBe(0);
+    expect(listRes.output).toContain('Welcome.md');
+
+    // Read via REST
+    const readRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['read', 'Welcome.md'],
+    });
+    expect(readRes.exitCode).toBe(0);
+    expect(readRes.output).toContain('This is an API test note');
+
+    // Search via REST
+    const searchRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['search', 'Gateway', '--json'],
+    });
+    expect(searchRes.exitCode).toBe(0);
+    const searchData = JSON.parse(searchRes.output);
+    expect(searchData.total).toBe(2);
+
+    // Backlinks via REST
+    const backlinksRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['backlinks', 'Welcome.md'],
+    });
+    expect(backlinksRes.exitCode).toBe(0);
+    expect(backlinksRes.output).toContain('Folder/Sub Note.md');
+
+    // Invalid Token via REST -> fails with Unauthorized
+    const unauthRes = await runCli({
+      url: gateway.url,
+      token: 'bad-token',
+      args: ['info'],
+    });
+    expect(unauthRes.exitCode).toBe(1);
+    expect(unauthRes.output).toContain('Unauthorized');
+
+    // Unreachable Gateway -> fails with clear error message
+    const unreachableRes = await runCli({
+      url: 'http://127.0.0.1:59998',
+      token: TEST_TOKEN,
+      args: ['info'],
+    });
+    expect(unreachableRes.exitCode).toBe(1);
+    expect(unreachableRes.output).toContain('Unable to connect to OpenOb Gateway');
+  });
+
+  it('19. CLI argument parser parses url and token options', async () => {
+    const { parseCliArgs } = await import('../bin/cli.js');
+    const parsed = parseCliArgs([
+      '--url',
+      'http://127.0.0.1:9999',
+      '--token',
+      'my-cli-token',
+      'read',
+      'Note.md',
+    ]);
+
+    expect(parsed.url).toBe('http://127.0.0.1:9999');
+    expect(parsed.token).toBe('my-cli-token');
+    expect(parsed.commandArgs).toEqual(['read', 'Note.md']);
+  });
+
+  it('20. Clean State Executable Test: Spawns built CLI executable as real process', async () => {
+    const { execFile } = await import('node:child_process');
+    const path = await import('node:path');
+    const cliBinPath = path.resolve(__dirname, '../../dist/bin/cli.js');
+
+    // Run `node <cliBinPath> --url <gateway.url> --token <TEST_TOKEN> info --json`
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [cliBinPath, '--url', gateway.url, '--token', TEST_TOKEN, 'info', '--json'],
+        (err, stdout, stderr) => {
+          if (err) {
+            reject(new Error(`CLI exit with code ${err.code}: ${stderr || stdout}`));
+          } else {
+            resolve(stdout);
+          }
+        }
+      );
+    });
+
+    const parsed = JSON.parse(stdout);
+    expect(parsed.name).toBe('gateway-vault');
+    expect(parsed.readOnly).toBe(true);
+    expect(parsed.noteCount).toBe(5);
+  });
 });

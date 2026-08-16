@@ -12,7 +12,9 @@
     "node": ">=20 <23"
   },
   "scripts": {
-    "build": "npm run build --workspace=apps/web",
+    "build": "tsc --build && npm run build --workspace=apps/web",
+    "gateway": "node apps/gateway/dist/bin/gateway.js",
+    "openob": "node apps/gateway/dist/bin/cli.js",
     "typecheck": "tsc --build",
     "test": "vitest run",
     "test:watch": "vitest",

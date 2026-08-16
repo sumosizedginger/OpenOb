@@ -247,4 +247,35 @@ Tasks:
     });
     expect(errRes.isError).toBe(true);
   });
+
+  it('14. Boundary Hardening: internal subsystems (storage, index, safeWriter, coordinator) are private', async () => {
+    const { workspace } = await createFixtureWorkspace();
+
+    // Verify public properties
+    expect(workspace.vaultName).toBe('test-vault');
+    expect(workspace.readOnly).toBe(true);
+
+    // Verify internal mutation machinery is not part of public API
+    const publicKeys = Object.keys(workspace);
+    expect(publicKeys).toContain('vaultName');
+    expect(publicKeys).toContain('readOnly');
+
+    // Type-level assertion: ensure OpenObWorkspace type only has read-only methods and metadata
+    type PublicWorkspaceKeys = keyof OpenObWorkspace;
+    // Compile-time check: 'storage' | 'index' | 'safeWriter' | 'coordinator' must NOT be in PublicWorkspaceKeys
+    type IsExposed<K extends string> = K extends PublicWorkspaceKeys ? true : false;
+    type StorageExposed = IsExposed<'storage'>;
+    type IndexExposed = IsExposed<'index'>;
+    type SafeWriterExposed = IsExposed<'safeWriter'>;
+    type CoordinatorExposed = IsExposed<'coordinator'>;
+
+    const _storageCheck: StorageExposed = false;
+    const _indexCheck: IndexExposed = false;
+    const _safeWriterCheck: SafeWriterExposed = false;
+    const _coordinatorCheck: CoordinatorExposed = false;
+    expect(_storageCheck).toBe(false);
+    expect(_indexCheck).toBe(false);
+    expect(_safeWriterCheck).toBe(false);
+    expect(_coordinatorCheck).toBe(false);
+  });
 });
