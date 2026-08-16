@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FileSnapshot,
+  FileStat,
   FileVersion,
   VaultEntry,
   VaultPath,
