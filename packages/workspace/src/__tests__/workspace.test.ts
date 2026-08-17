@@ -278,4 +278,13 @@ Tasks:
     expect(_safeWriterCheck).toBe(false);
     expect(_coordinatorCheck).toBe(false);
   });
+
+  it('15. P3A-4: Leading slash paths normalize safely to vault-relative paths', async () => {
+    const { workspace } = await createFixtureWorkspace();
+
+    // /Welcome.md normalizes to Welcome.md and reads correctly
+    const note = await workspace.readNote('/Welcome.md');
+    expect(note.path).toBe('Welcome.md');
+    expect(note.title).toBe('Welcome Note');
+  });
 });

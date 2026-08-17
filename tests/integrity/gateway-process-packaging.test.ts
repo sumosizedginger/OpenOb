@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -9,31 +9,68 @@ const GATEWAY_BIN = path.resolve(__dirname, '../../apps/gateway/dist/bin/gateway
 const CLI_BIN = path.resolve(__dirname, '../../apps/gateway/dist/bin/cli.js');
 const BUILD_SCRIPT = path.resolve(__dirname, '../../apps/gateway/build.js');
 
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
-    srv.on('error', reject);
+function spawnGatewayProcess(
+  binPath: string,
+  vaultDir: string,
+  extraArgs: string[] = []
+): { child: ChildProcess; ready: Promise<{ port: number; url: string }> } {
+  const child = spawn(process.execPath, [binPath, vaultDir, '--port', '0', ...extraArgs], {
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  const ready = new Promise<{ port: number; url: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for gateway to start. Stderr:\n${stderr}`));
+    }, 10000);
+
+    child.stdout.on('data', (data) => {
+      const msg = data.toString();
+      const match = msg.match(/Listening on (http:\/\/127\.0\.0\.1:(\d+))/);
+      if (match) {
+        clearTimeout(timeout);
+        resolve({ port: parseInt(match[2], 10), url: match[1] });
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`Child error: ${err.message}. Stderr:\n${stderr}`));
+    });
+
+    child.on('exit', (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Child exited prematurely with code ${code}. Stderr:\n${stderr}`));
+    });
+  });
+
+  return { child, ready };
 }
 
 describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
   let tempVaultDir: string;
 
   beforeAll(async () => {
-    // 1. Build production gateway artifacts using esbuild packaging script
-    await new Promise<void>((resolve, reject) => {
-      execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
-        if (err) {
-          reject(new Error(`Failed to build gateway: ${stderr || stdout}`));
-        } else {
-          resolve();
-        }
+    // 1. Ensure production gateway artifacts exist
+    const exists = await fs
+      .stat(GATEWAY_BIN)
+      .then(() => fs.stat(CLI_BIN))
+      .catch(() => null);
+    if (!exists) {
+      await new Promise<void>((resolve, reject) => {
+        execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
+          if (err) {
+            reject(new Error(`Failed to build gateway: ${stderr || stdout}`));
+          } else {
+            resolve();
+          }
+        });
       });
-    });
+    }
 
     // 2. Create isolated temporary vault
     tempVaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'okw-gateway-packaging-'));
@@ -51,56 +88,25 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
   });
 
   it('TEST A: Real startup with plain Node -> stays alive, /health 200, auth enforced, workspace metadata valid', async () => {
-    const port = await getFreePort();
     const token = 'test-secret-packaging-token-a';
-
-    const child = spawn(
-      process.execPath,
-      [GATEWAY_BIN, tempVaultDir, '--port', String(port), '--token', token],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
+    const { child, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, ['--token', token]);
 
     try {
-      // Wait for server to announce listening
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Timed out waiting for gateway to start'));
-        }, 10000);
-
-        child.stdout.on('data', (data) => {
-          const msg = data.toString();
-          if (msg.includes('[OpenOb Gateway] Listening on')) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        });
-
-        child.on('error', (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-
-        child.on('exit', (code) => {
-          clearTimeout(timeout);
-          reject(new Error(`Child exited prematurely with code ${code}`));
-        });
-      });
+      const { url } = await ready;
 
       // 1. GET /health -> 200 without auth
-      const healthRes = await fetch(`http://127.0.0.1:${port}/health`);
+      const healthRes = await fetch(`${url}/health`);
       expect(healthRes.status).toBe(200);
       const healthData = await healthRes.json();
       expect(healthData.status).toBe('ok');
       expect(healthData.vault).toBe(path.basename(tempVaultDir));
 
       // 2. GET /api/v1/workspace without token -> 401
-      const unauthRes = await fetch(`http://127.0.0.1:${port}/api/v1/workspace`);
+      const unauthRes = await fetch(`${url}/api/v1/workspace`);
       expect(unauthRes.status).toBe(401);
 
       // 3. GET /api/v1/workspace with valid token -> 200
-      const authRes = await fetch(`http://127.0.0.1:${port}/api/v1/workspace`, {
+      const authRes = await fetch(`${url}/api/v1/workspace`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -111,39 +117,22 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
       expect(wsData.noteCount).toBe(1);
     } finally {
       child.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 100));
     }
   });
 
   it('TEST B: CLI against running gateway -> info, read, search work via REST without direct storage opening', async () => {
-    const port = await getFreePort();
     const token = 'test-secret-packaging-token-b';
-
-    const child = spawn(
-      process.execPath,
-      [GATEWAY_BIN, tempVaultDir, '--port', String(port), '--token', token],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
+    const { child, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, ['--token', token]);
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        child.stdout.on('data', (data) => {
-          if (data.toString().includes('[OpenOb Gateway] Listening on')) {
-            resolve();
-          }
-        });
-        child.on('exit', (code) => {
-          reject(new Error(`Gateway exited early with code ${code}`));
-        });
-      });
+      const { url } = await ready;
 
       // 1. CLI info --json
       const infoOut = await new Promise<string>((resolve, reject) => {
         execFile(
           process.execPath,
-          [CLI_BIN, '--url', `http://127.0.0.1:${port}`, '--token', token, 'info', '--json'],
+          [CLI_BIN, '--url', url, '--token', token, 'info', '--json'],
           (err, stdout, stderr) => {
             if (err) reject(new Error(stderr || stdout));
             else resolve(stdout);
@@ -158,16 +147,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
       const readOut = await new Promise<string>((resolve, reject) => {
         execFile(
           process.execPath,
-          [
-            CLI_BIN,
-            '--url',
-            `http://127.0.0.1:${port}`,
-            '--token',
-            token,
-            'read',
-            'Welcome.md',
-            '--json',
-          ],
+          [CLI_BIN, '--url', url, '--token', token, 'read', 'Welcome.md', '--json'],
           (err, stdout, stderr) => {
             if (err) reject(new Error(stderr || stdout));
             else resolve(stdout);
@@ -183,16 +163,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
       const searchOut = await new Promise<string>((resolve, reject) => {
         execFile(
           process.execPath,
-          [
-            CLI_BIN,
-            '--url',
-            `http://127.0.0.1:${port}`,
-            '--token',
-            token,
-            'search',
-            'Welcome',
-            '--json',
-          ],
+          [CLI_BIN, '--url', url, '--token', token, 'search', 'Welcome', '--json'],
           (err, stdout, stderr) => {
             if (err) reject(new Error(stderr || stdout));
             else resolve(stdout);
@@ -204,22 +175,17 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
       expect(searchParsed.matches[0].path).toBe('Welcome.md');
     } finally {
       child.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 100));
     }
   });
 
   it('TEST C: Invalid vault -> non-zero exit, diagnostic error on stderr, no hanging process', async () => {
-    const port = await getFreePort();
     const nonExistentVault = path.join(os.tmpdir(), 'okw-nonexistent-vault-99999');
 
     const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-      const child = spawn(
-        process.execPath,
-        [GATEWAY_BIN, nonExistentVault, '--port', String(port)],
-        {
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }
-      );
+      const child = spawn(process.execPath, [GATEWAY_BIN, nonExistentVault, '--port', '0'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
       let stderr = '';
       child.stderr.on('data', (chunk) => {
@@ -236,11 +202,11 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
   });
 
   it('TEST D: Occupied port -> non-zero exit, EADDRINUSE diagnostic on stderr, no hanging child', async () => {
-    const occupiedPort = await getFreePort();
     const blockingServer = net.createServer();
-
-    await new Promise<void>((resolve) => {
-      blockingServer.listen(occupiedPort, '127.0.0.1', () => resolve());
+    const occupiedPort = await new Promise<number>((resolve) => {
+      blockingServer.listen(0, '127.0.0.1', () => {
+        resolve((blockingServer.address() as net.AddressInfo).port);
+      });
     });
 
     try {
@@ -271,18 +237,8 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
   });
 
   it('TEST E: Graceful shutdown -> SIGTERM cleanly terminates without orphans or temp locks', async () => {
-    const port = await getFreePort();
-    const child = spawn(process.execPath, [GATEWAY_BIN, tempVaultDir, '--port', String(port)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    await new Promise<void>((resolve) => {
-      child.stdout.on('data', (data) => {
-        if (data.toString().includes('[OpenOb Gateway] Listening on')) {
-          resolve();
-        }
-      });
-    });
+    const { child, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir);
+    await ready;
 
     // Send SIGTERM
     const exitCodePromise = new Promise<number | null>((resolve) => {
@@ -299,48 +255,38 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
   });
 
   it('TEST F: Clean build proof -> deleting dist and rebuilding produces runnable executables', async () => {
-    const distDir = path.resolve(__dirname, '../../apps/gateway/dist');
-
-    // 1. Delete generated dist outputs
-    await fs.rm(distDir, { recursive: true, force: true });
-    expect(await fs.stat(distDir).catch(() => null)).toBeNull();
-
-    // 2. Run packaging build
-    await new Promise<void>((resolve, reject) => {
-      execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
-        if (err) reject(new Error(stderr || stdout));
-        else resolve();
-      });
-    });
-
-    // 3. Confirm artifacts exist
-    const gatewayStat = await fs.stat(GATEWAY_BIN);
-    const cliStat = await fs.stat(CLI_BIN);
-    expect(gatewayStat.isFile()).toBe(true);
-    expect(cliStat.isFile()).toBe(true);
-
-    // 4. Run newly generated gateway artifact and verify /health
-    const port = await getFreePort();
-    const child = spawn(process.execPath, [GATEWAY_BIN, tempVaultDir, '--port', String(port)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
+    const tempDist = path.resolve(__dirname, `../../apps/gateway/.dist-clean-test-${Date.now()}`);
     try {
-      await new Promise<void>((resolve) => {
-        child.stdout.on('data', (data) => {
-          if (data.toString().includes('[OpenOb Gateway] Listening on')) {
-            resolve();
-          }
+      // 1. Run packaging build targeting clean tempDist
+      await new Promise<void>((resolve, reject) => {
+        execFile(process.execPath, [BUILD_SCRIPT, '--outdir', tempDist], (err, stdout, stderr) => {
+          if (err) reject(new Error(stderr || stdout));
+          else resolve();
         });
       });
 
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.status).toBe('ok');
+      // 2. Confirm artifacts exist
+      const tempGatewayBin = path.join(tempDist, 'bin/gateway.js');
+      const tempCliBin = path.join(tempDist, 'bin/cli.js');
+      const gatewayStat = await fs.stat(tempGatewayBin);
+      const cliStat = await fs.stat(tempCliBin);
+      expect(gatewayStat.isFile()).toBe(true);
+      expect(cliStat.isFile()).toBe(true);
+
+      // 3. Run newly generated gateway artifact and verify /health
+      const { child, ready } = spawnGatewayProcess(tempGatewayBin, tempVaultDir);
+      try {
+        const { url } = await ready;
+        const res = await fetch(`${url}/health`);
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.status).toBe('ok');
+      } finally {
+        child.kill('SIGTERM');
+        await new Promise((r) => setTimeout(r, 100));
+      }
     } finally {
-      child.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 200));
+      await fs.rm(tempDist, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -348,7 +294,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     // 1. `node CLI_BIN --help` -> exit 0
     const helpFlagRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, '--help'], (err, stdout) => {
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
+        resolve({ code: err ? ((err.code as number) ?? 1) : 0, stdout });
       });
     });
     expect(helpFlagRes.code).toBe(0);
@@ -357,7 +303,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     // 2. `node CLI_BIN -h` -> exit 0
     const shortHelpRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, '-h'], (err, stdout) => {
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
+        resolve({ code: err ? ((err.code as number) ?? 1) : 0, stdout });
       });
     });
     expect(shortHelpRes.code).toBe(0);
@@ -366,7 +312,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     // 3. `node CLI_BIN help` -> exit 0
     const helpCmdRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, 'help'], (err, stdout) => {
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
+        resolve({ code: err ? ((err.code as number) ?? 1) : 0, stdout });
       });
     });
     expect(helpCmdRes.code).toBe(0);
@@ -375,7 +321,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     // 4. `node CLI_BIN` (no command) -> exit 0
     const noCmdRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN], (err, stdout) => {
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
+        resolve({ code: err ? ((err.code as number) ?? 1) : 0, stdout });
       });
     });
     expect(noCmdRes.code).toBe(0);
@@ -385,7 +331,7 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     const unknownRes = await new Promise<{ code: number; stderr: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, 'invalid-unknown-cmd'], (err, stdout, stderr) => {
         resolve({
-          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          code: err ? ((err.code as number) ?? 1) : 0,
           stderr: stderr || stdout,
         });
       });

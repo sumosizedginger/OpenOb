@@ -228,11 +228,11 @@ async function runCliDirect(
         const path = args[1];
         const key = args[2];
         const rawVal = args[3];
-        if (!path || !key) {
+        if (!path || !key || path.startsWith('-') || key.startsWith('-')) {
           return {
             exitCode: 1,
             output:
-              'Error: Missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
+              'Error: Invalid or missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
           };
         }
         if (!expectedVersion) {
@@ -476,11 +476,11 @@ async function runCliRemote(
         const path = args[1];
         const key = args[2];
         const rawVal = args[3];
-        if (!path || !key) {
+        if (!path || !key || path.startsWith('-') || key.startsWith('-')) {
           return {
             exitCode: 1,
             output:
-              'Error: Missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
+              'Error: Invalid or missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
           };
         }
         if (!expectedVersion) {

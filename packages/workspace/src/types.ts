@@ -232,6 +232,7 @@ export type ApiErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'CONFLICT'
+  | 'PAYLOAD_TOO_LARGE'
   | 'STORAGE_ERROR'
   | 'UNSUPPORTED'
   | 'INTERNAL_ERROR';

@@ -52,6 +52,13 @@ export class UnsupportedError extends WorkspaceError {
   }
 }
 
+export class PayloadTooLargeError extends WorkspaceError {
+  constructor(message = 'Payload Too Large: Request body exceeds maximum allowed size') {
+    super(message, 'PAYLOAD_TOO_LARGE', 413);
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
 /**
  * Maps an internal exception to a structured API error status code and DTO.
  */

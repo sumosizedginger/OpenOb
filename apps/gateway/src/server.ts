@@ -5,6 +5,7 @@ import {
   ClientContext,
   InvalidRequestError,
   OpenObWorkspace,
+  PayloadTooLargeError,
   toApiError,
   UnauthorizedError,
 } from '@okw/workspace';
@@ -37,15 +38,35 @@ async function readJsonBody(
       return;
     }
 
+    const contentLength = req.headers['content-length'];
+    if (contentLength) {
+      const len = parseInt(contentLength, 10);
+      if (!isNaN(len) && len > maxBytes) {
+        req.resume(); // Drain stream without storing into memory
+        reject(
+          new PayloadTooLargeError(
+            `Request body size (${len} bytes) exceeds maximum limit (${maxBytes} bytes)`
+          )
+        );
+        return;
+      }
+    }
+
     let body = '';
     let bytes = 0;
+    let exceeded = false;
 
     req.on('data', (chunk: Buffer) => {
+      if (exceeded) return;
       bytes += chunk.length;
       if (bytes > maxBytes) {
-        req.destroy();
+        exceeded = true;
+        req.pause(); // Stop reading more into memory
+        req.resume(); // Drain stream so socket doesn't hang
         reject(
-          new InvalidRequestError(`Request body exceeds maximum size limit (${maxBytes} bytes)`)
+          new PayloadTooLargeError(
+            `Request payload exceeds maximum allowed size (${maxBytes} bytes)`
+          )
         );
         return;
       }
@@ -53,6 +74,7 @@ async function readJsonBody(
     });
 
     req.on('end', () => {
+      if (exceeded) return;
       if (!body.trim()) {
         resolve({});
         return;
@@ -65,7 +87,11 @@ async function readJsonBody(
       }
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (!exceeded) {
+        reject(err);
+      }
+    });
   });
 }
 

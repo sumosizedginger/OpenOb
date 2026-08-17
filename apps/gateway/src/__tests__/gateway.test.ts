@@ -904,6 +904,8 @@ This note is literally named backlinks inside a subfolder.
       body: 'this is not json {',
     });
     expect(malformedRes.status).toBe(400);
+    const malformedData = await malformedRes.json();
+    expect(malformedData.code).toBe('INVALID_REQUEST');
 
     // 2. DELETE method -> 405 UNSUPPORTED
     const deleteRes = await fetch(`${gateway.url}/api/v1/notes/Welcome.md`, {
@@ -911,5 +913,120 @@ This note is literally named backlinks inside a subfolder.
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
     expect(deleteRes.status).toBe(405);
+  });
+
+  it('27. P2A-1: Oversized REST request bodies reliably return HTTP 413 PAYLOAD_TOO_LARGE without ECONNRESET', async () => {
+    const limitedStorage = new MemoryVaultStorage('limited-vault');
+    const limitedParser = new DefaultDocumentParser();
+    const limitedIndex = new MemoryDocumentIndex();
+    const limitedWs = new OpenObWorkspace({
+      storage: limitedStorage,
+      parser: limitedParser,
+      index: limitedIndex,
+      vaultName: 'limited-vault',
+      readOnly: false,
+    });
+
+    const limitedGateway = await startGateway({
+      workspace: limitedWs,
+      host: '127.0.0.1',
+      port: 0,
+      token: 'limited-token',
+      scopes: ['workspace.write', 'properties.write'],
+      maxBodyBytes: 1024, // 1 KB limit
+    });
+
+    try {
+      // 1. Request with Content-Length exceeding maxBodyBytes -> 413
+      const oversizedPayload = JSON.stringify({
+        path: 'TooBig1.md',
+        content: 'x'.repeat(2048),
+      });
+
+      const clRes = await fetch(`${limitedGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer limited-token',
+          'Content-Type': 'application/json',
+          'Content-Length': String(Buffer.byteLength(oversizedPayload)),
+        },
+        body: oversizedPayload,
+      });
+      expect(clRes.status).toBe(413);
+      const clData = await clRes.json();
+      expect(clData.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(clData.message).toContain('exceeds maximum');
+
+      // Verify file was NOT created on disk/storage
+      const stat1 = await limitedStorage.stat('TooBig1.md');
+      expect(stat1).toBeNull();
+
+      // 2. Streamed / chunked request exceeding maxBodyBytes -> 413 without socket crash
+      const streamedPayload = JSON.stringify({
+        path: 'TooBig2.md',
+        content: 'y'.repeat(4096),
+      });
+
+      const chunkedRes = await fetch(`${limitedGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer limited-token',
+          'Content-Type': 'application/json',
+        },
+        body: streamedPayload,
+      });
+      expect(chunkedRes.status).toBe(413);
+      const chunkedData = await chunkedRes.json();
+      expect(chunkedData.code).toBe('PAYLOAD_TOO_LARGE');
+
+      // Verify file was NOT created
+      const stat2 = await limitedStorage.stat('TooBig2.md');
+      expect(stat2).toBeNull();
+
+      // 3. Request within limit (500 bytes) -> 201 Created
+      const smallPayload = JSON.stringify({
+        path: 'SmallNote.md',
+        content: 'Valid content within 1KB limit.',
+      });
+      const validRes = await fetch(`${limitedGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer limited-token',
+          'Content-Type': 'application/json',
+        },
+        body: smallPayload,
+      });
+      expect(validRes.status).toBe(201);
+      const validData = await validRes.json();
+      expect(validData.path).toBe('SmallNote.md');
+      expect(validData.durableSuccess).toBe(true);
+
+      // 4. Verify gateway remains completely healthy and responsive
+      const healthRes = await fetch(`${limitedGateway.url}/health`);
+      expect(healthRes.status).toBe(200);
+      const healthData = await healthRes.json();
+      expect(healthData.status).toBe('ok');
+    } finally {
+      await limitedGateway.stop();
+    }
+  });
+
+  it('28. P3A-3: CLI set-property rejects flag-style misuse and validates positionals', async () => {
+    const res = await runCli({
+      workspace,
+      args: [
+        'set-property',
+        'Welcome.md',
+        '--key',
+        'status',
+        '--value',
+        'active',
+        '--expected-version',
+        'v1',
+      ],
+    });
+    expect(res.exitCode).toBe(1);
+    expect(res.output).toContain('Invalid or missing arguments');
+    expect(res.output).toContain('Usage: openob set-property');
   });
 });

@@ -128,6 +128,22 @@ All endpoints bind strictly to loopback (`127.0.0.1`).
 | `PUT`   | `/api/v1/notes/:path`                                | Update note body content with optimistic concurrency control     | `workspace.write`  | Yes           |
 | `PATCH` | `/api/v1/notes/:path/properties`                     | Set or remove a frontmatter property with optimistic concurrency | `properties.write` | Yes           |
 
+### Error Status Codes & Limits
+
+- **Body Size Limit (`maxBodyBytes`):** 10 MB default limit. Payloads exceeding this limit receive HTTP `413 PAYLOAD_TOO_LARGE` without TCP connection reset.
+- **Path Normalization:** Vault paths with leading slashes (e.g. `/Notes/Doc.md`) are normalized to vault-relative paths (`Notes/Doc.md`). Traversal sequences (`../`), drive letters, and UNC paths are strictly rejected with `400 INVALID_PATH`.
+
+| Status Code | Error Code                         | Description                                                   |
+| :---------- | :--------------------------------- | :------------------------------------------------------------ |
+| `400`       | `INVALID_REQUEST` / `INVALID_PATH` | Malformed JSON, missing fields, or invalid/traversal path     |
+| `401`       | `UNAUTHORIZED`                     | Missing or invalid bearer authorization token                 |
+| `403`       | `FORBIDDEN`                        | Gateway started without required capability scope             |
+| `404`       | `NOT_FOUND`                        | Target note file does not exist                               |
+| `405`       | `UNSUPPORTED`                      | HTTP method not supported in gateway mode                     |
+| `409`       | `CONFLICT`                         | Optimistic concurrency mismatch or target file already exists |
+| `413`       | `PAYLOAD_TOO_LARGE`                | Request payload exceeds maximum body size limit               |
+| `500`       | `INTERNAL_ERROR`                   | Unexpected internal runtime exception                         |
+
 ---
 
 ## 6. CLI Usage

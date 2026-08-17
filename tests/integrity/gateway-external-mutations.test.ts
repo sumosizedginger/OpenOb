@@ -2,7 +2,6 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { spawn, execFile, ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import net from 'node:net';
 
 describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifacts)', () => {
   const GATEWAY_BIN = path.resolve(__dirname, '../../apps/gateway/dist/bin/gateway.js');
@@ -10,24 +9,62 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
   const BUILD_SCRIPT = path.resolve(__dirname, '../../apps/gateway/build.js');
   let tempVaultDir: string;
 
-  async function getFreePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const srv = net.createServer();
-      srv.listen(0, '127.0.0.1', () => {
-        const port = (srv.address() as net.AddressInfo).port;
-        srv.close((err) => (err ? reject(err) : resolve(port)));
+  function spawnGatewayProcess(
+    binPath: string,
+    vaultDir: string,
+    extraArgs: string[] = []
+  ): { child: ChildProcess; ready: Promise<{ port: number; url: string }> } {
+    const child = spawn(process.execPath, [binPath, vaultDir, '--port', '0', ...extraArgs], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const ready = new Promise<{ port: number; url: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Timed out waiting for gateway to start. Stderr:\n${stderr}`));
+      }, 10000);
+
+      child.stdout.on('data', (data) => {
+        const msg = data.toString();
+        const match = msg.match(/Listening on (http:\/\/127\.0\.0\.1:(\d+))/);
+        if (match) {
+          clearTimeout(timeout);
+          resolve({ port: parseInt(match[2], 10), url: match[1] });
+        }
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(new Error(`Child error: ${err.message}. Stderr:\n${stderr}`));
+      });
+
+      child.on('exit', (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`Child exited prematurely with code ${code}. Stderr:\n${stderr}`));
       });
     });
+
+    return { child, ready };
   }
 
   beforeAll(async () => {
-    // 1. Compile real production artifacts via build script
-    await new Promise<void>((resolve, reject) => {
-      execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
-        if (err) reject(new Error(`Packaging build failed: ${stderr || stdout}`));
-        else resolve();
+    // 1. Ensure production gateway artifacts exist
+    const exists = await fs
+      .stat(GATEWAY_BIN)
+      .then(() => fs.stat(CLI_BIN))
+      .catch(() => null);
+    if (!exists) {
+      await new Promise<void>((resolve, reject) => {
+        execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
+          if (err) reject(new Error(`Packaging build failed: ${stderr || stdout}`));
+          else resolve();
+        });
       });
-    });
+    }
 
     // 2. Create isolated temp vault directory
     tempVaultDir = path.resolve(__dirname, `../../.temp-mutation-vault-${Date.now()}`);
@@ -46,43 +83,18 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
   });
 
   it('Exercises full mutation lifecycle (create -> update -> set-property -> disk verification -> stale 409) using real bundled binaries', async () => {
-    const port = await getFreePort();
     const token = 'process-mutation-token-999';
 
     // 1. Spawn real production gateway binary with explicit mutation scopes
-    const gatewayChild = spawn(
-      process.execPath,
-      [
-        GATEWAY_BIN,
-        tempVaultDir,
-        '--port',
-        String(port),
-        '--token',
-        token,
-        '--scopes',
-        'workspace.read,workspace.search,workspace.write,properties.write',
-      ],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
+    const { child: gatewayChild, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, [
+      '--token',
+      token,
+      '--scopes',
+      'workspace.read,workspace.search,workspace.write,properties.write',
+    ]);
 
     try {
-      // Wait for gateway startup
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Gateway startup timed out')), 5000);
-        gatewayChild.stdout.on('data', (data) => {
-          if (data.toString().includes('[OpenOb Gateway] Listening on')) {
-            clearTimeout(timer);
-            resolve();
-          }
-        });
-        gatewayChild.stderr.on('data', (data) => {
-          // Allow normal log lines on stderr
-        });
-      });
-
-      const gatewayUrl = `http://127.0.0.1:${port}`;
+      const { url: gatewayUrl } = await ready;
 
       // 2. Create Note using real CLI binary
       const createRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
@@ -214,35 +226,21 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
       expect(diskContent4).toBe(diskContent3);
     } finally {
       gatewayChild.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 100));
     }
   }, 15000);
 
   it('Default gateway starting with no --scopes starts read-only and rejects CLI mutations with 403', async () => {
-    const port = await getFreePort();
     const token = 'readonly-token-abc';
 
     // Start gateway with DEFAULT scopes (read-only)
-    const readOnlyGateway = spawn(
-      process.execPath,
-      [GATEWAY_BIN, tempVaultDir, '--port', String(port), '--token', token],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
+    const { child: readOnlyGateway, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, [
+      '--token',
+      token,
+    ]);
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Gateway startup timed out')), 5000);
-        readOnlyGateway.stdout.on('data', (data) => {
-          if (data.toString().includes('[OpenOb Gateway] Listening on')) {
-            clearTimeout(timer);
-            resolve();
-          }
-        });
-      });
-
-      const gatewayUrl = `http://127.0.0.1:${port}`;
+      const { url: gatewayUrl } = await ready;
 
       // CLI create against default read-only gateway must receive 403 Forbidden and exit 1
       const cliRes = await new Promise<{ code: number; stderr: string }>((resolve) => {
@@ -268,7 +266,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
       expect(cliRes.stderr).toMatch(/Forbidden|403/);
     } finally {
       readOnlyGateway.kill('SIGTERM');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 100));
     }
   });
 });

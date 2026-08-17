@@ -6,10 +6,14 @@ import * as esbuild from 'esbuild';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const outdir = path.resolve(__dirname, 'dist');
+let outdir = path.resolve(__dirname, 'dist');
+for (let i = 2; i < process.argv.length; i++) {
+  if (process.argv[i] === '--outdir' && i + 1 < process.argv.length) {
+    outdir = path.resolve(process.argv[++i]);
+  }
+}
 
 async function build() {
-  await fs.rm(outdir, { recursive: true, force: true });
   await fs.mkdir(outdir, { recursive: true });
 
   await esbuild.build({
@@ -27,7 +31,7 @@ async function build() {
     sourcemap: true,
   });
 
-  process.stdout.write('[OpenOb Gateway] Build complete -> apps/gateway/dist\n');
+  process.stdout.write(`[OpenOb Gateway] Build complete -> ${outdir}\n`);
 }
 
 build().catch((err) => {
