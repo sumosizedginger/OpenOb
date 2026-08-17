@@ -20,7 +20,7 @@ export const ConflictModal: React.FC<ConflictModalProps> = ({
   onClose,
 }) => {
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay conflict-modal" onClick={onClose}>
       <div
         className="modal-dialog"
         onClick={(e) => e.stopPropagation()}

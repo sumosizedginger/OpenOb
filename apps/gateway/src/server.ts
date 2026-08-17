@@ -1,4 +1,7 @@
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
@@ -17,7 +20,27 @@ export interface GatewayOptions {
   readonly token?: string;
   readonly scopes?: string[];
   readonly maxBodyBytes?: number;
+  readonly serveWeb?: boolean;
+  readonly webDistPath?: string;
 }
+
+const STATIC_MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+};
 
 export interface RunningGateway {
   readonly host: string;
@@ -102,10 +125,25 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
   const { workspace, token, scopes, maxBodyBytes } = options;
 
   const server = http.createServer(async (req, res) => {
-    // Standard secure JSON headers
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    // Standard secure headers
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
+
+    // CORS headers for local loopback web UI access
+    res.setHeader('Access-Control-Allow-Origin', (req.headers.origin as string) || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+
+    if (req.method?.toUpperCase() === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    // Default API content type (can be overridden by static asset delivery)
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
     const reqUrl = req.url ?? '/';
     let parsedUrl: URL;
@@ -139,7 +177,72 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
       return;
     }
 
-    // 2. Authentication check for /api/v1/* routes
+    // 2. Static Web Application delivery if serveWeb is enabled (public web asset delivery)
+    if (
+      options.serveWeb &&
+      (method === 'GET' || method === 'HEAD') &&
+      !pathname.startsWith('/api/')
+    ) {
+      const defaultWebDist = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../../web/dist'
+      );
+      let webDistDir = path.resolve(options.webDistPath || defaultWebDist);
+      if (!fs.existsSync(webDistDir)) {
+        const fallbackDist = path.resolve(process.cwd(), 'apps/web/dist');
+        if (fs.existsSync(fallbackDist)) {
+          webDistDir = fallbackDist;
+        }
+      }
+
+      const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+      let targetFile = path.resolve(webDistDir, relativePath);
+
+      // Disallow directory traversal outside of webDistDir
+      if (targetFile.startsWith(webDistDir)) {
+        let fileBuffer: Buffer | null = null;
+        let fileExt = path.extname(targetFile).toLowerCase();
+
+        try {
+          const stat = await fs.promises.stat(targetFile);
+          if (stat.isDirectory()) {
+            targetFile = path.join(targetFile, 'index.html');
+            fileExt = '.html';
+          }
+          fileBuffer = await fs.promises.readFile(targetFile);
+        } catch (err: any) {
+          // SPA fallback: serve index.html for non-asset routes
+          if (
+            err.code === 'ENOENT' &&
+            !fileExt.match(/\.(js|css|json|png|jpg|jpeg|gif|svg|ico|woff2?|ttf)$/i)
+          ) {
+            try {
+              const indexPath = path.join(webDistDir, 'index.html');
+              fileBuffer = await fs.promises.readFile(indexPath);
+              fileExt = '.html';
+            } catch {
+              fileBuffer = null;
+            }
+          }
+        }
+
+        if (fileBuffer) {
+          const mimeType = STATIC_MIME_TYPES[fileExt] || 'application/octet-stream';
+          res.statusCode = 200;
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          res.setHeader('X-Frame-Options', 'DENY');
+          if (method === 'HEAD') {
+            res.end();
+          } else {
+            res.end(fileBuffer);
+          }
+          return;
+        }
+      }
+    }
+
+    // 3. Authentication check for /api/v1/* routes
     if (token) {
       const authHeader = req.headers['authorization'];
       const customTokenHeader = req.headers['x-openob-token'];
@@ -169,6 +272,17 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
     }
 
     // Extract client identity context (scopes are ALWAYS server-configured, never client-forged)
+    const defaultScopes = !workspace.readOnly
+      ? [
+          'workspace.read',
+          'workspace.search',
+          'workspace.write',
+          'properties.write',
+          'workspace.rename',
+          'workspace.delete',
+        ]
+      : ['workspace.read', 'workspace.search'];
+
     const clientIdHeader = req.headers['x-openob-client-id'];
     const clientContext: ClientContext = {
       clientId: typeof clientIdHeader === 'string' ? clientIdHeader : undefined,
@@ -177,7 +291,7 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           ? req.headers['x-request-id']
           : undefined) ?? randomUUID(),
       timestamp: Date.now(),
-      scopes: scopes ?? ['workspace.read', 'workspace.search'],
+      scopes: scopes ?? defaultScopes,
     };
 
     // 3. Route Dispatch

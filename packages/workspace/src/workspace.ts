@@ -139,6 +139,10 @@ export class OpenObWorkspace {
     this.readOnly = options.readOnly ?? true;
   }
 
+  public getCoordinator(): NoteWriteCoordinator {
+    return this.coordinator;
+  }
+
   /**
    * Retrieves summary information about the workspace and its capabilities.
    */
@@ -184,7 +188,7 @@ export class OpenObWorkspace {
   async listEntries(subPath = '', context?: ClientContext): Promise<VaultEntry[]> {
     this.checkCapability('workspace.read', context);
     const normalized = subPath ? normalizeVaultPath(subPath) : '';
-    return this.storage.list(normalized);
+    return this.storage.list(normalized, true);
   }
 
   /**

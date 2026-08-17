@@ -16,6 +16,14 @@ import {
   NoteWriteCoordinator,
   NoteState,
 } from '@okw/vault';
+import {
+  GatewayWorkspaceBackend,
+  LocalWorkspaceBackend,
+  OpenObGatewayClient,
+  OpenObWorkspace,
+  WorkspaceBackend,
+  GatewayError,
+} from '@okw/workspace';
 
 export interface OpenTab {
   path: VaultPath;
@@ -192,6 +200,13 @@ tags: [meeting, notes]
 };
 
 export function useVault() {
+  const [vaultMode, setVaultMode] = useState<'memory' | 'fsa' | 'gateway'>('memory');
+  const [vaultName, setVaultName] = useState<string>('Open Knowledge Workspace');
+  const [gatewayUrl, setGatewayUrl] = useState<string>('http://127.0.0.1:4200');
+  const [gatewayToken, setGatewayToken] = useState<string | undefined>(undefined);
+  const [gatewayConnected, setGatewayConnected] = useState<boolean>(false);
+
+  // Local storage instances (used exclusively in local/standalone mode)
   const [storage, setStorage] = useState<VaultStorage>(
     () => new MemoryVaultStorage('Open Knowledge Workspace')
   );
@@ -202,6 +217,19 @@ export function useVault() {
   const coordinatorRef = useRef<NoteWriteCoordinator>(
     new NoteWriteCoordinator(storage, safeWriter)
   );
+
+  // Authoritative workspace backend abstraction
+  const [backend, setBackend] = useState<WorkspaceBackend>(() => {
+    const ws = new OpenObWorkspace({
+      storage,
+      index,
+      parser,
+      safeWriter,
+      coordinator: coordinatorRef.current,
+      vaultName: 'Open Knowledge Workspace',
+    });
+    return new LocalWorkspaceBackend(ws);
+  });
 
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
@@ -225,23 +253,32 @@ export function useVault() {
   activeTabPathRef.current = activeTabPath;
   const openTabsRef = useRef<OpenTab[]>(openTabs);
   openTabsRef.current = openTabs;
+  const backendRef = useRef<WorkspaceBackend>(backend);
+  backendRef.current = backend;
+  const vaultModeRef = useRef<'memory' | 'fsa' | 'gateway'>(vaultMode);
+  vaultModeRef.current = vaultMode;
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
-  // Expose test and introspection hooks on window only in DEV/TEST environments (H6, R6)
+  // Expose test and introspection hooks on window only in DEV/TEST environments
   useEffect(() => {
     if (
       typeof window !== 'undefined' &&
       ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'test')
     ) {
+      (window as any).__vaultMode = vaultMode;
+      (window as any).__backend = backend;
       (window as any).__vaultStorage = storage;
       (window as any).__coordinator = coordinatorRef.current;
       (window as any).__BrowserFSAVaultStorage = BrowserFSAVaultStorage;
+      (window as any).__connectToGateway = connectToGateway;
+      (window as any).__disconnectGateway = disconnectGateway;
+      (window as any).__refreshVault = refreshVault;
+      (window as any).__openNote = openNote;
       (window as any).__readStorage = async (p: string) => {
         return storage.readText(p);
       };
 
-      // R6: Single-level delay indirection; no closure accumulation
       let delayMs = 0;
       const uninstrumentedWrite = (storage as any).__origWrite || storage.write.bind(storage);
       (storage as any).__origWrite = uninstrumentedWrite;
@@ -257,11 +294,13 @@ export function useVault() {
         delayMs = newDelay;
       };
     }
-  }, [storage]);
+  }, [storage, backend, vaultMode]);
 
-  // Listen to authoritative coordinator state updates and reflect in React state (G1, G2)
+  // Coordinator listener (active ONLY in local mode)
   useEffect(() => {
     const unsubscribe = coordinatorRef.current.addListener((noteState: NoteState) => {
+      if (vaultModeRef.current === 'gateway') return; // Strictly ignore coordinator in gateway mode
+
       setOpenTabs((prev) =>
         prev.map((t) => {
           if (t.path !== noteState.path) return t;
@@ -284,52 +323,238 @@ export function useVault() {
     return unsubscribe;
   }, []);
 
-  // Refresh directory list & derived index (R5: Invalidate pre-rebuild upserts via rebuild epoch)
+  // Refresh directory list & derived index
   const refreshVault = useCallback(
-    async (currentStorage: VaultStorage = storage) => {
+    async (
+      currentStorage: VaultStorage = storage,
+      currentIndex: MemoryDocumentIndex = index,
+      currentBackend: WorkspaceBackend = backendRef.current
+    ) => {
       try {
-        const list = await currentStorage.list('', true);
-        setEntries(list);
-        await rebuildVaultIndex(currentStorage, index, parser);
-        vaultRebuildEpochRef.current++;
-        if (activeTabPath) {
-          const bl = await index.getBacklinks(activeTabPath);
-          setBacklinks(bl);
+        if (vaultModeRef.current === 'gateway') {
+          const list = await currentBackend.listEntries('');
+          setEntries(list);
+          if (activeTabPathRef.current) {
+            const bl = await currentBackend.getBacklinks(activeTabPathRef.current);
+            setBacklinks(bl);
+          }
+        } else {
+          const list = await currentStorage.list('', true);
+          setEntries(list);
+          await rebuildVaultIndex(currentStorage, currentIndex, parser);
+          vaultRebuildEpochRef.current++;
+          if (activeTabPathRef.current) {
+            const bl = await currentIndex.getBacklinks(activeTabPathRef.current);
+            setBacklinks(bl);
+          }
         }
       } catch (err) {
         console.error('Error refreshing vault:', err);
       }
     },
-    [storage, index, parser, activeTabPath]
+    [storage, index, parser]
   );
 
-  // Seed default vault on mount
+  // Open note via Gateway backend
+  const openGatewayNote = async (
+    rawPath: VaultPath,
+    currentBackend: WorkspaceBackend = backendRef.current
+  ) => {
+    const path = normalizeVaultPath(rawPath);
+    try {
+      const note = await currentBackend.readNote(path);
+      const snapshot: FileSnapshot = {
+        path: note.path,
+        content: new TextEncoder().encode(note.textContent),
+        textContent: note.textContent,
+        size: note.version.size ?? note.textContent.length,
+        modifiedAt: note.version.modifiedAt ?? Date.now(),
+        version: {
+          token: note.version.token,
+          hash: note.version.hash,
+          modifiedAt: note.version.modifiedAt ?? Date.now(),
+          size: note.version.size ?? note.textContent.length,
+        },
+      };
+
+      const parsed = await parser.parse(note.path, note.textContent, note.version.hash);
+      const newTab: OpenTab = {
+        path: note.path,
+        title: parsed.title || note.path.replace(/\.md$/, '').split('/').pop() || note.path,
+        isDirty: false,
+        content: note.textContent,
+        initialSnapshot: snapshot,
+      };
+
+      setOpenTabs((prev) => {
+        if (prev.some((t) => t.path === note.path)) {
+          return prev.map((t) => (t.path === note.path ? newTab : t));
+        }
+        return [...prev, newTab];
+      });
+
+      activeTabPathRef.current = note.path;
+      setActiveTabPath(note.path);
+      setParsedDoc(parsed);
+
+      const bl = await currentBackend.getBacklinks(note.path);
+      setBacklinks(bl);
+      setSaveStatus('saved');
+      setConflictData(null);
+    } catch (err: any) {
+      console.error(`Failed to open gateway note "${path}":`, err);
+    }
+  };
+
+  // Connect to Gateway Flow
+  const connectToGateway = useCallback(
+    async (url: string, token?: string): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const client = new OpenObGatewayClient({ url, token, clientId: 'openob-web' });
+        const info = await client.getWorkspaceInfo();
+        const gatewayBackend = new GatewayWorkspaceBackend(client);
+
+        setBackend(gatewayBackend);
+        backendRef.current = gatewayBackend;
+        setGatewayUrl(url);
+        setGatewayToken(token);
+        setGatewayConnected(true);
+        setVaultMode('gateway');
+        vaultModeRef.current = 'gateway';
+        setVaultName(info.name);
+
+        try {
+          sessionStorage.setItem('openob_gateway_url', url);
+          if (token) {
+            sessionStorage.setItem('openob_gateway_token', token);
+          } else {
+            sessionStorage.removeItem('openob_gateway_token');
+          }
+        } catch {}
+
+        setOpenTabs([]);
+        setActiveTabPath(null);
+        setParsedDoc(null);
+        setBacklinks([]);
+        setConflictData(null);
+
+        const list = await gatewayBackend.listEntries('');
+        setEntries(list);
+
+        const welcome = list.find((e) => e.path === 'Welcome.md' || e.name === 'Welcome.md');
+        if (welcome) {
+          await openGatewayNote('Welcome.md', gatewayBackend);
+        } else {
+          const first = list.find((e) => !e.isDirectory && e.path.endsWith('.md'));
+          if (first) {
+            await openGatewayNote(first.path, gatewayBackend);
+          }
+        }
+
+        return { success: true };
+      } catch (err: any) {
+        console.error('Failed to connect to gateway:', err);
+        return { success: false, error: err.message || String(err) };
+      }
+    },
+    []
+  );
+
+  // Disconnect from Gateway -> Switch to Local Memory Vault
+  const disconnectGateway = useCallback(async () => {
+    try {
+      sessionStorage.removeItem('openob_gateway_url');
+      sessionStorage.removeItem('openob_gateway_token');
+    } catch {}
+
+    setGatewayConnected(false);
+    setGatewayToken(undefined);
+    setVaultMode('memory');
+    vaultModeRef.current = 'memory';
+    const memStorage = new MemoryVaultStorage('Open Knowledge Workspace');
+    const newWriter = new SafeWriter(memStorage);
+    const newIndex = new MemoryDocumentIndex();
+    const newWorkspace = new OpenObWorkspace({
+      storage: memStorage,
+      index: newIndex,
+      parser,
+      safeWriter: newWriter,
+      vaultName: 'Open Knowledge Workspace',
+    });
+    setStorage(memStorage);
+    setSafeWriter(newWriter);
+    coordinatorRef.current.setStorage(memStorage, newWriter);
+    const localBackend = new LocalWorkspaceBackend(newWorkspace);
+    setBackend(localBackend);
+    backendRef.current = localBackend;
+    setVaultName('Open Knowledge Workspace');
+    setOpenTabs([]);
+    setActiveTabPath(null);
+    setParsedDoc(null);
+    setBacklinks([]);
+    setConflictData(null);
+
+    await memStorage.seed(DEFAULT_VAULT_SEED);
+    await refreshVault(memStorage, newIndex, localBackend);
+    await openNote('Welcome.md');
+  }, [parser]);
+
+  // Auto-connect or seed initial vault on mount
   useEffect(() => {
     void (async () => {
-      if (storage instanceof MemoryVaultStorage) {
-        await storage.seed(DEFAULT_VAULT_SEED);
-        await refreshVault(storage);
-        await openNote('Welcome.md');
+      let restored = false;
+      try {
+        const savedUrl = sessionStorage.getItem('openob_gateway_url');
+        const savedToken = sessionStorage.getItem('openob_gateway_token') || undefined;
+        if (savedUrl) {
+          const res = await connectToGateway(savedUrl, savedToken);
+          if (res.success) {
+            restored = true;
+          }
+        }
+      } catch {}
+
+      if (!restored) {
+        if (storage instanceof MemoryVaultStorage) {
+          await storage.seed(DEFAULT_VAULT_SEED);
+          await refreshVault(storage, index, backendRef.current);
+          await openNote('Welcome.md');
+        }
       }
     })();
   }, []);
 
-  // Open / Pick a native local directory via File System Access API
+  // Open directory via File System Access API
   const openDirectoryVault = async () => {
     if ('showDirectoryPicker' in window) {
       try {
         const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
         const fsaStorage = new BrowserFSAVaultStorage(handle, handle.name);
         const newWriter = new SafeWriter(fsaStorage);
+        const newWorkspace = new OpenObWorkspace({
+          storage: fsaStorage,
+          index,
+          parser,
+          safeWriter: newWriter,
+          vaultName: handle.name,
+        });
+
         setStorage(fsaStorage);
         setSafeWriter(newWriter);
         coordinatorRef.current.setStorage(fsaStorage, newWriter);
+        const localBackend = new LocalWorkspaceBackend(newWorkspace);
+        setBackend(localBackend);
+        backendRef.current = localBackend;
+        setVaultMode('fsa');
+        vaultModeRef.current = 'fsa';
+        setVaultName(handle.name);
+
         pathEpochMapRef.current.clear();
         pathSeqMapRef.current.clear();
         vaultRebuildEpochRef.current++;
         setOpenTabs([]);
         setActiveTabPath(null);
-        await refreshVault(fsaStorage);
+        await refreshVault(fsaStorage, index, localBackend);
       } catch (err: any) {
         if (err.name !== 'AbortError') {
           console.error('Error opening directory:', err);
@@ -342,6 +567,12 @@ export function useVault() {
 
   const openNote = async (rawPath: VaultPath) => {
     const path = normalizeVaultPath(rawPath);
+
+    if (vaultModeRef.current === 'gateway') {
+      await openGatewayNote(path);
+      return;
+    }
+
     if (coordinatorRef.current.getNoteState(path)) {
       activeTabPathRef.current = path;
       setActiveTabPath(path);
@@ -357,7 +588,6 @@ export function useVault() {
       const parsed = await parser.parse(path, content, snapshot.version.hash);
       coordinatorRef.current.initNote(path, snapshot, content);
 
-      // R4: Initialize path lifecycle epoch
       pathEpochMapRef.current.set(path, (pathEpochMapRef.current.get(path) ?? 0) + 1);
       pathSeqMapRef.current.set(path, 0);
 
@@ -395,7 +625,10 @@ export function useVault() {
       discarded = true;
     }
 
-    coordinatorRef.current.removeNote(path, discarded);
+    if (vaultModeRef.current !== 'gateway') {
+      coordinatorRef.current.removeNote(path, discarded);
+    }
+
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t.path !== path);
       if (activeTabPath === path) {
@@ -408,6 +641,25 @@ export function useVault() {
   };
 
   const updateContent = (targetPath: VaultPath, newContent: string) => {
+    if (vaultModeRef.current === 'gateway') {
+      setOpenTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.path === targetPath) {
+            const diskText = tab.initialSnapshot?.textContent ?? '';
+            const isDirty = diskText !== newContent;
+            return { ...tab, content: newContent, isDirty };
+          }
+          return tab;
+        })
+      );
+      if (targetPath === activeTabPathRef.current) {
+        const active = openTabsRef.current.find((t) => t.path === targetPath);
+        const diskText = active?.initialSnapshot?.textContent ?? '';
+        setSaveStatus(diskText !== newContent ? 'modified' : 'saved');
+      }
+      return;
+    }
+
     coordinatorRef.current.setBuffer(targetPath, newContent);
     setOpenTabs((prev) =>
       prev.map((tab) => {
@@ -436,6 +688,86 @@ export function useVault() {
     const currentPath = activeTabPathRef.current;
     if (!currentPath) return;
 
+    const currentTab = openTabsRef.current.find((t) => t.path === currentPath);
+    if (!currentTab) return;
+    if (!currentTab.isDirty && !force) return;
+
+    if (vaultModeRef.current === 'gateway') {
+      setSaveStatus('saving');
+      try {
+        const expectedToken = currentTab.initialSnapshot?.version.token || '';
+        const res = await backendRef.current.updateNote({
+          path: currentPath,
+          content: currentTab.content,
+          expectedVersion: {
+            token: expectedToken,
+            hash: currentTab.initialSnapshot?.version.hash,
+          },
+        });
+
+        // Update tab with new authoritative version
+        const newSnapshot: FileSnapshot = {
+          path: currentPath,
+          content: new TextEncoder().encode(currentTab.content),
+          textContent: currentTab.content,
+          size: res.currentVersion.size ?? currentTab.content.length,
+          modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+          version: {
+            token: res.currentVersion.token,
+            hash: res.currentVersion.hash ?? '',
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            size: res.currentVersion.size ?? currentTab.content.length,
+          },
+        };
+
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            if (t.path !== currentPath) return t;
+            return {
+              ...t,
+              isDirty: false,
+              initialSnapshot: newSnapshot,
+            };
+          })
+        );
+
+        const parsed = await parser.parse(
+          currentPath,
+          currentTab.content,
+          res.currentVersion.hash || ''
+        );
+        if (activeTabPathRef.current === currentPath) {
+          setParsedDoc(parsed);
+          const bl = await backendRef.current.getBacklinks(currentPath);
+          if (activeTabPathRef.current === currentPath) {
+            setBacklinks(bl);
+          }
+          setSaveStatus('saved');
+          setConflictData(null);
+        }
+      } catch (err: any) {
+        if (err instanceof GatewayError || err.status === 409 || err.code === 'CONFLICT') {
+          setSaveStatus('conflict');
+          try {
+            const latest = await backendRef.current.readNote(currentPath);
+            setConflictData({ path: currentPath, diskContent: latest.textContent });
+          } catch {
+            setConflictData({ path: currentPath });
+          }
+        } else if (err.status === 403 || err.code === 'FORBIDDEN') {
+          setSaveStatus('modified');
+          alert('Read-only gateway: mutations are not permitted.');
+        } else if (err.status === 404 || err.code === 'NOT_FOUND') {
+          setSaveStatus('conflict');
+          setConflictData({ path: currentPath });
+        } else {
+          setSaveStatus('modified');
+          console.error('Gateway save failed:', err);
+        }
+      }
+      return;
+    }
+
     try {
       const startEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
       const startRebuildEpoch = vaultRebuildEpochRef.current;
@@ -448,7 +780,6 @@ export function useVault() {
           new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
         const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
 
-        // H15, H16, R4, R5: Rebuild-epoch, lifecycle-epoch, and strictly monotonic sequence guard
         const currentPathEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
         const lastIndexed = pathSeqMapRef.current.get(currentPath) ?? 0;
 
@@ -484,10 +815,19 @@ export function useVault() {
       let counter = 1;
       targetPath = folder ? `${folder}/${name}` : name;
 
-      while (await storage.exists(targetPath)) {
-        name = `Untitled ${counter}.md`;
-        targetPath = folder ? `${folder}/${name}` : name;
-        counter++;
+      if (vaultModeRef.current === 'gateway') {
+        const existingEntries = await backendRef.current.listEntries('');
+        while (existingEntries.some((e) => e.path === targetPath)) {
+          name = `Untitled ${counter}.md`;
+          targetPath = folder ? `${folder}/${name}` : name;
+          counter++;
+        }
+      } else {
+        while (await storage.exists(targetPath)) {
+          name = `Untitled ${counter}.md`;
+          targetPath = folder ? `${folder}/${name}` : name;
+          counter++;
+        }
       }
     }
 
@@ -499,15 +839,59 @@ export function useVault() {
       counter++;
     }
 
+    const initialContent = `# ${candidate.replace(/\.md$/, '').split('/').pop()}\n\n`;
+
+    if (vaultModeRef.current === 'gateway') {
+      try {
+        const res = await backendRef.current.createNote({
+          path: candidate,
+          content: initialContent,
+        });
+
+        const snapshot: FileSnapshot = {
+          path: candidate,
+          content: new TextEncoder().encode(initialContent),
+          textContent: initialContent,
+          size: res.currentVersion.size ?? initialContent.length,
+          modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+          version: {
+            token: res.currentVersion.token,
+            hash: res.currentVersion.hash ?? '',
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            size: res.currentVersion.size ?? initialContent.length,
+          },
+        };
+
+        const parsed = await parser.parse(candidate, initialContent, res.currentVersion.hash || '');
+        const newTab: OpenTab = {
+          path: candidate,
+          title: parsed.title,
+          isDirty: false,
+          content: initialContent,
+          initialSnapshot: snapshot,
+        };
+
+        setOpenTabs((prev) => [...prev, newTab]);
+        setActiveTabPath(candidate);
+        activeTabPathRef.current = candidate;
+        setParsedDoc(parsed);
+        setBacklinks([]);
+        setSaveStatus('saved');
+        await refreshVault();
+      } catch (err: any) {
+        console.error(`Failed to create gateway note "${candidate}":`, err);
+        alert(`Create note failed: ${err.message || String(err)}`);
+      }
+      return;
+    }
+
     try {
-      const initialContent = `# ${candidate.replace(/\.md$/, '').split('/').pop()}\n\n`;
       const res = await safeWriter.safeSave(candidate, initialContent, { expectedVersion: null });
       const parsed = await parser.parse(candidate, initialContent, res.snapshot.version.hash);
       await index.upsert(parsed);
 
       coordinatorRef.current.initNote(candidate, res.snapshot, initialContent);
 
-      // R4: Initialize path lifecycle epoch
       pathEpochMapRef.current.set(candidate, (pathEpochMapRef.current.get(candidate) ?? 0) + 1);
       pathSeqMapRef.current.set(candidate, 0);
 
@@ -537,13 +921,28 @@ export function useVault() {
     } else {
       let counter = 1;
       let candidate = 'New Folder';
-      while (await storage.exists(candidate)) {
-        candidate = `New Folder ${counter}`;
-        counter++;
+      if (vaultModeRef.current === 'gateway') {
+        const existing = await backendRef.current.listEntries('');
+        while (existing.some((e) => e.path === candidate)) {
+          candidate = `New Folder ${counter}`;
+          counter++;
+        }
+      } else {
+        while (await storage.exists(candidate)) {
+          candidate = `New Folder ${counter}`;
+          counter++;
+        }
       }
       targetPath = candidate;
     }
     if (!targetPath) return;
+
+    if (vaultModeRef.current === 'gateway') {
+      // In Gateway Mode, folder creation is implicit through note creation or subpaths
+      await refreshVault();
+      return;
+    }
+
     try {
       await storage.createFolder(targetPath);
       await refreshVault();
@@ -564,12 +963,60 @@ export function useVault() {
       );
       if (normalizedOld === normalizedNew) return;
 
+      if (vaultModeRef.current === 'gateway') {
+        const tab = openTabsRef.current.find((t) => t.path === normalizedOld || t.path === oldPath);
+        const expectedToken = tab?.initialSnapshot?.version.token || '';
+
+        const res = await backendRef.current.renameNote({
+          oldPath: normalizedOld,
+          newPath: normalizedNew,
+          expectedVersion: {
+            token: expectedToken,
+            hash: tab?.initialSnapshot?.version.hash,
+          },
+          updateLinks: true,
+        });
+
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            if (t.path === normalizedOld || t.path === oldPath) {
+              const updatedSnapshot: FileSnapshot | null = t.initialSnapshot
+                ? {
+                    ...t.initialSnapshot,
+                    path: normalizedNew,
+                    version: {
+                      token: res.currentVersion.token,
+                      hash: res.currentVersion.hash ?? '',
+                      modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+                      size: res.currentVersion.size ?? t.initialSnapshot.size,
+                    },
+                  }
+                : null;
+              return {
+                ...t,
+                path: normalizedNew,
+                title: normalizedNew.replace(/\.md$/, '').split('/').pop() || normalizedNew,
+                initialSnapshot: updatedSnapshot,
+              };
+            }
+            return t;
+          })
+        );
+
+        if (activeTabPathRef.current === normalizedOld || activeTabPathRef.current === oldPath) {
+          activeTabPathRef.current = normalizedNew;
+          setActiveTabPath(normalizedNew);
+        }
+
+        await refreshVault();
+        return;
+      }
+
       await coordinatorRef.current.waitForIdle(normalizedOld);
       await renameDocument(storage, index, parser, normalizedOld, normalizedNew);
       const newSnap = await storage.read(normalizedNew);
       coordinatorRef.current.renameNote(normalizedOld, normalizedNew, newSnap);
 
-      // H16 & R4: Invalidate old path lifecycle; initialize new path lifecycle
       pathEpochMapRef.current.set(
         normalizedOld,
         (pathEpochMapRef.current.get(normalizedOld) ?? 0) + 1
@@ -608,11 +1055,26 @@ export function useVault() {
 
   const deletePath = async (path: VaultPath) => {
     try {
-      // R3: Deterministically sequence delete against coordinator pump before removing from disk
+      if (vaultModeRef.current === 'gateway') {
+        const tab = openTabsRef.current.find((t) => t.path === path);
+        const expectedToken = tab?.initialSnapshot?.version.token || '';
+
+        await backendRef.current.deleteNote({
+          path,
+          expectedVersion: {
+            token: expectedToken,
+            hash: tab?.initialSnapshot?.version.hash,
+          },
+        });
+
+        closeTab(path, true);
+        await refreshVault();
+        return;
+      }
+
       await coordinatorRef.current.waitForIdle(path);
       coordinatorRef.current.removeNote(path);
 
-      // H16 & R4: Invalidate path lifecycle epoch
       pathEpochMapRef.current.set(path, (pathEpochMapRef.current.get(path) ?? 0) + 1);
       pathSeqMapRef.current.delete(path);
 
@@ -645,9 +1107,16 @@ export function useVault() {
         );
         if (activeTabPathRef.current === activeTabPath) {
           setParsedDoc(parsed);
-          const bl = await index.getBacklinks(activeTabPath);
-          if (activeTabPathRef.current === activeTabPath) {
-            setBacklinks(bl);
+          if (vaultModeRef.current === 'gateway') {
+            const bl = await backendRef.current.getBacklinks(activeTabPath);
+            if (activeTabPathRef.current === activeTabPath) {
+              setBacklinks(bl);
+            }
+          } else {
+            const bl = await index.getBacklinks(activeTabPath);
+            if (activeTabPathRef.current === activeTabPath) {
+              setBacklinks(bl);
+            }
           }
         }
       } catch (err) {
@@ -674,6 +1143,58 @@ export function useVault() {
 
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
+      if (vaultModeRef.current === 'gateway') {
+        const tab = openTabsRef.current.find((t) => t.path === path);
+        const expectedToken = tab?.initialSnapshot?.version.token || '';
+
+        const res = await backendRef.current.setProperty({
+          path,
+          key,
+          value,
+          expectedVersion: {
+            token: expectedToken,
+            hash: tab?.initialSnapshot?.version.hash,
+          },
+        });
+
+        // Read updated note to reflect updated frontmatter
+        const updated = await backendRef.current.readNote(path);
+        const snapshot: FileSnapshot = {
+          path: updated.path,
+          content: new TextEncoder().encode(updated.textContent),
+          textContent: updated.textContent,
+          size: updated.version.size ?? updated.textContent.length,
+          modifiedAt: updated.version.modifiedAt ?? Date.now(),
+          version: {
+            token: res.currentVersion.token,
+            hash: res.currentVersion.hash ?? updated.version.hash,
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            size: res.currentVersion.size ?? updated.textContent.length,
+          },
+        };
+
+        const parsed = await parser.parse(updated.path, updated.textContent, snapshot.version.hash);
+
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            if (t.path !== path) return t;
+            return {
+              ...t,
+              content: updated.textContent,
+              isDirty: false,
+              initialSnapshot: snapshot,
+            };
+          })
+        );
+
+        if (activeTabPathRef.current === path) {
+          setParsedDoc(parsed);
+          const bl = await backendRef.current.getBacklinks(path);
+          setBacklinks(bl);
+        }
+        return;
+      }
+
       const startEpoch = pathEpochMapRef.current.get(path) ?? 0;
       const startRebuildEpoch = vaultRebuildEpochRef.current;
       const currentSeq = ++saveSequenceRef.current;
@@ -718,6 +1239,21 @@ export function useVault() {
     const body = `# ${noteTitle}\n\n`;
     const fullContent = updateDocumentFrontmatter(body, initialProps);
 
+    if (vaultModeRef.current === 'gateway') {
+      try {
+        await backendRef.current.createNote({
+          path: targetPath,
+          content: fullContent,
+          properties: initialProps,
+        });
+        await refreshVault();
+        await openNote(targetPath);
+      } catch (err: any) {
+        console.error('Failed to create note with properties in gateway:', err);
+      }
+      return;
+    }
+
     await storage.write(targetPath, null, fullContent);
     pathEpochMapRef.current.set(targetPath, (pathEpochMapRef.current.get(targetPath) ?? 0) + 1);
     pathSeqMapRef.current.set(targetPath, 0);
@@ -730,6 +1266,60 @@ export function useVault() {
     proposal: any
   ): Promise<{ success: boolean; error?: string }> => {
     const targetPath = proposal.path;
+
+    if (vaultModeRef.current === 'gateway') {
+      try {
+        const tab = openTabsRef.current.find((t) => t.path === targetPath);
+        const expectedToken = tab?.initialSnapshot?.version.token || '';
+        const res = await backendRef.current.updateNote({
+          path: targetPath,
+          content: proposal.newContent,
+          expectedVersion: {
+            token: expectedToken,
+            hash: tab?.initialSnapshot?.version.hash,
+          },
+        });
+
+        const snapshot: FileSnapshot = {
+          path: targetPath,
+          content: new TextEncoder().encode(proposal.newContent),
+          textContent: proposal.newContent,
+          size: res.currentVersion.size ?? proposal.newContent.length,
+          modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+          version: {
+            token: res.currentVersion.token,
+            hash: res.currentVersion.hash ?? '',
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            size: res.currentVersion.size ?? proposal.newContent.length,
+          },
+        };
+
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            if (t.path !== targetPath) return t;
+            return {
+              ...t,
+              content: proposal.newContent,
+              isDirty: false,
+              initialSnapshot: snapshot,
+            };
+          })
+        );
+
+        if (activeTabPathRef.current === targetPath) {
+          const parsed = await parser.parse(
+            targetPath,
+            proposal.newContent,
+            res.currentVersion.hash || ''
+          );
+          setParsedDoc(parsed);
+        }
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err.message || String(err) };
+      }
+    }
+
     const startEpoch = pathEpochMapRef.current.get(targetPath) ?? 0;
     const startRebuildEpoch = vaultRebuildEpochRef.current;
     const currentSeq = ++saveSequenceRef.current;
@@ -767,7 +1357,14 @@ export function useVault() {
   };
 
   return {
-    vaultName: storage.name,
+    vaultName,
+    vaultMode,
+    mode: vaultMode === 'gateway' ? ('gateway' as const) : ('local' as const),
+    isReadOnly: backend.isReadOnly,
+    gatewayUrl,
+    gatewayToken,
+    gatewayConnected,
+    backend,
     storage,
     entries,
     openTabs,
@@ -788,6 +1385,8 @@ export function useVault() {
     renameNote,
     deletePath,
     openDirectoryVault,
+    connectToGateway,
+    disconnectGateway,
     refreshVault,
     updateNoteProperty,
     createNoteWithProperties,

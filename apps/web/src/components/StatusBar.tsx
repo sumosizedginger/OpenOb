@@ -1,30 +1,79 @@
 import React from 'react';
 import { ParsedDocument, VaultPath } from '@okw/core';
-import { CheckCircle2, AlertTriangle, RefreshCw, HardDrive, FileEdit } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  HardDrive,
+  FileEdit,
+  Server,
+  Lock,
+} from 'lucide-react';
 
 interface StatusBarProps {
   vaultName: string;
+  vaultMode: 'memory' | 'fsa' | 'gateway';
+  isReadOnly?: boolean;
   activePath: VaultPath | null;
   parsedDoc: ParsedDocument | null;
   saveStatus: 'saved' | 'saving' | 'modified' | 'conflict';
   onSave: () => void;
   onOpenConflictModal?: () => void;
+  onOpenGatewayModal?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
   vaultName,
+  vaultMode,
+  isReadOnly = false,
   activePath,
   parsedDoc,
   saveStatus,
   onSave,
   onOpenConflictModal,
+  onOpenGatewayModal,
 }) => {
   return (
     <div className="status-bar">
       <div className="status-left">
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <HardDrive size={12} color="var(--accent-primary)" />
-          {vaultName}
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            cursor: onOpenGatewayModal ? 'pointer' : 'default',
+          }}
+          onClick={onOpenGatewayModal}
+          title={
+            vaultMode === 'gateway'
+              ? `Connected to OpenOb Gateway (${isReadOnly ? 'Read-Only' : 'Writable'})`
+              : `Local Vault Mode (${vaultMode.toUpperCase()})`
+          }
+        >
+          {vaultMode === 'gateway' ? (
+            <Server size={12} color="var(--accent-primary)" />
+          ) : (
+            <HardDrive size={12} color="var(--accent-primary)" />
+          )}
+          <span style={{ fontWeight: 600 }}>
+            {vaultMode === 'gateway' ? `Gateway: ${vaultName}` : vaultName}
+          </span>
+          {isReadOnly && (
+            <span
+              style={{
+                fontSize: '10px',
+                padding: '1px 4px',
+                borderRadius: '3px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                color: '#ef4444',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+              }}
+            >
+              <Lock size={9} /> Read-Only
+            </span>
+          )}
         </span>
         {activePath && <span style={{ color: 'var(--text-secondary)' }}>{activePath}</span>}
       </div>

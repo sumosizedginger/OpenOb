@@ -14,6 +14,8 @@ export interface GatewayCliOptions {
   port: number;
   token?: string;
   scopes: string[];
+  serveWeb: boolean;
+  webDistPath?: string;
 }
 
 export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
@@ -22,6 +24,8 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
   let port = parseInt(process.env.OPENOB_PORT || '4200', 10);
   let token = process.env.OPENOB_TOKEN || undefined;
   let rawScopes = process.env.OPENOB_SCOPES || '';
+  let serveWeb = process.env.OPENOB_SERVE_WEB === 'true' || process.env.OPENOB_SERVE_WEB === '1';
+  let webDistPath = process.env.OPENOB_WEB_DIST || undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -35,6 +39,10 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
       token = argv[++i];
     } else if (arg === '--scopes' && i + 1 < argv.length) {
       rawScopes = argv[++i];
+    } else if (arg === '--serve-web') {
+      serveWeb = true;
+    } else if (arg === '--web-dist' && i + 1 < argv.length) {
+      webDistPath = argv[++i];
     } else if (!arg.startsWith('-') && !vaultPath) {
       vaultPath = arg;
     }
@@ -51,7 +59,7 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
         .filter(Boolean)
     : ['workspace.read', 'workspace.search'];
 
-  return { vaultPath, host, port, token, scopes };
+  return { vaultPath, host, port, token, scopes, serveWeb, webDistPath };
 }
 
 export async function runGatewayProcess(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -113,10 +121,13 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
       port: options.port,
       token,
       scopes: options.scopes,
+      serveWeb: options.serveWeb,
+      webDistPath: options.webDistPath,
     });
 
+    const webSuffix = options.serveWeb ? ' [Web UI Enabled]' : '';
     process.stdout.write(
-      `[OpenOb Gateway] Listening on ${gateway.url} (Vault: ${vaultName}, Read-Only: ${isReadOnly}, Scopes: [${options.scopes.join(', ')}])\n`
+      `[OpenOb Gateway] Listening on ${gateway.url}${webSuffix} (Vault: ${vaultName}, Read-Only: ${isReadOnly}, Scopes: [${options.scopes.join(', ')}])\n`
     );
 
     const shutdown = async () => {

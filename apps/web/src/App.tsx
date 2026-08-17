@@ -31,6 +31,7 @@ import {
   ManuscriptToolsPlugin,
 } from '@okw/plugin';
 import { PluginManagerModal } from './components/plugins/PluginManagerModal.js';
+import { GatewayConnectModal } from './components/GatewayConnectModal.js';
 import {
   FolderPlus,
   FilePlus,
@@ -52,11 +53,16 @@ import {
   Bot,
   Boxes,
   AlertTriangle,
+  Server,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const {
     vaultName,
+    vaultMode,
+    isReadOnly,
+    gatewayUrl,
+    backend,
     storage,
     entries,
     openTabs,
@@ -77,6 +83,8 @@ export const App: React.FC = () => {
     renameNote,
     deletePath,
     openDirectoryVault,
+    connectToGateway,
+    disconnectGateway,
     refreshVault,
     updateNoteProperty,
     createNoteWithProperties,
@@ -94,6 +102,7 @@ export const App: React.FC = () => {
   >('outline');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isGatewayModalOpen, setIsGatewayModalOpen] = useState(false);
   const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
@@ -331,6 +340,18 @@ export const App: React.FC = () => {
             onClick={() => setIsPluginModalOpen(true)}
           >
             <Boxes size={15} />
+          </button>
+
+          <button
+            className={`btn-icon ${vaultMode === 'gateway' ? 'active' : ''}`}
+            title={
+              vaultMode === 'gateway'
+                ? `Connected to Gateway (${vaultName})`
+                : 'Connect to OpenOb Gateway'
+            }
+            onClick={() => setIsGatewayModalOpen(true)}
+          >
+            <Server size={16} />
           </button>
 
           <button
@@ -627,11 +648,14 @@ export const App: React.FC = () => {
       {/* Bottom Status Bar */}
       <StatusBar
         vaultName={vaultName}
+        vaultMode={vaultMode}
+        isReadOnly={isReadOnly}
         activePath={activeTabPath}
         parsedDoc={parsedDoc}
         saveStatus={saveStatus}
         onSave={() => void saveActiveNote()}
         onOpenConflictModal={() => {}}
+        onOpenGatewayModal={() => setIsGatewayModalOpen(true)}
       />
 
       {/* Global Full-Screen Graph Modal */}
@@ -696,6 +720,35 @@ export const App: React.FC = () => {
           void openNote(path);
         }}
         index={index}
+        searchFn={async (query: string, tag?: string | null) => {
+          if (vaultMode === 'gateway') {
+            const res = await backend.search({
+              query: query || '',
+              tags: tag ? [tag] : undefined,
+              limit: 20,
+            });
+            return res.matches.map((r) => ({
+              documentId: r.path,
+              path: r.path,
+              title: r.title,
+              score: r.score,
+              source: (r.source as any) || 'fts',
+              excerpt: r.matchSnippet,
+            }));
+          }
+          const scope = tag ? { tags: [tag] } : undefined;
+          return index.query({ query: query || tag || '', scope, limit: 20 });
+        }}
+      />
+
+      {/* Gateway Connection Modal */}
+      <GatewayConnectModal
+        isOpen={isGatewayModalOpen}
+        currentUrl={gatewayUrl || 'http://127.0.0.1:4200'}
+        isConnected={vaultMode === 'gateway'}
+        onConnect={connectToGateway}
+        onDisconnect={disconnectGateway}
+        onClose={() => setIsGatewayModalOpen(false)}
       />
 
       {/* Plugin Manager Modal (Constitution Law 20) */}
