@@ -1,105 +1,94 @@
 # PHASE3C_FINAL_CLOSURE_AUDIT.md
 
-Re-audit of the Phase 3C remediation (R3C-1, R3C-2, R3C-3) at HEAD `391debb2e079a53d9e921186b41f1b2f0e258ad6`. **AUDIT ONLY** — no production code modified; temporary probes removed afterward; working tree clean.
+Final re-audit of the P2-LEGACY remediation at HEAD `fd9b7c01a7389eea3b1b6031265bc7747823b504` (`fix(phase3c): legacy cursor unconditional reset for restart safety (P2-LEGACY)`). **AUDIT ONLY** — no production code modified; temporary probes removed afterward; working tree clean.
 
-## 1. Baseline & original findings
+## 1. Baseline & original bug (not redefined)
 
-Original findings (from `PHASE3C_LIVE_CHANGE_STREAM_AUDIT.md`, not the closure report):
+Original P2-LEGACY (from the Phase 3C closure audit, unchanged): a **legacy** cursor (`evt_<seq>_<rand>` or a bare integer) reconnecting across a gateway restart — when the new instance had already advanced past the legacy sequence — was interpreted as a bare sequence and replayed a partial window (`events > lastSeq`) **without a reset**, silently skipping the new instance's early events (`B:1` skipped, `B:2`/`B:3` replayed). The web client was unaffected (it sends `instanceId:seq`), but the public API accepted legacy cursors as trusted replay positions.
 
-| Item      | Original finding                                                                                                                                              | Acceptance (original)                                                                                                                                                                          |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **R3C-1** | `evt_<seq>_<rand>` cursor never triggers `server_restarted` — after a gateway restart the old cursor silently gaps until the new instance's counter passes it | Old cursor from gateway A produces an explicit reset on B; same-instance replay preserved; replay expiration resets; no silent gaps; legacy cursor fail-safe; web performs safe restart resync |
-| **R3C-2** | `EXTERNAL_ACCESS.md` overclaimed restart→`stream.reset`                                                                                                       | Docs match observed behavior (cursor format, replay, expiration, restart, legacy)                                                                                                              |
-| **R3C-3** | No HTTP-level `index.degraded`/`index.recovered` coverage                                                                                                     | Both events proven over the real SSE endpoint with truthful `indexStatus`                                                                                                                      |
+Fix inspected in `apps/gateway/src/server.ts` + `packages/workspace/src/events.ts`: any cursor parsed as `isLegacy` now **unconditionally** emits `stream.reset` with `reason: 'legacy_cursor'` (server branch fires before any replay logic; `getEventsSince` returns `{reset:true, reason:'legacy_cursor'}` whenever `clientServerInstanceId` is omitted with `lastSequence > 0`). The heuristic legacy replay path is **removed**. Modern `instanceId:seq` cursors are unchanged.
 
-## 2. Cursor contract — **PASS**
+## 2. Exact old-bug reproduction — **PASS (32/32 cycles)**
 
-The server now emits SSE `id: <serverInstanceId>:<sequence>` (`encodeEventCursor`) — carrying **both** the process instance and the sequence position. The web client (`subscribeToEvents`) stores the full emitted id and sends it back verbatim via `Last-Event-ID` (header) / `?lastEventId=` (query; the **cursor**, never the token — the token stays in the `Authorization` header). Payload `eventId` (`evt_<seq>_<rand>`) is a distinct per-event identifier and is **not** conflated with the replay cursor (the emitted SSE id is the instance-qualified cursor). `parseEventCursor` accepts the new format, the legacy `evt_` format, and a plain integer, with bounded input (≤256 chars) and non-negative integer validation.
+Real production gateway artifacts: for each cycle — fresh gateway B advanced to sequence ≥ 3 (`B:1`, `B:2`, `B:3` committed via real `openob-mcp`), then reconnect to `GET /api/v1/events` with `Last-Event-ID: evt_1_legacy`:
 
-## 3. Exact R3C-1 reproduction — **PASS (22/22)**
+- The **first semantic SSE event is `stream.reset`** with `reason: legacy_cursor`.
+- **Zero** `note.created` events are replayed before/after the reset from the legacy cursor (asserted on the captured stream).
+- The `B:2`/`B:3`-only incremental replay that the old bug produced **never occurs** — any incremental replay based solely on a legacy sequence is impossible (the production path no longer extracts sequence positions from legacy cursors for buffer lookups).
 
-Real production gateway artifacts, 22 restart cycles: gateway A → connect authenticated SSE → mutate → capture the emitted SSE id (verified `format = <instanceId>:<sequence>`) → kill A → start gateway B (same vault, same port) → reconnect with A's exact captured id → **`stream.reset` received with `reason: server_restarted`** → mutate through B → the new event is received with **B's** `serverInstanceId` (≠ A's). No event gap; no waiting for the new sequence to exceed the old; the old bug (silent empty return) is impossible for the emitted format (the instance mismatch branch fires before any sequence comparison).
+Ran 8 cycles in the suite plus 3 additional full runs (24 more cycles) = **32/32**, all identical. The committed HTTP-level test (gateway-change-stream.test.ts test 9) covers the same scenario (gateway A → stop → gateway B advanced to seq 3 → `evt_1_legacyA` → reset + zero partial replay + `B:4` live after reset).
 
-## 4. Repeat restart test — **PASS**
+## 3. Legacy always-reset matrix — **PASS (9/9)**
 
-The 22-cycle loop showed **zero** intermittent silent gaps and **zero** stale cross-instance replay (every reconnect reset before any event; every post-restart event carried the new instance id).
+`evt_1_a`, `evt_2_b`, `evt_999_c` each tested against: **fresh** gateway, **advanced** gateway (post-mutations), and **restarted** process (restart then reconnect) — **every one of the 9 combinations produced `stream.reset` (`legacy_cursor`)**. No legacy cursor is ever used as a trusted replay position.
 
-## 5. Same-instance replay — **PASS**
+## 4. Modern cursor regression — **PASS**
 
-Within one instance: receive seq N, disconnect, produce N+1..N+K, reconnect with cursor N → the missed events replay **strictly in order** with **no** unnecessary reset (verified R1–R5; `serverInstanceId` unchanged). The fix did not destroy useful replay.
+- Same instance: `A:1` → disconnect → `A:2`, `A:3` → reconnect with `<instA>:1` → **`A:2`, `A:3` replay in order, no reset** (verified `Mod2.md,Mod3.md`).
+- Different instance: reconnect with `<instA>:1` after restart → **`stream.reset` (`server_restarted`)**.
 
-## 6. Replay window expiration — **PASS**
+## 5. Replay window regression — **PASS**
 
-1030-event churn (> 1024 ring buffer) → reconnect with a too-old cursor on the same instance → **`stream.reset` with `reason: replay_window_expired`** — explicit, no silent gap.
+Same instance, cursor older than the 1024-event ring (1030-event churn) → **`stream.reset` (`replay_window_expired`)**. The legacy-reset change did not alter modern expiration semantics.
 
-## 7. Legacy `evt_` cursor — **PARTIAL (residual P2)**
+## 6. Malformed cursors — **PASS**
 
-- Same instance, in-buffer: legacy `evt_<seq>_<rand>` reconnects replay correctly (no reset) — documented fallback works.
-- Across restart (common case): `sequenceCounter < lastSequence` → **`stream.reset` (`server_restarted`)** — observed in the full-suite run (`{reset:true, reason:"server_restarted"}`).
-- **Residual defect (P2, narrow):** if a **legacy-format** cursor reconnects after a restart **and the new instance has already advanced its counter past the legacy sequence**, the server replays the partial window (`events > lastSeq`) **without any reset**, silently skipping the new instance's early events ≤ lastSeq and mixing sequence spaces. Proven in an isolated reproduction: legacy seq 1 from instance A vs new instance B at counter 3 → B's events H1,H2 replayed, **H0 silently skipped**, no reset. The current web client is unaffected (it always sends `instanceId:seq`, proven safe 22/22), but the public API still accepts legacy cursors, so a silent gap remains reachable via the API. This is exactly the case audit item 7 rejects ("legacy cursor interpreted only as a sequence in a way that can silently skip events across restart"). Required change: make legacy cursors always emit an unconditional safe `stream.reset` (the docs already claim this) or prove buffer identity before replay.
+`evt_`, `evt_bad`, `evt_-1_x` → legacy-parse → **safe reset** (`legacy_cursor`); oversized (300 chars), `garbage`, `::::` → parse-null → **fresh connection** (no reset, no crash, no unsafe replay); live events continue to flow after each. No resource issue, no authorization bypass (auth is checked before cursor parsing).
 
-## 8. Malformed cursors — **PASS**
+## 7. HTTP path only — **PASS**
 
-Empty, garbage, huge (500 chars), negative, non-numeric, `:::`, `evt_`, `evt_abc_x`, `a:b:c`, `null`, `NaN` — all 12 cases: no crash, no unbounded processing, safe fresh/error behavior, no authorization bypass (auth is checked before cursor parsing; live events continue to flow after each malformed cursor).
+All acceptance evidence above was gathered through the **real built gateway artifact**: `GET /api/v1/events` route, real SSE framing (`id:`/`event:`/`data:` lines), `Last-Event-ID` header + `?lastEventId=` query, real `openob-mcp` mutations. Publisher-level `getEventsSince()` unit tests exist only as supplemental evidence (the committed test 1); acceptance is satisfied by the HTTP-path tests (committed tests 9/10 + this audit's probes).
 
-## 9. Real web restart resync — **PASS (spot-checked)**
+## 8. Docs — **PASS**
 
-The committed e2e change-stream suite (4 tests, green) covers the browser resync path; this audit re-verified on real artifacts that a restarted gateway emits `server_restarted`, and the browser's existing reset handler performs a full `refreshVault` (clean notes show authoritative latest; dirty buffers are preserved — the dirty-buffer invariants were re-verified in the targeted regression below, including after event-driven invalidation). No FSA fallback, no auto-save, no auto-merge, no silent overwrite.
+`EXTERNAL_ACCESS.md` now states: modern cursors support same-instance replay / `replay_window_expired` / `server_restarted`; **legacy `evt_<seq>_<rand>` cursors "unconditionally trigger `event: stream.reset` with `reason: legacy_cursor`, guaranteeing safe full resynchronization without risk of partial/gapped replay"** — matching observed HTTP behavior exactly. **No documentation claims legacy incremental replay.**
 
-## 10 + 11. index.degraded / index.recovered over HTTP — **PASS**
+## 9. Targeted Phase 3C regression — **PASS**
 
-- Committed integration test (gateway-change-stream.test.ts test 8) drives the **real HTTP SSE** endpoint with an injected index-upsert failure: after a successful canonical mutation, the stream carries the truthful `note.*` event **and** `index.degraded` (disk mutation succeeded; no rollback because the disposable index failed; `indexStatus` truthful), then after rebuild `index.recovered` arrives on the same public event path.
-- This audit verified on the **real production binary**: `POST /api/v1/index/rebuild` → 200 `{count:1100, status:"verified"}` (1100 files from the probe suite's churn — the rebuild truly re-indexed the whole vault), then `GET /api/v1/search?q=Welcome` returned the correct match — the rebuilt index operates correctly.
+Real web (production SPA + real gateway + real MCP + real Chromium):
 
-## 12. R3C-2 documentation — **PARTIAL**
+- Clean note → MCP V2 → **live refresh** (browser shows V2 without manual reload).
+- Dirty note → MCP V2 → **buffer preserved**, save → **409**, **V2 survives on disk**.
+- Delete → no resurrection / rename → no ghost (unchanged from the Phase 3C audit; the event path is untouched by this fix).
+- Self-event → no save loop (unchanged; one PUT per save).
+- `index.degraded` / `index.recovered` → emitted over real HTTP SSE (committed test 8, injected-failure path) — unchanged.
+- Token → absent from URL/event payloads (re-verified in the browser test).
 
-`EXTERNAL_ACCESS.md` §10 now documents the emitted cursor format, same-instance replay, `replay_window_expired`, `server_restarted`, and legacy compatibility — matching observed behavior **for the new cursor format**. One residual mismatch: the legacy-cursor sentence claims it "fails safe by emitting `stream.reset` (`server_restarted`)" — false for the narrow window in §7 (partial replay without reset). P3 doc overclaim tied to the P2-LEGACY fix.
+## 10. Full clean gate
 
-## 13. Targeted Phase 3C regression — **PASS**
+| Step                                                  | Result                                                                                                         |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `rm -rf apps/gateway/dist packages/*/dist` + `npm ci` | OK                                                                                                             |
+| `npm run format:check`                                | **PASS**                                                                                                       |
+| `npm run lint`                                        | **PASS** (0 errors)                                                                                            |
+| `npm run typecheck`                                   | **PASS**                                                                                                       |
+| `npm test`                                            | **PASS — Vitest: 54 files / 293 tests**                                                                        |
+| `npm run build`                                       | **PASS**                                                                                                       |
+| `npm run test:e2e`                                    | **PASS — Playwright: 23/23**                                                                                   |
+| `npm run verify:full`                                 | **PASS (exit 0)**                                                                                              |
+| Legacy advanced-instance regression                   | **32/32** runs (8 in-suite + 24 across three repeat runs), all `legacy_cursor` resets with zero partial replay |
 
-- Dirty browser V1 + MCP V2 + event: buffer **preserved byte-for-byte**, save → **409**, **V2 survives on disk** (re-verified).
-- Delete via stream: no resurrection (file stays absent after stale save).
-- Rename via stream: no ghost (verified in the Phase 3C audit; the rename invalidation path unchanged — spot-checked).
-- Self-event: no recursive save (Phase 3C probe 11: exactly one PUT per save; unchanged).
-- Token: absent from URL/SSE payload (probe 20 re-verified; the cursor in `?lastEventId=` is a sequence cursor, not a credential).
-- Single authority: no FSA/OPFS gateway-mode writes (unchanged architecture; no new paths introduced by the fix).
-
-## 14. Event ordering — **PASS**
-
-Within an instance: sequences strictly increase, SSE ids unique and unambiguous (`<instanceId>:<seq>` — the instance id prefix identifies the sequence space). Across restart: sequences may reset, but the instance id differentiates the space and the new-format cursor is never ambiguous.
-
-## 15. Resource safety — **PASS**
-
-30 rapid SSE connect/disconnect cycles + the 22-restart cycles: no listener/timer/connection leaks observed (gateway remained responsive — mutation 201 immediately after; fresh subscribers still received live events). Ring buffer stays bounded (1024).
-
-## 16. Full clean gate
-
-| Step                                                  | Result                                  |
-| ----------------------------------------------------- | --------------------------------------- |
-| `rm -rf apps/gateway/dist packages/*/dist` + `npm ci` | OK                                      |
-| `npm run format:check`                                | **PASS**                                |
-| `npm run lint`                                        | **PASS** (0 errors)                     |
-| `npm run typecheck`                                   | **PASS**                                |
-| `npm test`                                            | **PASS — Vitest: 54 files / 289 tests** |
-| `npm run build`                                       | **PASS**                                |
-| `npm run test:e2e`                                    | **PASS — Playwright: 23/23**            |
-| `npm run verify:full`                                 | **PASS (exit 0)**                       |
-
-## 17. Remote CI
+## 11. Remote CI
 
 **REMOTE CI UNVERIFIED IN THIS ENVIRONMENT** — `api.github.com` 404 for the SHA (private repo); Node 20/22/Playwright/packaging status not queryable. Reported as unverified, not non-existent.
 
-## 18. Severity
+## 12. Severity
 
-**P0: none. P1: none.**
+**P0: none. P1: none. P2-LEGACY: CLOSED.**
 
-- **R3C-1: CLOSED** — the real emitted cursor is restart-safe (22/22 explicit `server_restarted` resets, no gaps); same-instance replay intact; expiration resets; malformed cursors safe.
-- **R3C-2: CLOSED** with one P3 doc overclaim (legacy "fails safe" wording).
-- **R3C-3: CLOSED** — `index.degraded`/`index.recovered` proven over real HTTP SSE (committed injected-failure test) plus real-binary rebuild/search verification.
-- **P2-LEGACY (residual, narrow):** a legacy `evt_` cursor reconnecting across a restart where the new instance has already advanced past the legacy sequence silently skips the new instance's early events (no reset, partial replay). Reachable only via the legacy format (pre-upgrade clients / manual API use); the current web client is unaffected. This is the one gap against the audit's item 7 acceptance ("unconditional safe reset or exact-buffer-proof replay").
+The only residual is fully remediated: legacy cursors can no longer skip events across restarts (unconditional `legacy_cursor` reset; the sequence-only replay path is deleted). Modern cursors retain all required semantics (same-instance replay, `server_restarted`, `replay_window_expired`). Docs match behavior. Full gate green.
 
-## 19. Verdict
+## 13. Verdict
 
-# **STOP — exact blocker: P2-LEGACY (legacy-cursor restart ambiguity)**
+# **LIVE GATEWAY CHANGE STREAM COMPLETE**
 
-R3C-1 (new-format cursor restart safety), same-instance replay, replay expiration, web resync, index.degraded/recovered over HTTP, docs (new format), targeted regressions, and the full gate (verify:full exit 0; 54/289 vitest; 23/23 playwright) are **all green**. The one remaining blocker is the narrow legacy-cursor path: a `evt_<seq>_<rand>` cursor reconnecting after a restart, when the new instance has already advanced past that sequence, is interpreted as a bare sequence and replays a partial window **without a reset** — silently skipping the new instance's early events (proven in isolation). Per audit item 7 this is the exact case to reject ("legacy cursor interpreted only as a sequence in a way that can silently skip events across restart"). Required fix (trivial): legacy cursors always emit an unconditional `stream.reset` (`server_restarted`) — matching the docs' claim — plus an HTTP-level regression test for the already-advanced-new-instance case. **REMOTE CI UNVERIFIED IN THIS ENVIRONMENT.**
+- Legacy `evt_` cursors **always reset** (`legacy_cursor`) — verified 32/32 against real artifacts, including the exact advanced-new-instance case from the original bug.
+- **No legacy sequence-only replay path remains** in the production code (inspected) or behavior (probed).
+- The advanced-new-instance case **cannot** silently skip early events — the first semantic event is always the reset, and zero note events are replayed from a legacy cursor.
+- Modern same-instance replay remains functional (`A:2,A:3` in order).
+- Modern cross-instance restart reset remains functional (`server_restarted`).
+- Replay-window expiration remains functional (`replay_window_expired`).
+- Docs match actual HTTP behavior (no legacy incremental-replay claim).
+- `verify:full` passes (54/293 Vitest, 23/23 Playwright).
+
+**REMOTE CI UNVERIFIED IN THIS ENVIRONMENT.**

@@ -221,7 +221,7 @@ Tasks:
   it('13. MCP tool declarations and dispatcher execute properly', async () => {
     const { workspace } = await createFixtureWorkspace();
 
-    expect(MCP_TOOL_DEFINITIONS).toHaveLength(11);
+    expect(MCP_TOOL_DEFINITIONS).toHaveLength(12);
 
     const infoRes = await handleMcpToolCall(workspace, 'openob_workspace_info');
     expect(infoRes.isError).toBeFalsy();
@@ -241,6 +241,13 @@ Tasks:
     expect(searchRes.isError).toBeFalsy();
     const parsedSearch = JSON.parse(searchRes.content[0].text);
     expect(parsedSearch.total).toBe(1);
+
+    const queryRes = await handleMcpToolCall(workspace, 'openob_query_notes', {
+      filters: [{ field: 'title', operator: 'contains', value: 'Welcome' }],
+    });
+    expect(queryRes.isError).toBeFalsy();
+    const parsedQuery = JSON.parse(queryRes.content[0].text);
+    expect(parsedQuery.total).toBe(1);
 
     const errRes = await handleMcpToolCall(workspace, 'openob_read_note', {
       path: '../evil.md',

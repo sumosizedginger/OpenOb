@@ -5,10 +5,13 @@ import {
   CreateNoteRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
   OutgoingLinkDTO,
   PropertyMapDTO,
+  PropertyQueryDTO,
+  PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
   SearchRequestDTO,
@@ -32,6 +35,8 @@ export interface WorkspaceBackend {
   listEntries(subpath?: string): Promise<VaultEntry[]>;
   readNote(path: string): Promise<NoteReadResult>;
   search(req: SearchRequestDTO): Promise<SearchResultDTO>;
+  queryNotes(req: PropertyQueryDTO): Promise<PropertyQueryResultDTO>;
+  discoverProperties(): Promise<DiscoverPropertiesResultDTO>;
   getBacklinks(path: string): Promise<BacklinkDTO[]>;
   getOutgoingLinks(path: string): Promise<OutgoingLinkDTO[]>;
   getGraphNeighbors(path: string): Promise<GraphNeighborDTO>;
@@ -73,6 +78,14 @@ export class LocalWorkspaceBackend implements WorkspaceBackend {
 
   search(req: SearchRequestDTO): Promise<SearchResultDTO> {
     return this.workspace.search(req);
+  }
+
+  queryNotes(req: PropertyQueryDTO): Promise<PropertyQueryResultDTO> {
+    return this.workspace.queryNotes(req);
+  }
+
+  discoverProperties(): Promise<DiscoverPropertiesResultDTO> {
+    return this.workspace.discoverProperties();
   }
 
   getBacklinks(path: string): Promise<BacklinkDTO[]> {
@@ -146,6 +159,14 @@ export class GatewayWorkspaceBackend implements WorkspaceBackend {
 
   search(req: SearchRequestDTO): Promise<SearchResultDTO> {
     return this.client.search(req);
+  }
+
+  queryNotes(req: PropertyQueryDTO): Promise<PropertyQueryResultDTO> {
+    return this.client.queryNotes(req);
+  }
+
+  discoverProperties(): Promise<DiscoverPropertiesResultDTO> {
+    return this.client.discoverProperties();
   }
 
   getBacklinks(path: string): Promise<BacklinkDTO[]> {

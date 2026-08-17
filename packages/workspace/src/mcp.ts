@@ -261,6 +261,75 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
       required: ['path', 'expectedVersion'],
     },
   },
+  {
+    name: 'openob_query_notes',
+    description:
+      'Execute a structured property query across vault notes, supporting folder scoping, property filters, deterministic sorting, and pagination.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folderScope: {
+          type: 'string',
+          description: 'Optional folder path to scope results (e.g. "Projects/").',
+        },
+        filters: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              field: {
+                type: 'string',
+                description:
+                  'Property field to filter on (e.g. "status", "priority", "tags", "title").',
+              },
+              operator: {
+                type: 'string',
+                enum: [
+                  'equals',
+                  'not_equals',
+                  'contains',
+                  'not_contains',
+                  'greater_than',
+                  'less_than',
+                  'is_empty',
+                  'is_not_empty',
+                ],
+                description: 'Filter comparison operator.',
+              },
+              value: { description: 'Comparison target value.' },
+            },
+            required: ['field', 'operator'],
+          },
+          description: 'List of filters combined with AND.',
+        },
+        sorts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              field: { type: 'string', description: 'Field to sort on.' },
+              direction: { type: 'string', enum: ['asc', 'desc'], description: 'Sort direction.' },
+            },
+            required: ['field', 'direction'],
+          },
+          description: 'Sort ordering list.',
+        },
+        columns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of visible property columns.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of rows to return (default 100, max 500).',
+        },
+        offset: {
+          type: 'number',
+          description: 'Pagination row offset (default 0).',
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -314,6 +383,23 @@ export async function handleMcpToolCall(
             tags: args.tags,
             pathPrefix: args.pathPrefix,
             limit: args.limit,
+          },
+          context
+        );
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case 'openob_query_notes': {
+        const result = await workspace.queryNotes(
+          {
+            folderScope: args.folderScope,
+            filters: args.filters,
+            sorts: args.sorts,
+            columns: args.columns,
+            limit: args.limit,
+            offset: args.offset,
           },
           context
         );

@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { NodeFsVaultStorage } from '@okw/vault';
-import { SqliteDocumentIndex, rebuildVaultIndex, buildGraphData } from '@okw/index';
+import {
+  SqliteDocumentIndex,
+  rebuildVaultIndex,
+  buildGraphData,
+  executeProtocolPropertyQuery,
+} from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 
 function genDoc(i: number, n: number): string {
@@ -152,15 +157,28 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
       const graphData = await buildGraphData(idx);
       const graphMs = Date.now() - t3;
 
+      // 5. Property query over 10,000 documents (Phase 3D budget < 500 ms)
+      const t4 = Date.now();
+      const queryRes = await executeProtocolPropertyQuery(idx, {
+        folderScope: 'cat_0',
+        filters: [{ field: 'status', operator: 'equals', value: 'active' }],
+        sorts: [{ field: 'index', direction: 'desc' }],
+        limit: 50,
+      });
+      const queryMs = Date.now() - t4;
+
       idx.close();
 
       expect(rebuildMs).toBeLessThan(5000);
       expect(searchMs).toBeLessThan(500);
       expect(upsertMs).toBeLessThan(500);
       expect(graphMs).toBeLessThan(10000);
+      expect(queryMs).toBeLessThan(500);
       expect(graphData.nodes.length).toBe(10000);
       expect(graphData.edges.length).toBeGreaterThan(5000);
       expect(searchRes.length).toBeGreaterThanOrEqual(1);
+      expect(queryRes.total).toBeGreaterThan(0);
+      expect(queryRes.rows.length).toBeLessThanOrEqual(50);
     }
   );
 });

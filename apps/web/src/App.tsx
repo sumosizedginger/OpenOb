@@ -63,6 +63,7 @@ export const App: React.FC = () => {
     isReadOnly,
     gatewayUrl,
     gatewayReachable,
+    eventRefreshCounter,
     backend,
     storage,
     entries,
@@ -87,8 +88,6 @@ export const App: React.FC = () => {
     connectToGateway,
     disconnectGateway,
     refreshVault,
-    updateNoteProperty,
-    createNoteWithProperties,
     applyAIProposedEdit,
     atomicWrites,
     dismissConflict,
@@ -328,6 +327,14 @@ export const App: React.FC = () => {
 
         <div className="header-right">
           <button
+            className={`btn-icon ${mainMode === 'views' ? 'active' : ''}`}
+            title="Database Views"
+            onClick={() => setMainMode((prev) => (prev === 'views' ? 'editor' : 'views'))}
+          >
+            <LayoutGrid size={15} />
+          </button>
+
+          <button
             className={`btn-icon ${isGlobalGraphOpen ? 'active' : ''}`}
             title="Graph View (Ctrl+G)"
             onClick={() => setIsGlobalGraphOpen((prev) => !prev)}
@@ -502,18 +509,11 @@ export const App: React.FC = () => {
         <main className="editor-area">
           {mainMode === 'views' ? (
             <ViewContainer
-              index={index}
-              refreshKey={activeTab?.initialSnapshot?.version.hash}
+              backend={backend}
+              refreshKey={eventRefreshCounter}
               onNavigate={(path) => {
                 setMainMode('editor');
                 void openNote(path);
-              }}
-              onUpdateNoteProperty={(path, key, value) => void updateNoteProperty(path, key, value)}
-              onCreateNoteWithProperties={(props) => {
-                const title = prompt('Enter note title:');
-                if (title) {
-                  void createNoteWithProperties(title, props);
-                }
               }}
             />
           ) : (

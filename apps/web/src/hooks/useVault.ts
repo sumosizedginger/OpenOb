@@ -206,6 +206,7 @@ export function useVault() {
   const [gatewayUrl, setGatewayUrl] = useState<string>('http://127.0.0.1:4200');
   const [gatewayToken, setGatewayToken] = useState<string | undefined>(undefined);
   const [gatewayConnected, setGatewayConnected] = useState<boolean>(false);
+  const [eventRefreshCounter, setEventRefreshCounter] = useState<number>(0);
 
   // Local storage instances (used exclusively in local/standalone mode)
   const [storage, setStorage] = useState<VaultStorage>(
@@ -465,6 +466,7 @@ export function useVault() {
 
     const handleEvent = async (event: WorkspaceChangeEvent) => {
       if (!isSubscribed) return;
+      setEventRefreshCounter((prev) => prev + 1);
 
       // 1. Reset event -> full refresh
       if (event.type === 'stream.reset') {
@@ -1671,6 +1673,7 @@ export function useVault() {
     gatewayToken,
     gatewayConnected,
     gatewayReachable,
+    eventRefreshCounter,
     backend,
     storage,
     entries,

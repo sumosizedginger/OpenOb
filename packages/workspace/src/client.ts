@@ -4,10 +4,13 @@ import {
   CreateNoteRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
   OutgoingLinkDTO,
   PropertyMapDTO,
+  PropertyQueryDTO,
+  PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
   SearchRequestDTO,
@@ -211,6 +214,17 @@ export class OpenObGatewayClient {
 
     const qs = params.toString();
     return this.request<SearchResultDTO>(`/api/v1/search${qs ? `?${qs}` : ''}`);
+  }
+
+  async queryNotes(query: PropertyQueryDTO): Promise<PropertyQueryResultDTO> {
+    return this.request<PropertyQueryResultDTO>('/api/v1/query', {
+      method: 'POST',
+      body: query,
+    });
+  }
+
+  async discoverProperties(): Promise<DiscoverPropertiesResultDTO> {
+    return this.request<DiscoverPropertiesResultDTO>('/api/v1/properties');
   }
 
   async getBacklinks(notePath: string): Promise<BacklinkDTO[]> {

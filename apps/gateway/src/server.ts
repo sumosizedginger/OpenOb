@@ -603,6 +603,15 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         return;
       }
 
+      // POST /api/v1/query (Execute property query)
+      if (pathname === '/api/v1/query' && method === 'POST') {
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.queryNotes(body, clientContext);
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
       // POST /api/v1/index/rebuild (Rebuild derived index and emit index.recovered)
       if (pathname === '/api/v1/index/rebuild' && method === 'POST') {
         const result = await workspace.rebuildIndex(clientContext);
@@ -613,6 +622,14 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
 
       // GET routes
       if (method === 'GET') {
+        // GET /api/v1/properties (Discover vault properties)
+        if (pathname === '/api/v1/properties') {
+          const props = await workspace.discoverProperties(clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(props));
+          return;
+        }
+
         // GET /api/v1/workspace
         if (pathname === '/api/v1/workspace') {
           const info = await workspace.getWorkspaceInfo(clientContext);

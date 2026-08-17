@@ -149,3 +149,41 @@ export interface SavedView extends ViewConfig {
   readonly createdAt: number;
   readonly updatedAt: number;
 }
+
+export interface PropertyQuery {
+  readonly folderScope?: string;
+  readonly filters?: PropertyFilter[];
+  readonly sorts?: PropertySort[];
+  readonly columns?: string[];
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export interface QueryRow {
+  readonly path: VaultPath;
+  readonly title: string;
+  readonly properties: Record<string, any>;
+  readonly tags: string[];
+  readonly wordCount: number;
+  readonly lineCount: number;
+  readonly version?: {
+    readonly token: string;
+    readonly hash: string;
+    readonly modifiedAt?: number;
+    readonly size?: number;
+  };
+}
+
+export interface PropertyQueryResult {
+  readonly rows: QueryRow[];
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
+  readonly availableProperties?: string[];
+  readonly indexStatus: 'verified' | 'degraded';
+}
+
+export interface DiscoverPropertiesResult {
+  readonly properties: string[];
+  readonly indexStatus: 'verified' | 'degraded';
+}

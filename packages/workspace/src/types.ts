@@ -130,6 +130,71 @@ export interface PropertyMapDTO {
 }
 
 /**
+ * Protocol-neutral property query request.
+ */
+export interface PropertyQueryDTO {
+  readonly folderScope?: string;
+  readonly filters?: Array<{
+    readonly field: string;
+    readonly operator:
+      | 'equals'
+      | 'not_equals'
+      | 'contains'
+      | 'not_contains'
+      | 'greater_than'
+      | 'less_than'
+      | 'is_empty'
+      | 'is_not_empty';
+    readonly value?: any;
+  }>;
+  readonly sorts?: Array<{
+    readonly field: string;
+    readonly direction: 'asc' | 'desc';
+  }>;
+  readonly columns?: string[];
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+/**
+ * Single row within a property query result.
+ */
+export interface QueryRowDTO {
+  readonly path: VaultPath;
+  readonly title: string;
+  readonly properties: Record<string, any>;
+  readonly tags: string[];
+  readonly wordCount: number;
+  readonly lineCount: number;
+  readonly version?: {
+    readonly token: string;
+    readonly hash: string;
+    readonly modifiedAt?: number;
+    readonly size?: number;
+  };
+}
+
+/**
+ * Protocol-neutral property query response.
+ */
+export interface PropertyQueryResultDTO {
+  readonly rows: QueryRowDTO[];
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
+  readonly availableProperties?: string[];
+  readonly indexStatus: 'verified' | 'degraded';
+}
+
+/**
+ * Protocol-neutral discovered properties response.
+ */
+export interface DiscoverPropertiesResultDTO {
+  readonly properties: string[];
+  readonly indexStatus: 'verified' | 'degraded';
+}
+
+/**
  * Graph neighbors and edge relationships for a note.
  */
 export interface GraphNeighborDTO {

@@ -15,7 +15,12 @@ import {
   VaultStorage,
   WriteResult,
 } from '@okw/core';
-import { buildGraphData, rewriteNoteWikilinks } from '@okw/index';
+import {
+  buildGraphData,
+  discoverVaultProperties,
+  executeProtocolPropertyQuery,
+  rewriteNoteWikilinks,
+} from '@okw/index';
 import { DefaultDocumentParser, parseFrontmatter, updateDocumentFrontmatter } from '@okw/markdown';
 import { NoteWriteCoordinator, SafeWriter } from '@okw/vault';
 import { InMemoryAuditSink } from './audit.js';
@@ -34,11 +39,14 @@ import {
   CreateNoteRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
   NoteSummary,
   OutgoingLinkDTO,
   PropertyMapDTO,
+  PropertyQueryDTO,
+  PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
   SearchRequestDTO,
@@ -359,6 +367,32 @@ export class OpenObWorkspace {
       matches,
       limit,
       offset,
+    };
+  }
+
+  /**
+   * Executes a protocol-neutral property query against the derived document index.
+   */
+  async queryNotes(
+    request: PropertyQueryDTO,
+    context?: ClientContext
+  ): Promise<PropertyQueryResultDTO> {
+    this.checkCapability('workspace.read', context);
+    const query = request || {};
+    return executeProtocolPropertyQuery(this.index, query, {
+      indexStatus: this.indexHealth,
+    });
+  }
+
+  /**
+   * Discovers all unique property keys used across the vault.
+   */
+  async discoverProperties(context?: ClientContext): Promise<DiscoverPropertiesResultDTO> {
+    this.checkCapability('workspace.read', context);
+    const properties = await discoverVaultProperties(this.index);
+    return {
+      properties,
+      indexStatus: this.indexHealth,
     };
   }
 

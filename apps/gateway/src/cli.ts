@@ -4,6 +4,8 @@ import {
   DeleteResultDTO,
   NoteReadResult,
   OpenObWorkspace,
+  PropertyQueryDTO,
+  PropertyQueryResultDTO,
   RenameResultDTO,
   SearchResultDTO,
   SearchResultMatch,
@@ -27,6 +29,7 @@ Usage:
   openob list [subpath] [--json] [--url <url>] [--token <token>]
   openob read <path> [--json] [--url <url>] [--token <token>]
   openob search <query> [--json] [--url <url>] [--token <token>]
+  openob query [--json-query <json>] [--folder <folder>] [--filter <f:op:val>] [--sort <f:dir>] [--limit <n>] [--offset <n>] [--json] [--url <url>] [--token <token>]
   openob backlinks <path> [--json] [--url <url>] [--token <token>]
   openob create <path> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
   openob update <path> --expected-version <token> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
@@ -35,6 +38,59 @@ Usage:
   openob delete <path> --expected-version <token> [--json] [--url <url>] [--token <token>]
   openob help
 `;
+
+export function parseQueryArgs(args: string[]): PropertyQueryDTO {
+  let jsonQuery: string | undefined;
+  let folderScope: string | undefined;
+  const filters: any[] = [];
+  const sorts: any[] = [];
+  let limit: number | undefined;
+  let offset: number | undefined;
+
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json-query' && i + 1 < args.length) {
+      jsonQuery = args[++i];
+    } else if (a === '--folder' && i + 1 < args.length) {
+      folderScope = args[++i];
+    } else if (a === '--filter' && i + 1 < args.length) {
+      const parts = args[++i].split(':');
+      if (parts.length >= 2) {
+        filters.push({
+          field: parts[0],
+          operator: parts[1],
+          value: parts.slice(2).join(':') || undefined,
+        });
+      }
+    } else if (a === '--sort' && i + 1 < args.length) {
+      const parts = args[++i].split(':');
+      sorts.push({
+        field: parts[0],
+        direction: (parts[1] === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc',
+      });
+    } else if (a === '--limit' && i + 1 < args.length) {
+      limit = parseInt(args[++i], 10);
+    } else if (a === '--offset' && i + 1 < args.length) {
+      offset = parseInt(args[++i], 10);
+    }
+  }
+
+  if (jsonQuery) {
+    try {
+      return JSON.parse(jsonQuery);
+    } catch {
+      throw new Error(`Invalid JSON in --json-query: "${jsonQuery}"`);
+    }
+  }
+
+  return {
+    folderScope,
+    filters: filters.length > 0 ? filters : undefined,
+    sorts: sorts.length > 0 ? sorts : undefined,
+    limit,
+    offset,
+  };
+}
 
 export function handleHelpOrUnknown(
   command?: string,
@@ -163,6 +219,18 @@ async function runCliDirect(
           ? JSON.stringify(result, null, 2)
           : `Found ${result.total} matches for "${query}":\n` +
             result.matches.map((m: SearchResultMatch) => `  - ${m.path}: ${m.title}`).join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'query': {
+        const queryReq = parseQueryArgs(args);
+        const result = await workspace.queryNotes(queryReq);
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Query results (${result.total} total matching, showing ${result.rows.length}):\n` +
+            result.rows
+              .map((r) => `  - ${r.path}: ${r.title} ${JSON.stringify(r.properties)}`)
+              .join('\n');
         return { exitCode: 0, output };
       }
 
@@ -355,6 +423,7 @@ async function runCliRemote(
     'list',
     'read',
     'search',
+    'query',
     'backlinks',
     'create',
     'update',
@@ -416,6 +485,18 @@ async function runCliRemote(
           ? JSON.stringify(result, null, 2)
           : `Found ${result.total} matches for "${query}":\n` +
             result.matches.map((m: SearchResultMatch) => `  - ${m.path}: ${m.title}`).join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'query': {
+        const queryReq = parseQueryArgs(args);
+        const result: PropertyQueryResultDTO = await client.queryNotes(queryReq);
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Query results (${result.total} total matching, showing ${result.rows.length}):\n` +
+            result.rows
+              .map((r) => `  - ${r.path}: ${r.title} ${JSON.stringify(r.properties)}`)
+              .join('\n');
         return { exitCode: 0, output };
       }
 
