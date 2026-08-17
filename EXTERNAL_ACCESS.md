@@ -185,3 +185,58 @@ openob delete Notes/RenamedNote.md --expected-version <token> --json
 | `openob_set_property`   | Set or remove property with expectedVersion | `properties.write` |
 | `openob_rename_note`    | Rename note and refactor wikilinks with OCC | `workspace.rename` |
 | `openob_delete_note`    | Delete note with expectedVersion OCC        | `workspace.delete` |
+
+---
+
+## 8. Live MCP Stdio Server (`openob-mcp`)
+
+The `openob-mcp` binary is a production Model Context Protocol (MCP) server that communicates over standard input/output (`stdio`) using the official TypeScript MCP SDK (`@modelcontextprotocol/server`).
+
+### Single Authority Invariant
+
+`openob-mcp` holds **no direct storage or index access**. It communicates strictly over HTTP loopback to the running OpenOb Gateway REST API:
+
+```text
+[External AI Agent / IDE]
+          │ (stdio JSON-RPC)
+          ▼
+    [openob-mcp]
+          │ (REST HTTP loopback /api/v1)
+          ▼
+   [OpenOb Gateway]
+          │
+          ▼
+  [OpenObWorkspace]
+```
+
+### Usage & Configuration
+
+```bash
+# Start MCP server targeting running gateway
+npx openob-mcp --url http://127.0.0.1:4512 --token <token>
+
+# Or configure via environment variables:
+export OPENOB_URL=http://127.0.0.1:4512
+export OPENOB_TOKEN=<token>
+export OPENOB_CLIENT_ID=claude-desktop
+npx openob-mcp
+```
+
+### Example Claude Desktop Configuration (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "openob": {
+      "command": "node",
+      "args": [
+        "/path/to/OpenOb/apps/gateway/dist/bin/mcp.js",
+        "--url",
+        "http://127.0.0.1:4512",
+        "--token",
+        "your-gateway-token"
+      ]
+    }
+  }
+}
+```

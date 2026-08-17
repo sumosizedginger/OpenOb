@@ -6,17 +6,21 @@
   "types": "./src/index.ts",
   "bin": {
     "openob-gateway": "./dist/bin/gateway.js",
-    "openob": "./dist/bin/cli.js"
+    "openob": "./dist/bin/cli.js",
+    "openob-mcp": "./dist/bin/mcp.js"
   },
   "exports": {
     ".": "./dist/index.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@okw/core": "*",
-    "@okw/vault": "*",
-    "@okw/markdown": "*",
     "@okw/index": "*",
-    "@okw/workspace": "*"
+    "@okw/markdown": "*",
+    "@okw/vault": "*",
+    "@okw/workspace": "*",
+    "zod": "^4.4.3"
   },
   "scripts": {
     "build": "node build.js",

@@ -51,6 +51,7 @@ jobs:
       - name: Verify Executable Packaging & Binary Invocation
         run: |
           node apps/gateway/dist/bin/cli.js --help
+          node apps/gateway/dist/bin/mcp.js --help
 
       - name: Run Test Suites
         run: npm test

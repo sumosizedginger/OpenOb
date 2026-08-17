@@ -20,6 +20,7 @@ async function build() {
     entryPoints: {
       'bin/gateway': path.resolve(__dirname, 'src/bin/gateway.ts'),
       'bin/cli': path.resolve(__dirname, 'src/bin/cli.ts'),
+      'bin/mcp': path.resolve(__dirname, 'src/bin/mcp.ts'),
       index: path.resolve(__dirname, 'src/index.ts'),
     },
     bundle: true,

@@ -10,6 +10,7 @@ import {
   SingleNoteMutationResultDTO,
   WorkspaceInfo,
 } from '@okw/workspace';
+import { OpenObGatewayClient } from './client.js';
 
 export interface CliOptions {
   readonly workspace?: OpenObWorkspace;
@@ -365,55 +366,16 @@ async function runCliRemote(
     return handleHelpOrUnknown(command, isJson);
   }
 
-  const headers: Record<string, string> = {
-    'User-Agent': 'openob-cli/0.1.0',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const cleanBase = baseUrl.replace(/\/+$/, '');
-
-  async function remoteFetch(
-    apiPath: string,
-    fetchMethod: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET',
-    body?: any
-  ): Promise<any> {
-    const targetUrl = `${cleanBase}${apiPath}`;
-    const reqHeaders: Record<string, string> = { ...headers };
-    let reqBody: string | undefined;
-
-    if (body !== undefined) {
-      reqHeaders['Content-Type'] = 'application/json';
-      reqBody = JSON.stringify(body);
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(targetUrl, {
-        method: fetchMethod,
-        headers: reqHeaders,
-        body: reqBody,
-      });
-    } catch (err: any) {
-      throw new Error(
-        `Unable to connect to OpenOb Gateway at "${cleanBase}". Is the gateway running?\n(Start it with: npx openob-gateway <vault-path>)`,
-        { cause: err }
-      );
-    }
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errMsg = data?.message || `HTTP ${res.status} ${res.statusText}`;
-      throw new Error(errMsg);
-    }
-    return data;
-  }
+  const client = new OpenObGatewayClient({
+    url: baseUrl,
+    token,
+    clientId: 'openob-cli',
+  });
 
   try {
     switch (command) {
       case 'info': {
-        const info: WorkspaceInfo = await remoteFetch('/api/v1/workspace');
+        const info: WorkspaceInfo = await client.getWorkspaceInfo();
         const output = isJson
           ? JSON.stringify(info, null, 2)
           : `Vault: ${info.name}\nNotes: ${info.noteCount}\nStorage: ${info.storageType}\nAPI: ${info.apiVersion}\nRead-Only: ${info.readOnly}`;
@@ -422,8 +384,7 @@ async function runCliRemote(
 
       case 'list': {
         const subPath = args[1] ?? '';
-        const queryParam = subPath ? `?path=${encodeURIComponent(subPath)}` : '';
-        const entries: VaultEntry[] = await remoteFetch(`/api/v1/entries${queryParam}`);
+        const entries: VaultEntry[] = await client.listEntries(subPath);
         const output = isJson
           ? JSON.stringify(entries, null, 2)
           : entries
@@ -437,7 +398,7 @@ async function runCliRemote(
         if (!path) {
           return { exitCode: 1, output: 'Error: Missing path argument. Usage: openob read <path>' };
         }
-        const note: NoteReadResult = await remoteFetch(`/api/v1/notes/${encodeURIComponent(path)}`);
+        const note: NoteReadResult = await client.readNote(path);
         const output = isJson ? JSON.stringify(note, null, 2) : note.textContent;
         return { exitCode: 0, output };
       }
@@ -450,9 +411,7 @@ async function runCliRemote(
             output: 'Error: Missing query argument. Usage: openob search <query>',
           };
         }
-        const result: SearchResultDTO = await remoteFetch(
-          `/api/v1/search?q=${encodeURIComponent(query)}`
-        );
+        const result: SearchResultDTO = await client.search({ query });
         const output = isJson
           ? JSON.stringify(result, null, 2)
           : `Found ${result.total} matches for "${query}":\n` +
@@ -468,9 +427,7 @@ async function runCliRemote(
             output: 'Error: Missing path argument. Usage: openob backlinks <path>',
           };
         }
-        const backlinks: BacklinkDTO[] = await remoteFetch(
-          `/api/v1/notes/${encodeURIComponent(path)}/backlinks`
-        );
+        const backlinks: BacklinkDTO[] = await client.getBacklinks(path);
         const output = isJson
           ? JSON.stringify(backlinks, null, 2)
           : `Backlinks to ${path} (${backlinks.length}):\n` +
@@ -489,7 +446,7 @@ async function runCliRemote(
               'Error: Missing path argument. Usage: openob create <path> [--content <content>] [--stdin]',
           };
         }
-        const result: SingleNoteMutationResultDTO = await remoteFetch('/api/v1/notes', 'POST', {
+        const result: SingleNoteMutationResultDTO = await client.createNote({
           path,
           content: content ?? '',
         });
@@ -514,14 +471,11 @@ async function runCliRemote(
             output: 'Error: Missing required --expected-version <token> flag for note update',
           };
         }
-        const result: SingleNoteMutationResultDTO = await remoteFetch(
-          `/api/v1/notes/${encodeURIComponent(path)}`,
-          'PUT',
-          {
-            content: content ?? '',
-            expectedVersion: { token: expectedVersion },
-          }
-        );
+        const result: SingleNoteMutationResultDTO = await client.updateNote({
+          path,
+          content: content ?? '',
+          expectedVersion: { token: expectedVersion },
+        });
         const output = isJson
           ? JSON.stringify(result, null, 2)
           : `Updated note: ${result.path} (version: ${result.currentVersion.token})`;
@@ -557,15 +511,12 @@ async function runCliRemote(
           }
         }
 
-        const result: SingleNoteMutationResultDTO = await remoteFetch(
-          `/api/v1/notes/${encodeURIComponent(path)}/properties`,
-          'PATCH',
-          {
-            key,
-            value: parsedVal,
-            expectedVersion: { token: expectedVersion },
-          }
-        );
+        const result: SingleNoteMutationResultDTO = await client.setProperty({
+          path,
+          key,
+          value: parsedVal,
+          expectedVersion: { token: expectedVersion },
+        });
         const output = isJson
           ? JSON.stringify(result, null, 2)
           : `Set property "${key}" on ${result.path} (version: ${result.currentVersion.token})`;
@@ -589,14 +540,11 @@ async function runCliRemote(
           };
         }
 
-        const result: RenameResultDTO = await remoteFetch(
-          `/api/v1/notes/${encodeURIComponent(oldPath)}/rename`,
-          'POST',
-          {
-            newPath,
-            expectedVersion: { token: expectedVersion },
-          }
-        );
+        const result: RenameResultDTO = await client.renameNote({
+          oldPath,
+          newPath,
+          expectedVersion: { token: expectedVersion },
+        });
         const output = isJson
           ? JSON.stringify(result, null, 2)
           : `Renamed note: ${result.oldPath} -> ${result.newPath} (version: ${result.currentVersion.token}, updated ${result.updatedFiles.length} files)`;
@@ -619,13 +567,10 @@ async function runCliRemote(
           };
         }
 
-        const result: DeleteResultDTO = await remoteFetch(
-          `/api/v1/notes/${encodeURIComponent(path)}`,
-          'DELETE',
-          {
-            expectedVersion: { token: expectedVersion },
-          }
-        );
+        const result: DeleteResultDTO = await client.deleteNote({
+          path,
+          expectedVersion: { token: expectedVersion },
+        });
         const output = isJson ? JSON.stringify(result, null, 2) : `Deleted note: ${result.path}`;
         return { exitCode: 0, output };
       }
