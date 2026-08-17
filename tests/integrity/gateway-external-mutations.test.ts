@@ -4,9 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifacts)', () => {
-  const GATEWAY_BIN = path.resolve(__dirname, '../../apps/gateway/dist/bin/gateway.js');
-  const CLI_BIN = path.resolve(__dirname, '../../apps/gateway/dist/bin/cli.js');
   const BUILD_SCRIPT = path.resolve(__dirname, '../../apps/gateway/build.js');
+  let tempDist: string;
+  let gatewayBin: string;
+  let cliBin: string;
   let tempVaultDir: string;
 
   function spawnGatewayProcess(
@@ -52,19 +53,23 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
   }
 
   beforeAll(async () => {
-    // 1. Ensure production gateway artifacts exist
-    const exists = await fs
-      .stat(GATEWAY_BIN)
-      .then(() => fs.stat(CLI_BIN))
-      .catch(() => null);
-    if (!exists) {
-      await new Promise<void>((resolve, reject) => {
-        execFile(process.execPath, [BUILD_SCRIPT], (err, stdout, stderr) => {
-          if (err) reject(new Error(`Packaging build failed: ${stderr || stdout}`));
-          else resolve();
-        });
+    // 1. Build an isolated production gateway artifact specifically for this test suite
+    tempDist = path.resolve(
+      __dirname,
+      `../../apps/gateway/.dist-mut-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    await new Promise<void>((resolve, reject) => {
+      execFile(process.execPath, [BUILD_SCRIPT, '--outdir', tempDist], (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`Failed to build gateway into isolated dist: ${stderr || stdout}`));
+        } else {
+          resolve();
+        }
       });
-    }
+    });
+
+    gatewayBin = path.join(tempDist, 'bin/gateway.js');
+    cliBin = path.join(tempDist, 'bin/cli.js');
 
     // 2. Create isolated temp vault directory
     tempVaultDir = path.resolve(__dirname, `../../.temp-mutation-vault-${Date.now()}`);
@@ -77,6 +82,9 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
   });
 
   afterAll(async () => {
+    if (tempDist) {
+      await fs.rm(tempDist, { recursive: true, force: true }).catch(() => {});
+    }
     if (tempVaultDir) {
       await fs.rm(tempVaultDir, { recursive: true, force: true }).catch(() => {});
     }
@@ -86,7 +94,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
     const token = 'process-mutation-token-999';
 
     // 1. Spawn real production gateway binary with explicit mutation scopes
-    const { child: gatewayChild, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, [
+    const { child: gatewayChild, ready } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
       '--token',
       token,
       '--scopes',
@@ -101,7 +109,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
         execFile(
           process.execPath,
           [
-            CLI_BIN,
+            cliBin,
             '--url',
             gatewayUrl,
             '--token',
@@ -134,7 +142,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
         execFile(
           process.execPath,
           [
-            CLI_BIN,
+            cliBin,
             '--url',
             gatewayUrl,
             '--token',
@@ -167,7 +175,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
         execFile(
           process.execPath,
           [
-            CLI_BIN,
+            cliBin,
             '--url',
             gatewayUrl,
             '--token',
@@ -199,7 +207,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
         execFile(
           process.execPath,
           [
-            CLI_BIN,
+            cliBin,
             '--url',
             gatewayUrl,
             '--token',
@@ -234,7 +242,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
     const token = 'readonly-token-abc';
 
     // Start gateway with DEFAULT scopes (read-only)
-    const { child: readOnlyGateway, ready } = spawnGatewayProcess(GATEWAY_BIN, tempVaultDir, [
+    const { child: readOnlyGateway, ready } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
       '--token',
       token,
     ]);
@@ -247,7 +255,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
         execFile(
           process.execPath,
           [
-            CLI_BIN,
+            cliBin,
             '--url',
             gatewayUrl,
             '--token',
