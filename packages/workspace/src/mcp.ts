@@ -140,7 +140,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'openob_update_note',
     description:
-      'Update the body content of an existing note using strict optimistic concurrency control.',
+      'Update the body content of an existing note using strict optimistic concurrency control. Note: this replaces the entire file content; existing frontmatter properties will be overwritten unless explicitly included in content. Use openob_set_property for individual property modifications.',
     inputSchema: {
       type: 'object',
       properties: {

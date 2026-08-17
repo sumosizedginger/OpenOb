@@ -176,7 +176,11 @@ export function createOpenObMcpServer(options: GatewayClientOptions): McpServer 
         path: z
           .string()
           .describe('Vault-relative path for the new note (e.g. "Notes/NewIdea.md").'),
-        content: z.string().optional().describe('Initial body content for the note.'),
+        content: z
+          .string()
+          .max(10 * 1024 * 1024)
+          .optional()
+          .describe('Initial body content for the note.'),
         properties: z
           .record(z.string(), z.any())
           .optional()
@@ -204,10 +208,13 @@ export function createOpenObMcpServer(options: GatewayClientOptions): McpServer 
     'openob_update_note',
     {
       description:
-        'Update the body content of an existing note using strict optimistic concurrency control.',
+        'Update the body content of an existing note using strict optimistic concurrency control. Note: this replaces the entire file content; existing frontmatter properties will be overwritten unless explicitly included in content. Use openob_set_property for individual property modifications.',
       inputSchema: {
         path: z.string().describe('Vault-relative path to the note.'),
-        content: z.string().describe('New body content for the note.'),
+        content: z
+          .string()
+          .max(10 * 1024 * 1024)
+          .describe('New body content for the note.'),
         expectedVersion: z
           .object({
             token: z.string().describe('Version token previously returned by readNote.'),

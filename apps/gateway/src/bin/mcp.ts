@@ -3,6 +3,7 @@
 import process from 'node:process';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createOpenObMcpServer } from '../mcp-server.js';
+import { SafeStdioServerTransport } from '../stdio-transport.js';
 
 const MCP_HELP_TEXT = `OpenOb MCP Server (Live Stdio Transport)
 
@@ -67,7 +68,13 @@ async function main() {
     clientId,
   });
 
-  const session = serveStdio(() => server);
+  const transport = new SafeStdioServerTransport(process.stdin, process.stdout);
+  const session = serveStdio(() => server, {
+    transport,
+    onerror: (err) => {
+      process.stderr.write(`[openob-mcp] Transport error: ${err?.message || String(err)}\n`);
+    },
+  });
 
   const shutdown = async () => {
     try {

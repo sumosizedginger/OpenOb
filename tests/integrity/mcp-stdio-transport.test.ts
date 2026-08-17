@@ -485,4 +485,219 @@ describe('Live MCP Stdio Transport (@okw/gateway openob-mcp)', () => {
       expect(mcpBinSource).not.toContain(forbidden);
     }
   });
+
+  it('8. P2-1 Adversarial Test: Oversized (>10MB & 25MB) and malformed inputs do NOT kill openob-mcp', async () => {
+    const token = 'mcp-robust-token';
+    const { child: gwChild, ready } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
+      '--token',
+      token,
+      '--scopes',
+      'workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete',
+    ]);
+
+    let mcpChild: ChildProcess | null = null;
+
+    try {
+      const { url: gwUrl } = await ready;
+
+      // Spawn raw openob-mcp process
+      mcpChild = spawn(process.execPath, [mcpBin, '--url', gwUrl, '--token', token], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      const stdoutLines: string[] = [];
+      let currentLine = '';
+
+      mcpChild.stdout?.on('data', (chunk) => {
+        const str = chunk.toString();
+        for (let i = 0; i < str.length; i++) {
+          if (str[i] === '\n') {
+            const line = currentLine.trim();
+            currentLine = '';
+            if (line) {
+              stdoutLines.push(line);
+            }
+          } else {
+            currentLine += str[i];
+          }
+        }
+      });
+
+      const waitForResponse = async (timeoutMs = 5000): Promise<any> => {
+        const start = Date.now();
+        while (stdoutLines.length === 0) {
+          if (Date.now() - start > timeoutMs) {
+            throw new Error('Timed out waiting for response from openob-mcp');
+          }
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        const raw = stdoutLines.shift()!;
+        return JSON.parse(raw);
+      };
+
+      // 1. Initialize handshake
+      const initReq = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'adversarial-tester', version: '1.0.0' },
+        },
+      };
+      mcpChild.stdin?.write(JSON.stringify(initReq) + '\n');
+      const initRes = await waitForResponse();
+      expect(initRes.id).toBe(1);
+      expect(initRes.result.serverInfo.name).toBe('openob-mcp');
+
+      // 2. Malformed JSON message
+      mcpChild.stdin?.write('this is not valid json at all {{{ \n');
+      const malformedRes = await waitForResponse();
+      expect(malformedRes.error).toBeDefined();
+      expect(malformedRes.error.code).toBe(-32700);
+      expect(malformedRes.error.message).toContain('Parse error');
+
+      // 3. Immediately verify server is alive: call tools/list
+      const listReq = {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {},
+      };
+      mcpChild.stdin?.write(JSON.stringify(listReq) + '\n');
+      const listRes = await waitForResponse();
+      expect(listRes.id).toBe(2);
+      expect(listRes.result.tools.length).toBe(11);
+
+      // 4. Send oversized message just above 10MB (11 MB)
+      const bigContent = 'x'.repeat(11 * 1024 * 1024);
+      const oversizedReq = {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'openob_create_note',
+          arguments: {
+            path: 'ShouldNotExist.md',
+            content: bigContent,
+          },
+        },
+      };
+      mcpChild.stdin?.write(JSON.stringify(oversizedReq) + '\n');
+      const oversizedRes = await waitForResponse(10000);
+      expect(oversizedRes.error).toBeDefined();
+      expect(oversizedRes.error.code).toBe(-32600);
+      expect(oversizedRes.error.message).toContain('PAYLOAD_TOO_LARGE');
+
+      // Verify no file was created on disk
+      await expect(fs.access(path.join(tempVaultDir, 'ShouldNotExist.md'))).rejects.toThrow();
+
+      // 5. Immediately verify server is STILL ALIVE on same process: call workspace_info
+      const infoReq = {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: {
+          name: 'openob_workspace_info',
+          arguments: {},
+        },
+      };
+      mcpChild.stdin?.write(JSON.stringify(infoReq) + '\n');
+      const infoRes = await waitForResponse();
+      expect(infoRes.id).toBe(4);
+      expect(infoRes.result.content[0].text).toContain('noteCount');
+
+      // 6. Very large oversized stream (25 MB)
+      const hugeContent = 'y'.repeat(25 * 1024 * 1024);
+      const hugeReq = {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: {
+          name: 'openob_create_note',
+          arguments: {
+            path: 'HugeOversized.md',
+            content: hugeContent,
+          },
+        },
+      };
+      mcpChild.stdin?.write(JSON.stringify(hugeReq) + '\n');
+      const hugeRes = await waitForResponse(15000);
+      expect(hugeRes.error).toBeDefined();
+      expect(hugeRes.error.code).toBe(-32600);
+      expect(hugeRes.error.message).toContain('PAYLOAD_TOO_LARGE');
+
+      // 7. Repeated 5x cycles of malformed / oversized requests followed by valid call
+      for (let i = 0; i < 5; i++) {
+        mcpChild.stdin?.write(`invalid-json-iteration-${i}\n`);
+        const malf = await waitForResponse();
+        expect(malf.error.code).toBe(-32700);
+
+        const okReq = {
+          jsonrpc: '2.0',
+          id: 100 + i,
+          method: 'tools/call',
+          params: {
+            name: 'openob_read_note',
+            arguments: { path: 'Welcome.md' },
+          },
+        };
+        mcpChild.stdin?.write(JSON.stringify(okReq) + '\n');
+        const okRes = await waitForResponse();
+        expect(okRes.id).toBe(100 + i);
+        expect(okRes.result.content[0].text).toContain('Welcome Note');
+      }
+
+      // 8. Prove stdout purity: every captured line must be valid JSON-RPC
+      for (const line of stdoutLines) {
+        expect(() => JSON.parse(line)).not.toThrow();
+        const obj = JSON.parse(line);
+        expect(obj.jsonrpc).toBe('2.0');
+      }
+    } finally {
+      if (mcpChild) {
+        mcpChild.kill('SIGTERM');
+      }
+      gwChild.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }, 40000);
+
+  it('9. P2-2 Contract: openob_update_note tool description is explicit about full document content replacement', async () => {
+    const token = 'mcp-contract-token';
+    const { child: gwChild, ready } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
+      '--token',
+      token,
+    ]);
+
+    try {
+      const { url: gwUrl } = await ready;
+      const { client } = await createMcpClient({ url: gwUrl, token });
+
+      try {
+        const toolsResult = await client.listTools();
+        const updateTool = toolsResult.tools.find((t) => t.name === 'openob_update_note');
+        expect(updateTool).toBeDefined();
+        expect(updateTool!.description).toContain('replaces the entire file content');
+        expect(updateTool!.description).toContain('openob_set_property');
+      } finally {
+        await client.close();
+      }
+    } finally {
+      gwChild.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+
+  it('10. P2-3 Packaging: sql.js is declared in apps/gateway/package.json dependencies', async () => {
+    const pkgRaw = await fs.readFile(
+      path.resolve(__dirname, '../../apps/gateway/package.json'),
+      'utf8'
+    );
+    const pkg = JSON.parse(pkgRaw);
+    expect(pkg.dependencies).toBeDefined();
+    expect(pkg.dependencies['sql.js']).toBeDefined();
+    expect(pkg.dependencies['sql.js']).toBe('^1.14.2');
+  });
 });
