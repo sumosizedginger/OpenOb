@@ -248,14 +248,15 @@ npx openob-mcp
 OpenOb supports two distinct web operating modes with strict mutual exclusivity:
 
 ### 1. Standalone Local Web Mode
+
 - Browser owns the vault through the File System Access API (`BrowserFSAVaultStorage`) or in-memory vault.
 - `NoteWriteCoordinator`, `SafeWriter`, and local `DocumentIndex` run in the browser tab.
 
 ### 2. Gateway-Managed Web Mode
+
 - The browser **never owns or directly touches the vault filesystem**.
 - The React Web UI connects over HTTP loopback exclusively to the running OpenOb Gateway REST API via `OpenObGatewayClient` wrapped in `GatewayWorkspaceBackend`.
 - **One Brain, Multiple Doors:** External AI agents (MCP), CLI commands, and the human Web UI all mutate through the exact same running `OpenObWorkspace`.
 - **Strict Mode Exclusivity:** In Gateway-Managed Mode, `BrowserFSAVaultStorage`, OPFS vault authority, `NoteWriteCoordinator`, `SafeWriter`, and local `DocumentIndex` are **not** instantiated or used for canonical access.
 - **OCC Human-Agent Protection:** When an external MCP agent updates a note (e.g. V1 -> V2) while a human has unsaved edits in the browser, the human's subsequent save attempt returns `409 Conflict`. The UI preserves the human's buffer, displays the conflict modal with disk vs local content, and prevents overwriting the agent's V2 update.
 - **Static Web Delivery:** The Gateway binary supports `--serve-web` and `--web-dist <dir>` to serve the production Web UI SPA directly from the local gateway process with single-page app fallback.
-

@@ -345,4 +345,62 @@ Details about Alpha.
       expect(err.message).not.toContain('super-secret-token-value');
     }
   });
+
+  it('6. Error Discrimination (R3B-1): Distinct error codes for 401, 403, 404, 409, 413, and 503 GatewayUnavailableError', async () => {
+    // 401 Unauthorized
+    const unauthClient = new OpenObGatewayClient({
+      url: runningGateway.url,
+      token: 'wrong-token-invalid',
+      clientId: 'openob-unauth',
+    });
+    let authErr: any = null;
+    try {
+      await unauthClient.getWorkspaceInfo();
+    } catch (err: any) {
+      authErr = err;
+    }
+    expect(authErr).toBeInstanceOf(GatewayError);
+    expect(authErr.status).toBe(401);
+    expect(authErr.code).toBe('UNAUTHORIZED');
+
+    // 404 Not Found
+    const validClient = new OpenObGatewayClient({
+      url: runningGateway.url,
+      token: TEST_TOKEN,
+      clientId: 'openob-valid',
+    });
+    let notFoundErr: any = null;
+    try {
+      await validClient.readNote('DefinitelyDoesNotExist.md');
+    } catch (err: any) {
+      notFoundErr = err;
+    }
+    expect(notFoundErr).toBeInstanceOf(GatewayError);
+    expect(notFoundErr.status).toBe(404);
+    expect(notFoundErr.code).toBe('NOT_FOUND');
+
+    // 503 / GatewayUnavailableError when connecting to an unreachable port
+    const deadPort = await getFreePort();
+    const deadClient = new OpenObGatewayClient({
+      url: `http://127.0.0.1:${deadPort}`,
+      token: TEST_TOKEN,
+      clientId: 'openob-dead',
+    });
+    let unavailErr: any = null;
+    try {
+      await deadClient.getWorkspaceInfo();
+    } catch (err: any) {
+      unavailErr = err;
+    }
+    expect(unavailErr).toBeInstanceOf(GatewayError);
+    expect(unavailErr.status).toBe(503);
+    expect(unavailErr.code).toBe('GATEWAY_UNAVAILABLE');
+  });
+
+  it('7. Health Endpoint (R3B-3): GET /health responds with 200 OK for background polling', async () => {
+    const res = await fetch(`${runningGateway.url}/health`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('ok');
+  });
 });

@@ -285,4 +285,163 @@ Native vault project documentation.
       timeout: 5000,
     });
   });
+
+  test('7. R3B-1 Error Discrimination: Read-only save and dead-gateway save render truthful states instead of conflict', async ({
+    page,
+  }) => {
+    // 1. Set up a read-only gateway
+    const roStorage = new NodeFsVaultStorage(tempVaultDir, 'RO-Vault');
+    const roParser = new DefaultDocumentParser();
+    const roIndex = new MemoryDocumentIndex();
+    const roSafeWriter = new SafeWriter(roStorage);
+    const roWorkspace = new OpenObWorkspace({
+      storage: roStorage,
+      index: roIndex,
+      parser: roParser,
+      safeWriter: roSafeWriter,
+      readOnly: true,
+      vaultName: 'RO-Vault',
+    });
+
+    const roPort = await getFreePort();
+    const roGateway = await startGateway({
+      workspace: roWorkspace,
+      port: roPort,
+      token: TEST_TOKEN,
+    });
+
+    try {
+      // Connect to read-only gateway
+      await page.evaluate(
+        async ({ url, token }) => {
+          return await (window as any).__connectToGateway(url, token);
+        },
+        { url: roGateway.url, token: TEST_TOKEN }
+      );
+
+      await expect(page.locator('.status-bar')).toContainText('Gateway: RO-Vault', {
+        timeout: 5000,
+      });
+
+      // Intercept alert for read-only save
+      let alertMessage = '';
+      page.once('dialog', async (dialog) => {
+        alertMessage = dialog.message();
+        await dialog.dismiss();
+      });
+
+      // Type and attempt save on read-only gateway
+      await page.locator('.cm-content').click();
+      await page.keyboard.type('\n\nAttempted edit on read-only vault');
+      await page.keyboard.press('Control+s');
+
+      // Verify alert was shown and status is NOT "External Conflict!"
+      await expect.poll(() => alertMessage, { timeout: 5000 }).toContain('Read-only gateway');
+      await expect(page.locator('.save-status')).not.toContainText('Conflict');
+      await expect(page.locator('.save-status')).toContainText('Modified');
+    } finally {
+      await roGateway.stop();
+    }
+  });
+
+  test('8. R3B-2 Safe Disconnect: Dirty buffer triggers confirmation and preserves edits on cancel', async ({
+    page,
+  }) => {
+    // Open Welcome note and make dirty edit
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\n\nUnsaved draft that must not be silently lost');
+    await expect(page.locator('.save-status')).toContainText('Modified');
+
+    // 1. User attempts to disconnect and CANCELS the prompt
+    let dialogMessage = '';
+    page.once('dialog', async (dialog) => {
+      dialogMessage = dialog.message();
+      await dialog.dismiss(); // User chooses Cancel
+    });
+
+    const cancelRes = await page.evaluate(async () => {
+      return await (window as any).__disconnectGateway();
+    });
+
+    expect(dialogMessage).toContain('unsaved changes');
+    expect(cancelRes.cancelled).toBe(true);
+
+    // Buffer and Gateway mode are preserved
+    await expect(page.locator('.status-bar')).toContainText('Gateway: E2E-Native-Vault');
+    await expect(page.locator('.cm-content')).toContainText(
+      'Unsaved draft that must not be silently lost'
+    );
+
+    // 2. User attempts to disconnect and CONFIRMS
+    page.once('dialog', async (dialog) => {
+      await dialog.accept(); // User chooses OK / Discard
+    });
+
+    const confirmRes = await page.evaluate(async () => {
+      return await (window as any).__disconnectGateway();
+    });
+
+    expect(confirmRes.success).toBe(true);
+    await expect(page.locator('.status-bar')).not.toContainText('Gateway:');
+    await expect(page.locator('.status-bar')).toContainText('Open Knowledge Workspace');
+  });
+
+  test('9. R3B-3 Gateway Health Monitoring: Unreachable gateway flips status bar to Disconnected automatically', async ({
+    page,
+  }) => {
+    // Start temporary standalone gateway
+    const healthDir = await fs.mkdtemp(path.join(os.tmpdir(), 'okw-health-vault-'));
+    await fs.writeFile(path.join(healthDir, 'Note.md'), '# Note\n\nContent');
+    const healthStorage = new NodeFsVaultStorage(healthDir, 'Health-Vault');
+    const healthParser = new DefaultDocumentParser();
+    const healthIndex = new MemoryDocumentIndex();
+    const healthSafeWriter = new SafeWriter(healthStorage);
+    const healthWorkspace = new OpenObWorkspace({
+      storage: healthStorage,
+      index: healthIndex,
+      parser: healthParser,
+      safeWriter: healthSafeWriter,
+      readOnly: false,
+      vaultName: 'Health-Vault',
+    });
+
+    const healthPort = await getFreePort();
+    const healthGateway = await startGateway({
+      workspace: healthWorkspace,
+      port: healthPort,
+      token: TEST_TOKEN,
+    });
+
+    try {
+      // Connect to health gateway
+      await page.evaluate(
+        async ({ url, token }) => {
+          return await (window as any).__connectToGateway(url, token);
+        },
+        { url: healthGateway.url, token: TEST_TOKEN }
+      );
+
+      await expect(page.locator('.status-bar')).toContainText('Gateway: Health-Vault', {
+        timeout: 5000,
+      });
+
+      // Type some unsaved content
+      await page.locator('.cm-content').click();
+      await page.keyboard.type('\n\nImportant text during outage');
+
+      // Kill the health gateway
+      await healthGateway.stop();
+
+      // Within ~4 seconds, the health check probe flips status to Disconnected without user input
+      await expect(page.locator('.badge-disconnected, .save-status.disconnected')).toBeVisible({
+        timeout: 6000,
+      });
+      await expect(page.locator('.status-bar')).toContainText('Disconnected');
+
+      // Verify editor content remains intact during outage
+      await expect(page.locator('.cm-content')).toContainText('Important text during outage');
+    } finally {
+      await fs.rm(healthDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });

@@ -7,16 +7,20 @@ import {
   HardDrive,
   FileEdit,
   Server,
+  ServerOff,
   Lock,
+  WifiOff,
+  AlertCircle,
 } from 'lucide-react';
 
 interface StatusBarProps {
   vaultName: string;
   vaultMode: 'memory' | 'fsa' | 'gateway';
   isReadOnly?: boolean;
+  gatewayReachable?: boolean;
   activePath: VaultPath | null;
   parsedDoc: ParsedDocument | null;
-  saveStatus: 'saved' | 'saving' | 'modified' | 'conflict';
+  saveStatus: 'saved' | 'saving' | 'modified' | 'conflict' | 'disconnected';
   onSave: () => void;
   onOpenConflictModal?: () => void;
   onOpenGatewayModal?: () => void;
@@ -26,6 +30,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   vaultName,
   vaultMode,
   isReadOnly = false,
+  gatewayReachable = true,
   activePath,
   parsedDoc,
   saveStatus,
@@ -33,6 +38,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenConflictModal,
   onOpenGatewayModal,
 }) => {
+  const isDisconnected =
+    vaultMode === 'gateway' && (!gatewayReachable || saveStatus === 'disconnected');
+
   return (
     <div className="status-bar">
       <div className="status-left">
@@ -46,19 +54,43 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           onClick={onOpenGatewayModal}
           title={
             vaultMode === 'gateway'
-              ? `Connected to OpenOb Gateway (${isReadOnly ? 'Read-Only' : 'Writable'})`
+              ? isDisconnected
+                ? 'OpenOb Gateway is unreachable / disconnected'
+                : `Connected to OpenOb Gateway (${isReadOnly ? 'Read-Only' : 'Writable'})`
               : `Local Vault Mode (${vaultMode.toUpperCase()})`
           }
         >
           {vaultMode === 'gateway' ? (
-            <Server size={12} color="var(--accent-primary)" />
+            isDisconnected ? (
+              <ServerOff size={12} color="#ef4444" />
+            ) : (
+              <Server size={12} color="var(--accent-primary)" />
+            )
           ) : (
             <HardDrive size={12} color="var(--accent-primary)" />
           )}
           <span style={{ fontWeight: 600 }}>
             {vaultMode === 'gateway' ? `Gateway: ${vaultName}` : vaultName}
           </span>
-          {isReadOnly && (
+          {vaultMode === 'gateway' && isDisconnected && (
+            <span
+              className="badge-disconnected"
+              style={{
+                fontSize: '10px',
+                padding: '1px 4px',
+                borderRadius: '3px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                color: '#ef4444',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                fontWeight: 600,
+              }}
+            >
+              <WifiOff size={9} /> Disconnected
+            </span>
+          )}
+          {isReadOnly && !isDisconnected && (
             <span
               style={{
                 fontSize: '10px',
@@ -87,6 +119,15 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           </>
         )}
 
+        {saveStatus === 'disconnected' && (
+          <span
+            className="save-status disconnected"
+            style={{ color: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            title="Gateway is unreachable. Changes are held in memory."
+          >
+            <AlertCircle size={12} /> Disconnected
+          </span>
+        )}
         {saveStatus === 'saved' && (
           <span className="save-status saved">
             <CheckCircle2 size={12} /> Saved

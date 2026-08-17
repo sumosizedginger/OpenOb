@@ -1,4 +1,5 @@
 # OpenOb — Phase 3B Gateway-Managed Web Mode Report
+
 # One Vault Authority for Human UI + Agents
 
 **Phase:** 3B  
@@ -15,6 +16,7 @@ Phase 3B delivers **Gateway-Managed Web Mode**, establishing a unified, authorit
 ### The Invariant: ONE BRAIN. MULTIPLE DOORS.
 
 In Gateway-Managed Web Mode:
+
 1. **Single Canonical Authority:** The running Node.js Gateway process (`apps/gateway`) holds the exclusive `OpenObWorkspace`, `NodeFsVaultStorage`, `SafeWriter`, `NoteWriteCoordinator`, and authoritative `DocumentIndex`.
 2. **Strict Mode Exclusivity:** The React Web UI runs in pure client mode via `GatewayWorkspaceBackend`. It **never** creates or invokes `BrowserFSAVaultStorage`, OPFS authorities, `NoteWriteCoordinator`, `SafeWriter`, or a canonical local index.
 3. **Optimistic Concurrency Control (OCC):** The Web editor tracks version tokens (`readNote` -> `FileVersion`). Saves send `expectedVersion`. Concurrent agent updates (e.g. via MCP/CLI) trigger `409 Conflict`, which preserves the human editor buffer, pops the Conflict Resolution Modal, and prevents overwriting agent updates.
@@ -46,6 +48,7 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
 ## 2. Implemented Architecture & Components
 
 ### 2.1 Universal Browser-Safe Gateway Client (`packages/workspace/src/client.ts`)
+
 - Implemented `OpenObGatewayClient`, `GatewayError`, and `GatewayUnavailableError`.
 - Safe for both browser and Node.js environments:
   - Uses `globalThis.fetch` or `window.fetch.bind(window)` (preventing illegal invocation errors).
@@ -54,12 +57,14 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
 - Provides full typed RPC for workspace info, list entries, read/create/update/delete notes, set properties, rename notes with inbound link refactoring, and search.
 
 ### 2.2 Unified Backend Abstraction (`packages/workspace/src/backend.ts`)
+
 - Defined `WorkspaceBackend` interface implemented by:
   - `LocalWorkspaceBackend`: Wraps in-memory or FSA `OpenObWorkspace`.
   - `GatewayWorkspaceBackend`: Wraps `OpenObGatewayClient`.
 - Decouples the React UI components (`FileTree`, `Editor`, `TabBar`, `PropertiesPanel`, `SearchModal`, `BacklinksPanel`) from direct storage dependencies.
 
 ### 2.3 Web UI Adaptation & Strict Mode Isolation (`apps/web`)
+
 - `apps/web/src/hooks/useVault.ts`:
   - Added `vaultMode: 'memory' | 'fsa' | 'gateway'`.
   - Added `connectToGateway(url, token)` and `disconnectGateway()`.
@@ -75,6 +80,7 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
   - Displays side-by-side comparison of current disk version vs unsaved editor buffer on 409 conflict, offering "Reload from Disk" or "Overwrite".
 
 ### 2.4 Gateway Server Enhancements (`apps/gateway/src/server.ts` & `apps/gateway/src/bin/gateway.ts`)
+
 - Static web asset delivery with directory traversal guards, MIME-type resolution, and SPA fallback to `index.html`.
 - Placed static file delivery before authentication checks so the Web UI SPA can load unauthenticated before the user provides a bearer token.
 - Universal loopback CORS headers (`Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers: *`, `OPTIONS` preflight 204 handler) allowing web clients on separate local ports (e.g. Vite dev server `localhost:3100`) to communicate seamlessly with the gateway.
@@ -85,6 +91,7 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
 ## 3. Verification Suite & Test Results
 
 ### 3.1 Integrity Test Suite (`tests/integrity/gateway-managed-web.test.ts`)
+
 - **5/5 tests passing:**
   1. `Web Delivery`: Gateway with `--serve-web` serves `index.html` and static assets.
   2. `Mode Exclusivity`: `GatewayWorkspaceBackend` executes 0 local storage/coordinator writes.
@@ -93,6 +100,7 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
   5. `Security`: Bearer tokens are not leaked in query parameters or error payloads.
 
 ### 3.2 Real Playwright Browser Integration Suite (`tests/e2e/gateway-managed-web.spec.ts`)
+
 - **6/6 tests passing against real Chromium browser:**
   1. `Read & Navigation`: Loads native notes from gateway and resolves backlinks.
   2. `Human Mutation & Autosave`: Saves edits via Gateway REST and updates native disk file.
@@ -102,6 +110,7 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
   6. `Disconnect Gateway`: Switches cleanly back to local memory vault.
 
 ### 3.3 Full Verification Gate (`npm run verify:full`)
+
 - **Prettier:** 100% formatted.
 - **ESLint:** 0 errors.
 - **TypeScript Typecheck (`tsc --build`):** 0 errors across all 6 packages and 2 apps.
@@ -113,13 +122,13 @@ React Web UI (Browser)          External Agent (Claude / MCP)        Local CLI (
 
 ## 4. Architectural Proofs & Invariants
 
-| Invariant | Implementation Proof |
-| :--- | :--- |
-| **No Dual Authority** | When `vaultMode === 'gateway'`, all mutations route through `GatewayWorkspaceBackend`. Zero instances of `BrowserFSAVaultStorage` or `NoteWriteCoordinator` touch the vault. |
-| **Optimistic Concurrency** | Every read stores `version.token`. Every save and property mutation sends `expectedVersion.token`. Stale saves trigger `409 CONFLICT`. |
-| **No Ghost Resurrection** | External deletions invalidate the note on the authoritative server. Subsequent saves fail OCC checks and never recreate deleted files. |
-| **Token Security** | Gateway tokens are transmitted strictly via `Authorization: Bearer <token>` HTTP headers. Tokens never appear in URLs, query strings, or error payloads. |
-| **Fallback Immunity** | Gateway network failures surface actionable `503 GATEWAY_UNAVAILABLE` errors to the human user and never silently fall back to local FSA mode. |
+| Invariant                  | Implementation Proof                                                                                                                                                         |
+| :------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No Dual Authority**      | When `vaultMode === 'gateway'`, all mutations route through `GatewayWorkspaceBackend`. Zero instances of `BrowserFSAVaultStorage` or `NoteWriteCoordinator` touch the vault. |
+| **Optimistic Concurrency** | Every read stores `version.token`. Every save and property mutation sends `expectedVersion.token`. Stale saves trigger `409 CONFLICT`.                                       |
+| **No Ghost Resurrection**  | External deletions invalidate the note on the authoritative server. Subsequent saves fail OCC checks and never recreate deleted files.                                       |
+| **Token Security**         | Gateway tokens are transmitted strictly via `Authorization: Bearer <token>` HTTP headers. Tokens never appear in URLs, query strings, or error payloads.                     |
+| **Fallback Immunity**      | Gateway network failures surface actionable `503 GATEWAY_UNAVAILABLE` errors to the human user and never silently fall back to local FSA mode.                               |
 
 ---
 

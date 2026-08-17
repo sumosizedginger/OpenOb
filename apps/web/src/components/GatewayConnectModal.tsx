@@ -6,7 +6,7 @@ interface GatewayConnectModalProps {
   currentUrl?: string;
   isConnected: boolean;
   onConnect: (url: string, token?: string) => Promise<{ success: boolean; error?: string }>;
-  onDisconnect?: () => void;
+  onDisconnect?: () => Promise<{ success: boolean; cancelled?: boolean } | void> | void;
   onClose: () => void;
 }
 
@@ -199,9 +199,10 @@ export const GatewayConnectModal: React.FC<GatewayConnectModalProps> = ({
             {isConnected && onDisconnect && (
               <button
                 type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  onDisconnect();
+                className="btn-secondary btn-disconnect"
+                onClick={async () => {
+                  const res = await onDisconnect();
+                  if (res && res.cancelled) return;
                   onClose();
                 }}
                 style={{

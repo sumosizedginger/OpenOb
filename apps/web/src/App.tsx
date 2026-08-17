@@ -62,6 +62,7 @@ export const App: React.FC = () => {
     vaultMode,
     isReadOnly,
     gatewayUrl,
+    gatewayReachable,
     backend,
     storage,
     entries,
@@ -650,6 +651,7 @@ export const App: React.FC = () => {
         vaultName={vaultName}
         vaultMode={vaultMode}
         isReadOnly={isReadOnly}
+        gatewayReachable={gatewayReachable}
         activePath={activeTabPath}
         parsedDoc={parsedDoc}
         saveStatus={saveStatus}

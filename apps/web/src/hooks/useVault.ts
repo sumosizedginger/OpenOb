@@ -22,7 +22,7 @@ import {
   OpenObGatewayClient,
   OpenObWorkspace,
   WorkspaceBackend,
-  GatewayError,
+  GatewayUnavailableError,
 } from '@okw/workspace';
 
 export interface OpenTab {
@@ -236,9 +236,10 @@ export function useVault() {
   const [activeTabPath, setActiveTabPath] = useState<VaultPath | null>(null);
   const [parsedDoc, setParsedDoc] = useState<ParsedDocument | null>(null);
   const [backlinks, setBacklinks] = useState<any[]>([]);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'modified' | 'conflict'>(
-    'saved'
-  );
+  const [saveStatus, setSaveStatus] = useState<
+    'saved' | 'saving' | 'modified' | 'conflict' | 'disconnected'
+  >('saved');
+  const [gatewayReachable, setGatewayReachable] = useState<boolean>(true);
   const [conflictData, setConflictData] = useState<{
     path: VaultPath;
     diskContent?: string;
@@ -260,6 +261,47 @@ export function useVault() {
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || null;
 
+  // Periodic gateway health check when in Gateway Mode (R3B-3)
+  useEffect(() => {
+    if (vaultMode !== 'gateway' || !gatewayConnected || !gatewayUrl) {
+      setGatewayReachable(true);
+      return;
+    }
+
+    let isMounted = true;
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${gatewayUrl}/health`, { method: 'GET' });
+        if (res.ok) {
+          if (isMounted) {
+            setGatewayReachable(true);
+            setSaveStatus((prev) => {
+              if (prev === 'disconnected') {
+                const active = openTabsRef.current.find((t) => t.path === activeTabPathRef.current);
+                return active?.isDirty ? 'modified' : 'saved';
+              }
+              return prev;
+            });
+          }
+        } else {
+          if (isMounted) {
+            setGatewayReachable(false);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setGatewayReachable(false);
+        }
+      }
+    };
+
+    const timer = setInterval(checkHealth, 2000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [vaultMode, gatewayConnected, gatewayUrl]);
+
   // Expose test and introspection hooks on window only in DEV/TEST environments
   useEffect(() => {
     if (
@@ -275,6 +317,7 @@ export function useVault() {
       (window as any).__disconnectGateway = disconnectGateway;
       (window as any).__refreshVault = refreshVault;
       (window as any).__openNote = openNote;
+      (window as any).__gatewayReachable = gatewayReachable;
       (window as any).__readStorage = async (p: string) => {
         return storage.readText(p);
       };
@@ -294,7 +337,7 @@ export function useVault() {
         delayMs = newDelay;
       };
     }
-  }, [storage, backend, vaultMode]);
+  }, [storage, backend, vaultMode, gatewayReachable]);
 
   // Coordinator listener (active ONLY in local mode)
   useEffect(() => {
@@ -461,43 +504,60 @@ export function useVault() {
   );
 
   // Disconnect from Gateway -> Switch to Local Memory Vault
-  const disconnectGateway = useCallback(async () => {
-    try {
-      sessionStorage.removeItem('openob_gateway_url');
-      sessionStorage.removeItem('openob_gateway_token');
-    } catch {}
+  const disconnectGateway = useCallback(
+    async (options?: { force?: boolean }): Promise<{ success: boolean; cancelled?: boolean }> => {
+      const hasDirtyTabs = openTabsRef.current.some((t) => t.isDirty);
+      if (hasDirtyTabs && !options?.force) {
+        const confirmDiscard =
+          typeof window !== 'undefined'
+            ? window.confirm('You have unsaved changes. Discard them and switch to local mode?')
+            : true;
+        if (!confirmDiscard) {
+          return { success: false, cancelled: true };
+        }
+      }
 
-    setGatewayConnected(false);
-    setGatewayToken(undefined);
-    setVaultMode('memory');
-    vaultModeRef.current = 'memory';
-    const memStorage = new MemoryVaultStorage('Open Knowledge Workspace');
-    const newWriter = new SafeWriter(memStorage);
-    const newIndex = new MemoryDocumentIndex();
-    const newWorkspace = new OpenObWorkspace({
-      storage: memStorage,
-      index: newIndex,
-      parser,
-      safeWriter: newWriter,
-      vaultName: 'Open Knowledge Workspace',
-    });
-    setStorage(memStorage);
-    setSafeWriter(newWriter);
-    coordinatorRef.current.setStorage(memStorage, newWriter);
-    const localBackend = new LocalWorkspaceBackend(newWorkspace);
-    setBackend(localBackend);
-    backendRef.current = localBackend;
-    setVaultName('Open Knowledge Workspace');
-    setOpenTabs([]);
-    setActiveTabPath(null);
-    setParsedDoc(null);
-    setBacklinks([]);
-    setConflictData(null);
+      try {
+        sessionStorage.removeItem('openob_gateway_url');
+        sessionStorage.removeItem('openob_gateway_token');
+      } catch {}
 
-    await memStorage.seed(DEFAULT_VAULT_SEED);
-    await refreshVault(memStorage, newIndex, localBackend);
-    await openNote('Welcome.md');
-  }, [parser]);
+      setGatewayConnected(false);
+      setGatewayReachable(true);
+      setGatewayToken(undefined);
+      setVaultMode('memory');
+      vaultModeRef.current = 'memory';
+      const memStorage = new MemoryVaultStorage('Open Knowledge Workspace');
+      const newWriter = new SafeWriter(memStorage);
+      const newIndex = new MemoryDocumentIndex();
+      const newWorkspace = new OpenObWorkspace({
+        storage: memStorage,
+        index: newIndex,
+        parser,
+        safeWriter: newWriter,
+        vaultName: 'Open Knowledge Workspace',
+      });
+      setStorage(memStorage);
+      setSafeWriter(newWriter);
+      coordinatorRef.current.setStorage(memStorage, newWriter);
+      const localBackend = new LocalWorkspaceBackend(newWorkspace);
+      setBackend(localBackend);
+      backendRef.current = localBackend;
+      setVaultName('Open Knowledge Workspace');
+      setOpenTabs([]);
+      setActiveTabPath(null);
+      setParsedDoc(null);
+      setBacklinks([]);
+      setConflictData(null);
+      setSaveStatus('saved');
+
+      await memStorage.seed(DEFAULT_VAULT_SEED);
+      await refreshVault(memStorage, newIndex, localBackend);
+      await openNote('Welcome.md');
+      return { success: true };
+    },
+    [parser]
+  );
 
   // Auto-connect or seed initial vault on mount
   useEffect(() => {
@@ -746,7 +806,19 @@ export function useVault() {
           setConflictData(null);
         }
       } catch (err: any) {
-        if (err instanceof GatewayError || err.status === 409 || err.code === 'CONFLICT') {
+        if (err.status === 401 || err.code === 'UNAUTHORIZED') {
+          setSaveStatus('modified');
+          alert('Gateway authentication failed (HTTP 401). Please check your authorization token.');
+        } else if (err.status === 403 || err.code === 'FORBIDDEN') {
+          setSaveStatus('modified');
+          alert('Read-only gateway: mutations are not permitted.');
+        } else if (err.status === 404 || err.code === 'NOT_FOUND') {
+          setSaveStatus('conflict');
+          setConflictData({ path: currentPath });
+        } else if (err.status === 413 || err.code === 'PAYLOAD_TOO_LARGE') {
+          setSaveStatus('modified');
+          alert('Payload too large (HTTP 413): note exceeds gateway maximum body size.');
+        } else if (err.status === 409 || err.code === 'CONFLICT') {
           setSaveStatus('conflict');
           try {
             const latest = await backendRef.current.readNote(currentPath);
@@ -754,12 +826,15 @@ export function useVault() {
           } catch {
             setConflictData({ path: currentPath });
           }
-        } else if (err.status === 403 || err.code === 'FORBIDDEN') {
-          setSaveStatus('modified');
-          alert('Read-only gateway: mutations are not permitted.');
-        } else if (err.status === 404 || err.code === 'NOT_FOUND') {
-          setSaveStatus('conflict');
-          setConflictData({ path: currentPath });
+        } else if (
+          err instanceof GatewayUnavailableError ||
+          err.status === 503 ||
+          err.code === 'GATEWAY_UNAVAILABLE' ||
+          err.name === 'TypeError'
+        ) {
+          setGatewayReachable(false);
+          setSaveStatus('disconnected');
+          console.error('Gateway unreachable:', err);
         } else {
           setSaveStatus('modified');
           console.error('Gateway save failed:', err);
@@ -1364,6 +1439,7 @@ export function useVault() {
     gatewayUrl,
     gatewayToken,
     gatewayConnected,
+    gatewayReachable,
     backend,
     storage,
     entries,
