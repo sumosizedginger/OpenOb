@@ -13,6 +13,7 @@ export interface GatewayCliOptions {
   host: string;
   port: number;
   token?: string;
+  scopes: string[];
 }
 
 export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
@@ -20,6 +21,7 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
   let host = '127.0.0.1';
   let port = parseInt(process.env.OPENOB_PORT || '4200', 10);
   let token = process.env.OPENOB_TOKEN || undefined;
+  let rawScopes = process.env.OPENOB_SCOPES || '';
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -31,6 +33,8 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
       host = argv[++i];
     } else if (arg === '--token' && i + 1 < argv.length) {
       token = argv[++i];
+    } else if (arg === '--scopes' && i + 1 < argv.length) {
+      rawScopes = argv[++i];
     } else if (!arg.startsWith('-') && !vaultPath) {
       vaultPath = arg;
     }
@@ -40,7 +44,14 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
     vaultPath = process.cwd();
   }
 
-  return { vaultPath, host, port, token };
+  const scopes = rawScopes
+    ? rawScopes
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : ['workspace.read', 'workspace.search'];
+
+  return { vaultPath, host, port, token, scopes };
 }
 
 export async function runGatewayProcess(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -84,12 +95,15 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
   process.stderr.write(`[OpenOb Gateway] Rebuilding index for vault "${vaultName}"...\n`);
   await rebuildVaultIndex(storage, index, parser);
 
+  const isReadOnly =
+    !options.scopes.includes('workspace.write') && !options.scopes.includes('properties.write');
+
   const workspace = new OpenObWorkspace({
     storage,
     index,
     parser,
     vaultName,
-    readOnly: true,
+    readOnly: isReadOnly,
   });
 
   try {
@@ -98,10 +112,11 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
       host: options.host,
       port: options.port,
       token,
+      scopes: options.scopes,
     });
 
     process.stdout.write(
-      `[OpenOb Gateway] Listening on ${gateway.url} (Vault: ${vaultName}, Read-Only: true)\n`
+      `[OpenOb Gateway] Listening on ${gateway.url} (Vault: ${vaultName}, Read-Only: ${isReadOnly}, Scopes: [${options.scopes.join(', ')}])\n`
     );
 
     const shutdown = async () => {

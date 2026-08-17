@@ -1,6 +1,7 @@
 import { VaultEntry } from '@okw/core';
 import {
   BacklinkDTO,
+  MutationResultDTO,
   NoteReadResult,
   OpenObWorkspace,
   SearchResultDTO,
@@ -13,9 +14,10 @@ export interface CliOptions {
   readonly url?: string;
   readonly token?: string;
   readonly args: string[];
+  readonly stdinContent?: string;
 }
 
-export const CLI_HELP_TEXT = `OpenOb Local CLI (Read-Only)
+export const CLI_HELP_TEXT = `OpenOb Local CLI
 
 Usage:
   openob info [--json] [--url <url>] [--token <token>]
@@ -23,6 +25,9 @@ Usage:
   openob read <path> [--json] [--url <url>] [--token <token>]
   openob search <query> [--json] [--url <url>] [--token <token>]
   openob backlinks <path> [--json] [--url <url>] [--token <token>]
+  openob create <path> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
+  openob update <path> --expected-version <token> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
+  openob set-property <path> <key> [value] --expected-version <token> [--json] [--url <url>] [--token <token>]
   openob help
 `;
 
@@ -39,27 +44,73 @@ export function handleHelpOrUnknown(
   return { exitCode: 1, output: errorMsg };
 }
 
+export async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
 export async function runCli(options: CliOptions): Promise<{ exitCode: number; output: string }> {
   const { workspace, args } = options;
   const isJson = args.includes('--json');
-  const filteredArgs = args.filter((a) => a !== '--json');
+
+  // Extract common flags
+  let expectedVersion: string | undefined;
+  let explicitContent: string | undefined;
+  const isStdin = args.includes('--stdin');
+  let explicitUrl: string | undefined;
+  let explicitToken: string | undefined;
+
+  const positionalArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json' || a === '--stdin') {
+      continue;
+    } else if (a === '--expected-version' && i + 1 < args.length) {
+      expectedVersion = args[++i];
+    } else if (a === '--content' && i + 1 < args.length) {
+      explicitContent = args[++i];
+    } else if (a === '--url' && i + 1 < args.length) {
+      explicitUrl = args[++i];
+    } else if (a === '--token' && i + 1 < args.length) {
+      explicitToken = args[++i];
+    } else {
+      positionalArgs.push(a);
+    }
+  }
+
+  let content = explicitContent;
+  if (isStdin) {
+    content = options.stdinContent !== undefined ? options.stdinContent : await readStdin();
+  }
 
   // If a direct in-memory workspace was provided, run against it (e.g. unit tests)
   if (workspace) {
-    return runCliDirect(workspace, filteredArgs, isJson);
+    return runCliDirect(workspace, positionalArgs, isJson, expectedVersion, content);
   }
 
   // Otherwise, connect via REST client to the running gateway (Gateway-Managed Mode)
-  const baseUrl = options.url || process.env.OPENOB_URL || 'http://127.0.0.1:4200';
-  const token = options.token || process.env.OPENOB_TOKEN;
+  const baseUrl = explicitUrl || options.url || process.env.OPENOB_URL || 'http://127.0.0.1:4200';
+  const token = explicitToken || options.token || process.env.OPENOB_TOKEN;
 
-  return runCliRemote(baseUrl, token, filteredArgs, isJson);
+  return runCliRemote(baseUrl, token, positionalArgs, isJson, expectedVersion, content);
 }
 
 async function runCliDirect(
   workspace: OpenObWorkspace,
   args: string[],
-  isJson: boolean
+  isJson: boolean,
+  expectedVersion?: string,
+  content?: string
 ): Promise<{ exitCode: number; output: string }> {
   const command = args[0];
 
@@ -128,6 +179,92 @@ async function runCliDirect(
         return { exitCode: 0, output };
       }
 
+      case 'create': {
+        const path = args[1];
+        if (!path) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing path argument. Usage: openob create <path> [--content <content>] [--stdin]',
+          };
+        }
+        const result = await workspace.createNote({
+          path,
+          content: content ?? '',
+        });
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Created note: ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
+      case 'update': {
+        const path = args[1];
+        if (!path) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing path argument. Usage: openob update <path> --expected-version <token> [--content <content>] [--stdin]',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for note update',
+          };
+        }
+        const result = await workspace.updateNote({
+          path,
+          content: content ?? '',
+          expectedVersion: { token: expectedVersion },
+        });
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Updated note: ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
+      case 'set-property': {
+        const path = args[1];
+        const key = args[2];
+        const rawVal = args[3];
+        if (!path || !key) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for property mutation',
+          };
+        }
+
+        let parsedVal: unknown = rawVal;
+        if (rawVal === undefined || rawVal === 'null') {
+          parsedVal = null;
+        } else {
+          try {
+            parsedVal = JSON.parse(rawVal);
+          } catch {
+            parsedVal = rawVal;
+          }
+        }
+
+        const result = await workspace.setProperty({
+          path,
+          key,
+          value: parsedVal,
+          expectedVersion: { token: expectedVersion },
+        });
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Set property "${key}" on ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
       case 'help':
       case '--help':
       case '-h':
@@ -147,7 +284,9 @@ async function runCliRemote(
   baseUrl: string,
   token: string | undefined,
   args: string[],
-  isJson: boolean
+  isJson: boolean,
+  expectedVersion?: string,
+  content?: string
 ): Promise<{ exitCode: number; output: string }> {
   const command = args[0];
 
@@ -156,7 +295,16 @@ async function runCliRemote(
     return handleHelpOrUnknown(command, isJson);
   }
 
-  const validCommands = new Set(['info', 'list', 'read', 'search', 'backlinks']);
+  const validCommands = new Set([
+    'info',
+    'list',
+    'read',
+    'search',
+    'backlinks',
+    'create',
+    'update',
+    'set-property',
+  ]);
   if (!validCommands.has(command)) {
     return handleHelpOrUnknown(command, isJson);
   }
@@ -170,11 +318,27 @@ async function runCliRemote(
 
   const cleanBase = baseUrl.replace(/\/+$/, '');
 
-  async function remoteFetch(apiPath: string): Promise<any> {
+  async function remoteFetch(
+    apiPath: string,
+    fetchMethod: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET',
+    body?: any
+  ): Promise<any> {
     const targetUrl = `${cleanBase}${apiPath}`;
+    const reqHeaders: Record<string, string> = { ...headers };
+    let reqBody: string | undefined;
+
+    if (body !== undefined) {
+      reqHeaders['Content-Type'] = 'application/json';
+      reqBody = JSON.stringify(body);
+    }
+
     let res: Response;
     try {
-      res = await fetch(targetUrl, { headers });
+      res = await fetch(targetUrl, {
+        method: fetchMethod,
+        headers: reqHeaders,
+        body: reqBody,
+      });
     } catch (err: any) {
       throw new Error(
         `Unable to connect to OpenOb Gateway at "${cleanBase}". Is the gateway running?\n(Start it with: npx openob-gateway <vault-path>)`,
@@ -257,6 +421,98 @@ async function runCliRemote(
             backlinks
               .map((b: BacklinkDTO) => `  - from ${b.sourcePath} (line ${b.line}): ${b.rawLink}`)
               .join('\n');
+        return { exitCode: 0, output };
+      }
+
+      case 'create': {
+        const path = args[1];
+        if (!path) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing path argument. Usage: openob create <path> [--content <content>] [--stdin]',
+          };
+        }
+        const result: MutationResultDTO = await remoteFetch('/api/v1/notes', 'POST', {
+          path,
+          content: content ?? '',
+        });
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Created note: ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
+      case 'update': {
+        const path = args[1];
+        if (!path) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing path argument. Usage: openob update <path> --expected-version <token> [--content <content>] [--stdin]',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for note update',
+          };
+        }
+        const result: MutationResultDTO = await remoteFetch(
+          `/api/v1/notes/${encodeURIComponent(path)}`,
+          'PUT',
+          {
+            content: content ?? '',
+            expectedVersion: { token: expectedVersion },
+          }
+        );
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Updated note: ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
+      case 'set-property': {
+        const path = args[1];
+        const key = args[2];
+        const rawVal = args[3];
+        if (!path || !key) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Missing arguments. Usage: openob set-property <path> <key> [value] --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for property mutation',
+          };
+        }
+
+        let parsedVal: unknown = rawVal;
+        if (rawVal === undefined || rawVal === 'null') {
+          parsedVal = null;
+        } else {
+          try {
+            parsedVal = JSON.parse(rawVal);
+          } catch {
+            parsedVal = rawVal;
+          }
+        }
+
+        const result: MutationResultDTO = await remoteFetch(
+          `/api/v1/notes/${encodeURIComponent(path)}/properties`,
+          'PATCH',
+          {
+            key,
+            value: parsedVal,
+            expectedVersion: { token: expectedVersion },
+          }
+        );
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Set property "${key}" on ${result.path} (version: ${result.currentVersion.token})`;
         return { exitCode: 0, output };
       }
 

@@ -346,45 +346,48 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
 
   it('TEST G: CLI Help & Unknown Command Process Invocations -> help/--help/-h/empty exit 0, unknown exits 1', async () => {
     // 1. `node CLI_BIN --help` -> exit 0
-    const helpFlagRes = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const helpFlagRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, '--help'], (err, stdout) => {
-        resolve({ code: err ? (err.code ?? 1) : 0, stdout });
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
       });
     });
     expect(helpFlagRes.code).toBe(0);
     expect(helpFlagRes.stdout).toContain('OpenOb Local CLI');
 
     // 2. `node CLI_BIN -h` -> exit 0
-    const shortHelpRes = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const shortHelpRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, '-h'], (err, stdout) => {
-        resolve({ code: err ? (err.code ?? 1) : 0, stdout });
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
       });
     });
     expect(shortHelpRes.code).toBe(0);
     expect(shortHelpRes.stdout).toContain('OpenOb Local CLI');
 
     // 3. `node CLI_BIN help` -> exit 0
-    const helpCmdRes = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const helpCmdRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, 'help'], (err, stdout) => {
-        resolve({ code: err ? (err.code ?? 1) : 0, stdout });
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
       });
     });
     expect(helpCmdRes.code).toBe(0);
     expect(helpCmdRes.stdout).toContain('OpenOb Local CLI');
 
     // 4. `node CLI_BIN` (no command) -> exit 0
-    const noCmdRes = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const noCmdRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN], (err, stdout) => {
-        resolve({ code: err ? (err.code ?? 1) : 0, stdout });
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout });
       });
     });
     expect(noCmdRes.code).toBe(0);
     expect(noCmdRes.stdout).toContain('OpenOb Local CLI');
 
     // 5. `node CLI_BIN unknown-command` -> exit 1 with error on stderr
-    const unknownRes = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+    const unknownRes = await new Promise<{ code: number; stderr: string }>((resolve) => {
       execFile(process.execPath, [CLI_BIN, 'invalid-unknown-cmd'], (err, stdout, stderr) => {
-        resolve({ code: err ? ((err.code as number) ?? 1) : 0, stderr: stderr || stdout });
+        resolve({
+          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          stderr: stderr || stdout,
+        });
       });
     });
     expect(unknownRes.code).toBe(1);

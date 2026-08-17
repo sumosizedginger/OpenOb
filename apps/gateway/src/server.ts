@@ -1,13 +1,21 @@
 import http from 'node:http';
 import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { ClientContext, OpenObWorkspace, toApiError, UnauthorizedError } from '@okw/workspace';
+import {
+  ClientContext,
+  InvalidRequestError,
+  OpenObWorkspace,
+  toApiError,
+  UnauthorizedError,
+} from '@okw/workspace';
 
 export interface GatewayOptions {
   readonly workspace: OpenObWorkspace;
   readonly host?: string;
   readonly port?: number;
   readonly token?: string;
+  readonly scopes?: string[];
+  readonly maxBodyBytes?: number;
 }
 
 export interface RunningGateway {
@@ -18,11 +26,54 @@ export interface RunningGateway {
   stop(): Promise<void>;
 }
 
+async function readJsonBody(
+  req: http.IncomingMessage,
+  maxBytes: number = 10 * 1024 * 1024
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const contentType = req.headers['content-type'];
+    if (contentType && !contentType.toLowerCase().includes('application/json')) {
+      reject(new InvalidRequestError('Content-Type must be application/json'));
+      return;
+    }
+
+    let body = '';
+    let bytes = 0;
+
+    req.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        req.destroy();
+        reject(
+          new InvalidRequestError(`Request body exceeds maximum size limit (${maxBytes} bytes)`)
+        );
+        return;
+      }
+      body += chunk.toString('utf8');
+    });
+
+    req.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        const parsed = JSON.parse(body);
+        resolve(parsed);
+      } catch (err: any) {
+        reject(new InvalidRequestError(`Malformed JSON payload: ${err.message}`));
+      }
+    });
+
+    req.on('error', reject);
+  });
+}
+
 /**
  * Creates and starts a local loopback gateway HTTP server for OpenOb.
  */
 export function createGatewayServer(options: GatewayOptions): http.Server {
-  const { workspace, token } = options;
+  const { workspace, token, scopes, maxBodyBytes } = options;
 
   const server = http.createServer(async (req, res) => {
     // Standard secure JSON headers
@@ -55,7 +106,7 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         JSON.stringify({
           status: 'ok',
           version: '0.1.0',
-          readOnly: true,
+          readOnly: workspace.readOnly,
           vault: workspace.vaultName,
         })
       );
@@ -91,7 +142,7 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
       }
     }
 
-    // Extract client identity context
+    // Extract client identity context (scopes are ALWAYS server-configured, never client-forged)
     const clientIdHeader = req.headers['x-openob-client-id'];
     const clientContext: ClientContext = {
       clientId: typeof clientIdHeader === 'string' ? clientIdHeader : undefined,
@@ -100,74 +151,72 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           ? req.headers['x-request-id']
           : undefined) ?? randomUUID(),
       timestamp: Date.now(),
-      scopes: ['workspace.read', 'workspace.search'],
+      scopes: scopes ?? ['workspace.read', 'workspace.search'],
     };
 
     // 3. Route Dispatch
     try {
-      if (method !== 'GET') {
-        res.statusCode = 405;
-        res.end(
-          JSON.stringify({
-            code: 'UNSUPPORTED',
-            message: `Method ${method} is not supported in read-only Phase 1`,
-          })
+      // POST /api/v1/notes (Create note)
+      if (pathname === '/api/v1/notes' && method === 'POST') {
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.createNote(body, clientContext);
+        res.statusCode = 201;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // PATCH /api/v1/notes/:path/properties (Set/remove property)
+      if (
+        pathname.startsWith('/api/v1/notes/') &&
+        pathname.endsWith('/properties') &&
+        method === 'PATCH'
+      ) {
+        const rawNoteSegment = pathname.slice(
+          '/api/v1/notes/'.length,
+          pathname.length - '/properties'.length
         );
-        return;
-      }
+        if (!rawNoteSegment) {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_REQUEST',
+              message: 'Note path must be specified',
+            })
+          );
+          return;
+        }
 
-      // GET /api/v1/workspace
-      if (pathname === '/api/v1/workspace') {
-        const info = await workspace.getWorkspaceInfo(clientContext);
-        res.statusCode = 200;
-        res.end(JSON.stringify(info));
-        return;
-      }
+        let decodedSegment: string;
+        try {
+          decodedSegment = decodeURIComponent(rawNoteSegment);
+        } catch {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_PATH',
+              message: `Malformed URI encoding in note path: "${rawNoteSegment}"`,
+            })
+          );
+          return;
+        }
 
-      // GET /api/v1/entries?path=...
-      if (pathname === '/api/v1/entries') {
-        const subPath = parsedUrl.searchParams.get('path') ?? '';
-        const entries = await workspace.listEntries(subPath, clientContext);
-        res.statusCode = 200;
-        res.end(JSON.stringify(entries));
-        return;
-      }
-
-      // GET /api/v1/search?q=...&tags=...&pathPrefix=...&limit=...&offset=...
-      if (pathname === '/api/v1/search') {
-        const q = parsedUrl.searchParams.get('q') ?? '';
-        const tagsParam = parsedUrl.searchParams.get('tags');
-        const tags = tagsParam
-          ? tagsParam
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean)
-          : undefined;
-        const pathPrefix = parsedUrl.searchParams.get('pathPrefix') ?? undefined;
-        const limitParam = parsedUrl.searchParams.get('limit');
-        const offsetParam = parsedUrl.searchParams.get('offset');
-
-        const limit = limitParam ? parseInt(limitParam, 10) : undefined;
-        const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
-
-        const results = await workspace.search(
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.setProperty(
           {
-            query: q,
-            tags,
-            pathPrefix,
-            limit: isNaN(limit!) ? undefined : limit,
-            offset: isNaN(offset!) ? undefined : offset,
+            path: decodedSegment,
+            key: body.key,
+            value: body.value,
+            expectedVersion: body.expectedVersion,
           },
           clientContext
         );
-
         res.statusCode = 200;
-        res.end(JSON.stringify(results));
+        res.end(JSON.stringify(result));
         return;
       }
 
-      // GET /api/v1/notes/...
-      if (pathname.startsWith('/api/v1/notes/')) {
+      // PUT /api/v1/notes/:path (Update note content)
+      if (pathname.startsWith('/api/v1/notes/') && method === 'PUT') {
         const rawNoteSegment = pathname.slice('/api/v1/notes/'.length);
         if (!rawNoteSegment) {
           res.statusCode = 400;
@@ -194,69 +243,167 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           return;
         }
 
-        // Subaction routes: /backlinks, /links, /properties, /graph-neighbors
-        const subactions = [
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.updateNote(
           {
-            suffix: '/backlinks',
-            handler: (p: string) => workspace.getBacklinks(p, clientContext),
+            path: decodedSegment,
+            content: body.content,
+            expectedVersion: body.expectedVersion,
           },
-          {
-            suffix: '/links',
-            handler: (p: string) => workspace.getOutgoingLinks(p, clientContext),
-          },
-          {
-            suffix: '/properties',
-            handler: (p: string) => workspace.getProperties(p, clientContext),
-          },
-          {
-            suffix: '/graph-neighbors',
-            handler: (p: string) => {
-              const maxDepthParam = parsedUrl.searchParams.get('maxDepth');
-              const maxDepth = maxDepthParam ? parseInt(maxDepthParam, 10) : undefined;
-              return workspace.getGraphNeighbors(
-                p,
-                { maxDepth: isNaN(maxDepth!) ? undefined : maxDepth },
-                clientContext
-              );
-            },
-          },
-        ];
-
-        const matchedSubaction = subactions.find((s) => decodedSegment.endsWith(s.suffix));
-
-        if (matchedSubaction) {
-          const targetNotePath = decodedSegment.slice(0, -matchedSubaction.suffix.length);
-
-          // Disambiguation: Check if the full decodedSegment is an existing note file
-          let isDirectNote = false;
-          try {
-            const meta = await workspace.getNoteMetadata(decodedSegment);
-            if (meta) isDirectNote = true;
-          } catch {
-            isDirectNote = false;
-          }
-
-          if (!isDirectNote) {
-            const subactionResult = await matchedSubaction.handler(targetNotePath);
-            res.statusCode = 200;
-            res.end(JSON.stringify(subactionResult));
-            return;
-          }
-        }
-
-        // Default: Read note
-        const note = await workspace.readNote(decodedSegment, clientContext);
+          clientContext
+        );
         res.statusCode = 200;
-        res.end(JSON.stringify(note));
+        res.end(JSON.stringify(result));
         return;
       }
 
-      // Not found
-      res.statusCode = 404;
+      // GET routes
+      if (method === 'GET') {
+        // GET /api/v1/workspace
+        if (pathname === '/api/v1/workspace') {
+          const info = await workspace.getWorkspaceInfo(clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(info));
+          return;
+        }
+
+        // GET /api/v1/entries?path=...
+        if (pathname === '/api/v1/entries') {
+          const subPath = parsedUrl.searchParams.get('path') ?? '';
+          const entries = await workspace.listEntries(subPath, clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(entries));
+          return;
+        }
+
+        // GET /api/v1/search?q=...&tags=...&pathPrefix=...&limit=...&offset=...
+        if (pathname === '/api/v1/search') {
+          const q = parsedUrl.searchParams.get('q') ?? '';
+          const tagsParam = parsedUrl.searchParams.get('tags');
+          const tags = tagsParam
+            ? tagsParam
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean)
+            : undefined;
+          const pathPrefix = parsedUrl.searchParams.get('pathPrefix') ?? undefined;
+          const limitParam = parsedUrl.searchParams.get('limit');
+          const offsetParam = parsedUrl.searchParams.get('offset');
+
+          const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
+
+          const results = await workspace.search(
+            {
+              query: q,
+              tags,
+              pathPrefix,
+              limit: isNaN(limit!) ? undefined : limit,
+              offset: isNaN(offset!) ? undefined : offset,
+            },
+            clientContext
+          );
+
+          res.statusCode = 200;
+          res.end(JSON.stringify(results));
+          return;
+        }
+
+        // GET /api/v1/notes/...
+        if (pathname.startsWith('/api/v1/notes/')) {
+          const rawNoteSegment = pathname.slice('/api/v1/notes/'.length);
+          if (!rawNoteSegment) {
+            res.statusCode = 400;
+            res.end(
+              JSON.stringify({
+                code: 'INVALID_REQUEST',
+                message: 'Note path must be specified',
+              })
+            );
+            return;
+          }
+
+          let decodedSegment: string;
+          try {
+            decodedSegment = decodeURIComponent(rawNoteSegment);
+          } catch {
+            res.statusCode = 400;
+            res.end(
+              JSON.stringify({
+                code: 'INVALID_PATH',
+                message: `Malformed URI encoding in note path: "${rawNoteSegment}"`,
+              })
+            );
+            return;
+          }
+
+          // Subaction routes: /backlinks, /links, /properties, /graph-neighbors
+          const subactions = [
+            {
+              suffix: '/backlinks',
+              handler: (p: string) => workspace.getBacklinks(p, clientContext),
+            },
+            {
+              suffix: '/links',
+              handler: (p: string) => workspace.getOutgoingLinks(p, clientContext),
+            },
+            {
+              suffix: '/properties',
+              handler: (p: string) => workspace.getProperties(p, clientContext),
+            },
+            {
+              suffix: '/graph-neighbors',
+              handler: (p: string) => {
+                const maxDepthParam = parsedUrl.searchParams.get('maxDepth');
+                const maxDepth = maxDepthParam ? parseInt(maxDepthParam, 10) : undefined;
+                return workspace.getGraphNeighbors(
+                  p,
+                  { maxDepth: isNaN(maxDepth!) ? undefined : maxDepth },
+                  clientContext
+                );
+              },
+            },
+          ];
+
+          const matchedSubaction = subactions.find((s) => decodedSegment.endsWith(s.suffix));
+
+          if (matchedSubaction) {
+            const targetNotePath = decodedSegment.slice(0, -matchedSubaction.suffix.length);
+
+            // Disambiguation: Check if the full decodedSegment is an existing note file
+            let isDirectNote = false;
+            try {
+              const meta = await workspace.getNoteMetadata(decodedSegment);
+              if (meta) isDirectNote = true;
+            } catch {
+              isDirectNote = false;
+            }
+
+            if (!isDirectNote) {
+              const subactionResult = await matchedSubaction.handler(targetNotePath);
+              res.statusCode = 200;
+              res.end(JSON.stringify(subactionResult));
+              return;
+            }
+          }
+
+          // Default: Read note
+          const note = await workspace.readNote(decodedSegment, clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(note));
+          return;
+        }
+      }
+
+      // Any other method or route
+      res.statusCode = method === 'GET' ? 404 : 405;
       res.end(
         JSON.stringify({
-          code: 'NOT_FOUND',
-          message: `Endpoint "${pathname}" not found`,
+          code: method === 'GET' ? 'NOT_FOUND' : 'UNSUPPORTED',
+          message:
+            method === 'GET'
+              ? `Endpoint "${pathname}" not found`
+              : `Method ${method} is not supported for "${pathname}"`,
         })
       );
     } catch (err) {

@@ -57,20 +57,55 @@ A vault operating with OpenOb has **strictly one authoritative writer** at any t
 
 ## 3. Why Direct Filesystem Bypass is Forbidden
 
-No adapter, tool, or external agent may directly call `fs.writeFile`, `storage.write`, `storage.remove`, `index.upsert`, or mutate YAML frontmatter independently.
+No adapter, tool, or external agent may directly call `fs.writeFile`, `storage.write`, `storage.remove`, `safeWriter.safeSave`, `index.upsert`, or mutate YAML frontmatter independently.
 
 **Bypassing `OpenObWorkspace` violates core system invariants:**
 
 1. **Concurrency Tokens & Optimistic Locking:** Safe saving relies on `FileVersion` tokens to prevent silent overwrites of user edits (`F-001`).
-2. **Deterministic Write Serialization:** In-flight saves and renames are sequenced via `NoteWriteCoordinator` to prevent ghost resurrection (`F-002`, `F-039`).
+2. **Deterministic Write Serialization:** In-flight saves and mutations are sequenced per-path via `withPathLock` and `NoteWriteCoordinator` to prevent races and ghost resurrection (`F-002`, `F-039`).
 3. **Atomic Commit & EOL Preservation:** File mutations must preserve line endings (CRLF vs LF) and UTF-8 BOM byte fidelity (`F-027`, `F-034`).
 4. **Disposable Index Parity:** Document indexing must remain 100% synchronized and derived from canonical Markdown (`F-003`, `F-004`).
+5. **Truthful Index Degradation:** Canonical Markdown is the single source of truth. A derived index error after a durable disk write marks index health as degraded without rolling back durable Markdown or claiming the write failed.
 
 ---
 
-## 4. REST API Reference (Phase 1 — Read-Only)
+## 4. Capability Scopes & Authorization Model
 
-All endpoints bind strictly to loopback (`127.0.0.1`) by default. In Phase 1, the API is **strictly read-only**; all mutating HTTP verbs (`POST`, `PUT`, `DELETE`, `PATCH`) return `405 UNSUPPORTED`.
+External operations are gated by explicit capability scopes. **The gateway server configuration—not client request headers—grants capability scopes.**
+
+### Supported Scopes
+
+| Scope              | Description                                                                             | Phase    |
+| :----------------- | :-------------------------------------------------------------------------------------- | :------- |
+| `workspace.read`   | Read note contents, metadata, backlinks, outgoing links, properties, directory listings | Phase 1  |
+| `workspace.search` | Execute lexical query and tag search across the vault index                             | Phase 1  |
+| `workspace.write`  | Create new notes and update body content of existing notes                              | Phase 2A |
+| `properties.write` | Set or remove frontmatter properties on existing notes                                  | Phase 2A |
+| `workspace.rename` | Rename notes and update inbound wikilinks (Deferred)                                    | Phase 2B |
+| `workspace.delete` | Delete notes from vault (Deferred)                                                      | Phase 2B |
+
+### Default Safe Configuration
+
+When started normally without explicit flags, the gateway defaults to **read-only**:
+
+```bash
+npx openob-gateway /path/to/vault
+# Scopes: [workspace.read, workspace.search]
+```
+
+To enable mutation capabilities, explicit `--scopes` must be supplied:
+
+```bash
+npx openob-gateway /path/to/vault --scopes workspace.read,workspace.search,workspace.write,properties.write
+# Or via environment variable:
+# OPENOB_SCOPES=workspace.read,workspace.search,workspace.write,properties.write
+```
+
+---
+
+## 5. REST API Reference
+
+All endpoints bind strictly to loopback (`127.0.0.1`).
 
 ### Base URL
 
@@ -78,123 +113,53 @@ All endpoints bind strictly to loopback (`127.0.0.1`) by default. In Phase 1, th
 
 ### Endpoints
 
-| Method | Route                                                | Description                                           | Auth Required |
-| :----- | :--------------------------------------------------- | :---------------------------------------------------- | :------------ |
-| `GET`  | `/health`                                            | Server status and vault identity                      | No            |
-| `GET`  | `/api/v1/workspace`                                  | Workspace metadata, note counts, and capabilities     | Yes           |
-| `GET`  | `/api/v1/entries?path=`                              | List files and directories at path                    | Yes           |
-| `GET`  | `/api/v1/notes/:path`                                | Read note metadata, headings, wikilinks, and raw body | Yes           |
-| `GET`  | `/api/v1/search?q=&tags=&pathPrefix=&limit=&offset=` | Search notes with lexical query and optional filters  | Yes           |
-| `GET`  | `/api/v1/notes/:path/backlinks`                      | Retrieve incoming backlinks referencing the note      | Yes           |
-| `GET`  | `/api/v1/notes/:path/links`                          | Retrieve outgoing wikilinks and resolution targets    | Yes           |
-| `GET`  | `/api/v1/notes/:path/properties`                     | Retrieve YAML frontmatter properties                  | Yes           |
-| `GET`  | `/api/v1/notes/:path/graph-neighbors`                | Retrieve local 1-hop graph structure                  | Yes           |
-
-### Route Disambiguation
-
-For endpoints ending with subaction suffixes (`/backlinks`, `/links`, `/properties`, `/graph-neighbors`):
-
-- If the requested path resolves to an existing note file (e.g. `Sub/backlinks.md` or `Sub/backlinks`), the gateway prioritizes reading the direct note file.
-- Otherwise, the path prefix before the suffix is treated as the target note for the subaction (e.g. `/api/v1/notes/Welcome.md/backlinks`).
+| Method  | Route                                                | Description                                                      | Required Scope     | Auth Required |
+| :------ | :--------------------------------------------------- | :--------------------------------------------------------------- | :----------------- | :------------ |
+| `GET`   | `/health`                                            | Server status, vault name, readOnly status                       | None               | No            |
+| `GET`   | `/api/v1/workspace`                                  | Workspace metadata, capabilities, and index health               | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/entries?path=`                              | List files and directories at subpath                            | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/notes/:path`                                | Read note metadata, headings, wikilinks, properties, raw body    | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/search?q=&tags=&pathPrefix=&limit=&offset=` | Search notes with lexical query and optional filters             | `workspace.search` | Yes           |
+| `GET`   | `/api/v1/notes/:path/backlinks`                      | Retrieve incoming backlinks referencing the note                 | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/notes/:path/links`                          | Retrieve outgoing wikilinks and resolution targets               | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/notes/:path/properties`                     | Retrieve YAML frontmatter properties                             | `workspace.read`   | Yes           |
+| `GET`   | `/api/v1/notes/:path/graph-neighbors`                | Retrieve local 1-hop graph structure                             | `workspace.read`   | Yes           |
+| `POST`  | `/api/v1/notes`                                      | Create a new note (fails if note exists; expectedVersion=null)   | `workspace.write`  | Yes           |
+| `PUT`   | `/api/v1/notes/:path`                                | Update note body content with optimistic concurrency control     | `workspace.write`  | Yes           |
+| `PATCH` | `/api/v1/notes/:path/properties`                     | Set or remove a frontmatter property with optimistic concurrency | `properties.write` | Yes           |
 
 ---
 
-## 5. Authentication & Capability Model
+## 6. CLI Usage
 
-### Bearer Token Authentication
-
-When a token is configured or generated on startup, all `/api/v1/*` endpoints require authentication via:
-
-- `Authorization: Bearer <TOKEN>`
-- or `X-OpenOb-Token: <TOKEN>`
-
-Authentication performs constant-time buffer comparison (`crypto.timingSafeEqual`) to prevent timing side-channels. Requests without valid credentials receive `401 UNAUTHORIZED`.
-
-> [!NOTE]
-> If started without a token option or `OPENOB_TOKEN` environment variable, the gateway generates a secure random 32-byte hex token on startup and prints it to `stderr`. If explicitly running in tokenless mode, all loopback callers on `127.0.0.1` are trusted.
-
-### Public Health Endpoint
-
-`GET /health` is public and unauthenticated, returning server status, read-only state, and vault identity:
-
-```json
-{
-  "status": "ok",
-  "version": "0.1.0",
-  "readOnly": true,
-  "vault": "my-vault"
-}
-```
-
-### Capability Scopes (Phase 1 vs Future)
-
-- **Phase 1 Active Scopes:**
-  - `workspace.read` — View workspace metadata, list entries, read notes, inspect links & properties.
-  - `workspace.search` — Execute full-text and tag queries across the index.
-- **Phase 2 Reserved Scopes:**
-  - `workspace.write` — Create and update notes via SafeWriter OCC.
-  - `workspace.rename` — Safely rename notes with vault-wide link refactoring.
-  - `workspace.delete` — Safely delete notes with coordinator sequencing.
-  - `properties.write` — Mutate frontmatter properties.
-  - `admin` — Rebuild derived indexes and manage capabilities.
-
-### Client Identity Context
-
-Callers can supply an optional client identifier:
-
-- `X-OpenOb-Client-Id: <client-id>` (e.g. `claude-code`, `reasonix-agent`, `hermes`)
-- `X-Request-Id: <uuid>`
-
----
-
-## 6. Model Context Protocol (MCP) Adapter
-
-`@okw/workspace` provides protocol-neutral tool definitions and an in-process dispatcher (`handleMcpToolCall`):
-
-- `openob_workspace_info`: Retrieve workspace status and note count.
-- `openob_list_entries`: List files and subfolders.
-- `openob_read_note`: Read full note with metadata.
-- `openob_search`: Query documents by keyword or tag.
-- `openob_get_backlinks`: Retrieve incoming backlinks.
-- `openob_get_properties`: Retrieve structured YAML properties.
-
-> [!NOTE]
-> Phase 1 delivers the protocol-neutral tool declarations and dispatcher function; the live MCP server transport (stdio/SSE) is deferred to a future phase.
-
-The MCP layer is a thin adapter over `OpenObWorkspace` and contains zero independent storage or index logic.
-
----
-
-## 7. Local CLI Tool & Executable Launcher
-
-The `@okw/gateway` package includes runnable executables:
-
-### Running the Gateway Process
+The `openob` CLI binary operates strictly as a REST client over HTTP loopback.
 
 ```bash
-# Start gateway over a local vault
-npx openob-gateway /path/to/vault --port 4200 --token <my-token>
+# Read operations
+openob info --json
+openob list Notes --json
+openob read Notes/Welcome.md --json
+openob search "Architecture" --json
+openob backlinks Notes/Welcome.md --json
+
+# Mutation operations (requires running gateway with write scopes)
+openob create Notes/NewNote.md --content "Hello World" --json
+cat content.md | openob update Notes/NewNote.md --expected-version <token> --stdin --json
+openob set-property Notes/NewNote.md status "published" --expected-version <token> --json
 ```
 
-### Running CLI Commands
+---
 
-```bash
-npx openob info --vault /path/to/vault [--json]
-npx openob list [subpath] --vault /path/to/vault [--json]
-npx openob read <path> --vault /path/to/vault [--json]
-npx openob search <query> --vault /path/to/vault [--json]
-npx openob backlinks <path> --vault /path/to/vault [--json]
-```
+## 7. Protocol-Neutral MCP Tools
 
-**Stream Conventions for Agents:**
-
-- **`stdout`**: Clean, machine-readable JSON data (when `--json` is supplied) or standard text command results.
-- **`stderr`**: Startup logs, token notifications, and diagnostic error messages.
-- Nonzero exit codes (`exit 1`) are returned on failure.
-
-## 8. Separation from `sumo-sized-api`
-
-> [!IMPORTANT]
-> `sumo-sized-api` is a separate external FastAPI telemetry service repository.
-> **`sumo-sized-api` is NOT the OpenOb gateway.**
-> The OpenOb gateway is a pure TypeScript/Node.js local-first application within the OpenOb repository providing direct application-service access to OpenOb vaults.
+| Tool Name               | Description                                 | Required Scope     |
+| :---------------------- | :------------------------------------------ | :----------------- |
+| `openob_workspace_info` | Retrieve vault summary and capabilities     | `workspace.read`   |
+| `openob_list_entries`   | List entries in a directory                 | `workspace.read`   |
+| `openob_read_note`      | Read full note content and metadata         | `workspace.read`   |
+| `openob_search`         | Search vault notes                          | `workspace.search` |
+| `openob_get_backlinks`  | Retrieve backlinks pointing to note         | `workspace.read`   |
+| `openob_get_properties` | Retrieve YAML frontmatter properties        | `workspace.read`   |
+| `openob_create_note`    | Create a new note                           | `workspace.write`  |
+| `openob_update_note`    | Update note content with expectedVersion    | `workspace.write`  |
+| `openob_set_property`   | Set or remove property with expectedVersion | `properties.write` |

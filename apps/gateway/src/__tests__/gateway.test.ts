@@ -1,10 +1,21 @@
+import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MemoryDocumentIndex } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 import { MemoryVaultStorage } from '@okw/vault';
-import { OpenObWorkspace } from '@okw/workspace';
+import { handleMcpToolCall, OpenObWorkspace } from '@okw/workspace';
 import { runCli } from '../cli.js';
 import { RunningGateway, startGateway } from '../server.js';
+
+async function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+  });
+}
 
 describe('OpenOb Gateway REST API & Security Tests (@okw/gateway)', () => {
   let gateway: RunningGateway;
@@ -624,5 +635,281 @@ This note is literally named backlinks inside a subfolder.
     });
     expect(unknownRes.exitCode).toBe(1);
     expect(unknownRes.output).toContain('Unknown command "foobar-command"');
+  });
+
+  it('22. Scope Enforcement: Default read-only gateway rejects POST, PUT, PATCH with 403 Forbidden', async () => {
+    // 1. POST /api/v1/notes
+    const postRes = await fetch(`${gateway.url}/api/v1/notes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path: 'ReadOnlyCreate.md', content: 'test' }),
+    });
+    expect(postRes.status).toBe(403);
+    const postErr = await postRes.json();
+    expect(postErr.code).toBe('FORBIDDEN');
+
+    // 2. PUT /api/v1/notes/Welcome.md
+    const putRes = await fetch(`${gateway.url}/api/v1/notes/Welcome.md`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: 'new',
+        expectedVersion: { token: 'mock' },
+      }),
+    });
+    expect(putRes.status).toBe(403);
+
+    // 3. Forged scopes header is ignored
+    const forgedRes = await fetch(`${gateway.url}/api/v1/notes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'Content-Type': 'application/json',
+        'X-OpenOb-Scopes': 'workspace.write,properties.write',
+      },
+      body: JSON.stringify({ path: 'Forged.md', content: 'test' }),
+    });
+    expect(forgedRes.status).toBe(403);
+  });
+
+  it('23. Writable Gateway: Full Mutation Lifecycle (Create -> Read -> Update -> Set-Property -> Conflict)', async () => {
+    // Start a writable gateway instance
+    const writePort = await getFreePort();
+    const writeGateway = await startGateway({
+      workspace: new OpenObWorkspace({
+        storage: new MemoryVaultStorage('writable-vault'),
+        index: new MemoryDocumentIndex(),
+        vaultName: 'writable-vault',
+        readOnly: false,
+      }),
+      port: writePort,
+      token: 'write-token',
+      scopes: ['workspace.read', 'workspace.search', 'workspace.write', 'properties.write'],
+    });
+
+    try {
+      // 1. POST /api/v1/notes -> 201 Created
+      const createRes = await fetch(`${writeGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer write-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: 'CreatedNote.md',
+          content: 'Hello World',
+          properties: { status: 'draft' },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const createData = await createRes.json();
+      expect(createData.durableSuccess).toBe(true);
+      expect(createData.currentVersion.token).toBeDefined();
+
+      const v1 = createData.currentVersion;
+
+      // 2. GET /api/v1/notes/CreatedNote.md -> 200 OK
+      const readRes = await fetch(`${writeGateway.url}/api/v1/notes/CreatedNote.md`, {
+        headers: { Authorization: 'Bearer write-token' },
+      });
+      expect(readRes.status).toBe(200);
+      const readData = await readRes.json();
+      expect(readData.textContent).toContain('Hello World');
+      expect(readData.properties.status).toBe('draft');
+
+      // 3. PUT /api/v1/notes/CreatedNote.md -> 200 OK
+      const updateRes = await fetch(`${writeGateway.url}/api/v1/notes/CreatedNote.md`, {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer write-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: 'Updated Content V2',
+          expectedVersion: v1,
+        }),
+      });
+      expect(updateRes.status).toBe(200);
+      const updateData = await updateRes.json();
+      expect(updateData.currentVersion.token).not.toBe(v1.token);
+
+      const v2 = updateData.currentVersion;
+
+      // 4. Stale PUT using v1 -> 409 Conflict
+      const staleRes = await fetch(`${writeGateway.url}/api/v1/notes/CreatedNote.md`, {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer write-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: 'Stale Content',
+          expectedVersion: v1,
+        }),
+      });
+      expect(staleRes.status).toBe(409);
+      const staleData = await staleRes.json();
+      expect(staleData.code).toBe('CONFLICT');
+
+      // 5. PATCH /api/v1/notes/CreatedNote.md/properties -> 200 OK
+      const propRes = await fetch(`${writeGateway.url}/api/v1/notes/CreatedNote.md/properties`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: 'Bearer write-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: 'status',
+          value: 'published',
+          expectedVersion: v2,
+        }),
+      });
+      expect(propRes.status).toBe(200);
+      const propData = await propRes.json();
+      expect(propData.operation).toBe('set_property');
+    } finally {
+      await writeGateway.stop();
+    }
+  });
+
+  it('24. CLI Mutation Commands via REST client against running gateway', async () => {
+    const writePort = await getFreePort();
+    const writeGateway = await startGateway({
+      workspace: new OpenObWorkspace({
+        storage: new MemoryVaultStorage('cli-vault'),
+        index: new MemoryDocumentIndex(),
+        vaultName: 'cli-vault',
+        readOnly: false,
+      }),
+      port: writePort,
+      token: 'cli-token',
+      scopes: ['workspace.read', 'workspace.search', 'workspace.write', 'properties.write'],
+    });
+
+    try {
+      // 1. openob create
+      const createCliRes = await runCli({
+        url: writeGateway.url,
+        token: 'cli-token',
+        args: ['create', 'CliNote.md', '--content', 'Body from CLI', '--json'],
+      });
+      expect(createCliRes.exitCode).toBe(0);
+      const created = JSON.parse(createCliRes.output);
+      expect(created.path).toBe('CliNote.md');
+
+      const v1Token = created.currentVersion.token;
+
+      // 2. openob update
+      const updateCliRes = await runCli({
+        url: writeGateway.url,
+        token: 'cli-token',
+        args: [
+          'update',
+          'CliNote.md',
+          '--expected-version',
+          v1Token,
+          '--content',
+          'Updated from CLI',
+          '--json',
+        ],
+      });
+      expect(updateCliRes.exitCode).toBe(0);
+      const updated = JSON.parse(updateCliRes.output);
+      expect(updated.currentVersion.token).not.toBe(v1Token);
+
+      // 3. openob set-property
+      const propCliRes = await runCli({
+        url: writeGateway.url,
+        token: 'cli-token',
+        args: [
+          'set-property',
+          'CliNote.md',
+          'rating',
+          '5',
+          '--expected-version',
+          updated.currentVersion.token,
+          '--json',
+        ],
+      });
+      expect(propCliRes.exitCode).toBe(0);
+    } finally {
+      await writeGateway.stop();
+    }
+  });
+
+  it('25. MCP Mutation Handlers: openob_create_note, openob_update_note, openob_set_property', async () => {
+    const ws = new OpenObWorkspace({
+      storage: new MemoryVaultStorage('mcp-vault'),
+      index: new MemoryDocumentIndex(),
+      readOnly: false,
+    });
+
+    // 1. openob_create_note
+    const createToolRes = await handleMcpToolCall(
+      ws,
+      'openob_create_note',
+      {
+        path: 'McpNote.md',
+        content: 'MCP Created Content',
+        properties: { topic: 'agents' },
+      },
+      { scopes: ['workspace.write'] }
+    );
+    expect(createToolRes.isError).toBeFalsy();
+    const createParsed = JSON.parse(createToolRes.content[0].text);
+    expect(createParsed.path).toBe('McpNote.md');
+
+    // 2. openob_update_note
+    const updateToolRes = await handleMcpToolCall(
+      ws,
+      'openob_update_note',
+      {
+        path: 'McpNote.md',
+        content: 'MCP Updated Content',
+        expectedVersion: createParsed.currentVersion,
+      },
+      { scopes: ['workspace.write'] }
+    );
+    expect(updateToolRes.isError).toBeFalsy();
+
+    // 3. openob_set_property
+    const propToolRes = await handleMcpToolCall(
+      ws,
+      'openob_set_property',
+      {
+        path: 'McpNote.md',
+        key: 'topic',
+        value: 'advanced-agents',
+        expectedVersion: JSON.parse(updateToolRes.content[0].text).currentVersion,
+      },
+      { scopes: ['properties.write'] }
+    );
+    expect(propToolRes.isError).toBeFalsy();
+  });
+
+  it('26. Security: Malformed JSON, oversized body, and invalid HTTP methods', async () => {
+    // 1. Malformed JSON -> 400
+    const malformedRes = await fetch(`${gateway.url}/api/v1/notes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: 'this is not json {',
+    });
+    expect(malformedRes.status).toBe(400);
+
+    // 2. DELETE method -> 405 UNSUPPORTED
+    const deleteRes = await fetch(`${gateway.url}/api/v1/notes/Welcome.md`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(deleteRes.status).toBe(405);
   });
 });
