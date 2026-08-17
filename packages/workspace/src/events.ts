@@ -41,6 +41,59 @@ export type EventReplayResult =
   | { readonly reset: false; readonly events: WorkspaceChangeEvent[] }
   | { readonly reset: true; readonly reason: string };
 
+/**
+ * Encodes a deterministic, instance-aware SSE event replay cursor in format `<serverInstanceId>:<sequence>`.
+ */
+export function encodeEventCursor(serverInstanceId: string, sequence: number): string {
+  return `${serverInstanceId}:${sequence}`;
+}
+
+export interface ParsedEventCursor {
+  readonly serverInstanceId?: string;
+  readonly sequence: number;
+  readonly isLegacy: boolean;
+}
+
+/**
+ * Parses an incoming Last-Event-ID or query cursor.
+ * Handles `<serverInstanceId>:<seq>`, legacy `evt_<seq>_<rand>`, and plain integer `<seq>`.
+ */
+export function parseEventCursor(cursor: string | null | undefined): ParsedEventCursor | null {
+  if (!cursor || typeof cursor !== 'string') return null;
+  const trimmed = cursor.trim();
+  if (!trimmed || trimmed.length > 256) return null; // Bounded input size
+
+  // Format 1: <serverInstanceId>:<sequence>
+  if (trimmed.includes(':')) {
+    const colonIdx = trimmed.lastIndexOf(':');
+    const instanceId = trimmed.slice(0, colonIdx);
+    const seqStr = trimmed.slice(colonIdx + 1);
+    const seq = parseInt(seqStr, 10);
+    if (!isNaN(seq) && seq >= 0 && instanceId.length > 0) {
+      return { serverInstanceId: instanceId, sequence: seq, isLegacy: false };
+    }
+    return null;
+  }
+
+  // Format 2: legacy "evt_<seq>_<rand>"
+  if (trimmed.startsWith('evt_')) {
+    const parts = trimmed.split('_');
+    const seq = parseInt(parts[1], 10);
+    if (!isNaN(seq) && seq >= 0) {
+      return { sequence: seq, isLegacy: true };
+    }
+    return null;
+  }
+
+  // Format 3: plain integer "<seq>"
+  const plainSeq = parseInt(trimmed, 10);
+  if (!isNaN(plainSeq) && plainSeq >= 0 && String(plainSeq) === trimmed) {
+    return { sequence: plainSeq, isLegacy: true };
+  }
+
+  return null;
+}
+
 function generateId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -112,26 +165,45 @@ export class WorkspaceEventPublisher {
 
   /**
    * Replay missed events starting after lastSequence.
-   * If lastSequence is 0, returns empty list (client wants to start receiving from now).
-   * If lastSequence is older than buffer's oldest event, or serverInstanceId doesn't match, returns reset.
+   * If lastSequence is 0, returns empty list (fresh connection).
+   * If clientServerInstanceId doesn't match this process, or requested sequence is older than
+   * the retained ring buffer / comes from an unverified legacy run, returns reset.
    */
   getEventsSince(lastSequence: number, clientServerInstanceId?: string): EventReplayResult {
+    // 1. Explicit server instance mismatch -> reset due to server restart
     if (clientServerInstanceId && clientServerInstanceId !== this.serverInstanceId) {
       return { reset: true, reason: 'server_restarted' };
     }
 
+    // 2. Fresh subscription (lastSequence <= 0)
     if (lastSequence <= 0) {
       return { reset: false, events: [] };
     }
 
-    if (lastSequence >= this.sequenceCounter) {
+    // 3. If no instance ID was provided (legacy cursor), fail safe on fresh/mismatched runs:
+    // If current instance sequenceCounter < lastSequence or buffer is empty, it came from prior run.
+    if (!clientServerInstanceId) {
+      if (this.sequenceCounter < lastSequence || this.buffer.length === 0) {
+        return { reset: true, reason: 'server_restarted' };
+      }
+    }
+
+    // 4. If client requested sequence ahead of current process sequenceCounter
+    if (lastSequence > this.sequenceCounter) {
+      return { reset: true, reason: 'server_restarted' };
+    }
+
+    // 5. Client is already up to date with latest sequence on this instance
+    if (lastSequence === this.sequenceCounter) {
       return { reset: false, events: [] };
     }
 
+    // 6. Buffer is empty
     if (this.buffer.length === 0) {
       return { reset: true, reason: 'replay_window_expired' };
     }
 
+    // 7. Check if requested sequence has fallen outside retained ring buffer window
     const oldestSeqInBuffer = this.buffer[0].sequence;
     if (lastSequence < oldestSeqInBuffer - 1) {
       return { reset: true, reason: 'replay_window_expired' };

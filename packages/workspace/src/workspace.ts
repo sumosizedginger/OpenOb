@@ -193,6 +193,37 @@ export class OpenObWorkspace {
   }
 
   /**
+   * Rebuilds the derived document index from canonical markdown files in storage.
+   * Emits 'index.recovered' change event upon successful rebuild.
+   */
+  async rebuildIndex(context?: ClientContext): Promise<{ count: number; status: 'verified' }> {
+    this.checkCapability('workspace.read', context);
+    const entries = await this.storage.list('', true);
+    const docs: any[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory && entry.path.endsWith('.md')) {
+        const snapshot = await this.storage.read(entry.path);
+        const text =
+          snapshot.textContent ??
+          (typeof snapshot.content === 'string'
+            ? snapshot.content
+            : new TextDecoder().decode(snapshot.content));
+        const parsed = await this.parser.parse(entry.path, text, snapshot.version.hash);
+        docs.push(parsed);
+      }
+    }
+    await this.index.rebuild(docs);
+    this.indexHealth = 'verified';
+    this.eventPublisher.publish({
+      type: 'index.recovered',
+      indexStatus: 'verified',
+      requestId: context?.requestId,
+      clientId: context?.clientId,
+    });
+    return { count: docs.length, status: 'verified' };
+  }
+
+  /**
    * Lists entries within a vault directory.
    */
   async listEntries(subPath = '', context?: ClientContext): Promise<VaultEntry[]> {

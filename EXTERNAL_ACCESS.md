@@ -288,10 +288,18 @@ Gateway-Managed Web UI (streaming fetch)
 ### Protocol & Guarantees
 
 1. **Application-Level Event Authority:** Emitted exclusively by `OpenObWorkspace` after durable canonical write and index synchronization have succeeded.
-2. **Strict Monotonic Sequence & Ring Buffer:** Every process maintains a strictly monotonic sequence counter and a bounded ring buffer (default 1024 events).
-3. **Reconnection & Resumption:** Clients reconnect with `Last-Event-ID: <id>`. If within the buffer window, missed events are replayed in order. If expired or across gateway restart, `event: stream.reset` is sent, triggering a clean vault refresh.
+2. **Instance-Aware Replay Cursor (`<serverInstanceId>:<sequence>`):**
+   - The SSE stream `id:` header emits a deterministic, instance-aware cursor formatted as `<serverInstanceId>:<sequence>` (e.g. `550e8400-e29b-41d4-a716-446655440000:17`).
+   - The semantic `eventId` (e.g. `evt_17_abc12345`) remains inside the event payload for audit/deduplication.
+   - Clients send the cursor on reconnection via the standard `Last-Event-ID` header (or `?lastEventId=` query param).
+3. **Reconnection & Safe Resynchronization:**
+   - **Same Server Instance + Retained Sequence:** Missed events are replayed strictly in order (`{ reset: false, events: [...] }`).
+   - **Same Server Instance + Expired Sequence:** When requested sequence has fallen outside the bounded ring buffer (1024 events), returns `event: stream.reset` with `reason: replay_window_expired`.
+   - **Different Server Instance (Gateway Restart):** When client reconnects to a restarted gateway process with a different `serverInstanceId`, returns `event: stream.reset` with `reason: server_restarted`. The web client triggers a clean full vault refresh.
+   - **Legacy Cursor Compatibility (`evt_<seq>_<rand>`):** Parsed safely. If unverified across process restarts, fails safe by emitting `event: stream.reset` (`server_restarted`).
 4. **Bearer Token Safety:** The browser client uses streaming `fetch()` with the `Authorization: Bearer <token>` header, avoiding exposing credentials in URL query strings or browser access logs.
 5. **Human Buffer Protection:**
    - **Clean Open Note:** Auto-updates immediately to authoritative latest V2 content.
    - **Dirty Open Note:** 100% preserves human buffer in editor, never auto-saves or auto-overwrites, surfaces conflict status, and preserves OCC 409 protection.
    - **External Delete / Rename:** Clean tabs are closed/migrated; dirty tabs preserve user content without ghost creation or resurrection.
+   - **Index Degradation & Recovery:** Truthful `index.degraded` event is emitted if derived index upsert fails after canonical write commits, and `index.recovered` is emitted upon successful rebuild.

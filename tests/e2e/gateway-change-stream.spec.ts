@@ -257,4 +257,75 @@ Initial clean text.
       timeout: 10000,
     });
   });
+
+  test('5. Gateway Restart Resync: browser reconnects across gateway restart, receives stream.reset, and keeps OCC/buffer safety', async ({
+    page,
+  }) => {
+    // 1. Open Welcome note and verify initial text
+    await expect(page.locator('.cm-content')).toContainText(
+      'This note demonstrates real-time changes'
+    );
+
+    // 2. Dirty edit in editor without saving
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type('\n\nHuman Unsaved Work Across Restart.');
+    await expect(page.locator('.tab-bar .tab.active .tab-dirty-indicator')).toBeVisible({
+      timeout: 5000,
+    });
+
+    // 3. Stop Gateway A
+    const port = (runningGateway.server.address() as net.AddressInfo).port;
+    await runningGateway.stop();
+    await new Promise((r) => setTimeout(r, 100));
+
+    // 4. Start Gateway B on same vault and same port
+    const parser = new DefaultDocumentParser();
+    const index = new MemoryDocumentIndex();
+    await rebuildVaultIndex(storage, index, parser);
+    const safeWriter = new SafeWriter(storage);
+
+    workspace = new OpenObWorkspace({
+      storage,
+      index,
+      parser,
+      safeWriter,
+      readOnly: false,
+      vaultName: 'E2E-Stream-Vault',
+    });
+
+    runningGateway = await startGateway({
+      workspace,
+      port,
+      token: TEST_TOKEN,
+    });
+    gatewayUrl = runningGateway.url;
+
+    agentClient = new OpenObGatewayClient({
+      url: gatewayUrl,
+      token: TEST_TOKEN,
+      clientId: 'restart-test-agent',
+    });
+
+    // 5. Assert browser automatically reconnects to Gateway B, preserves dirty human buffer
+    await expect(page.locator('.status-bar')).toContainText('Gateway: E2E-Stream-Vault', {
+      timeout: 15000,
+    });
+    await expect(page.locator('.cm-content')).toContainText('Human Unsaved Work Across Restart.');
+
+    // 6. External agent mutates a separate note (LiveClean.md) through Gateway B
+    const readClean = await agentClient.readNote('LiveClean.md');
+    await agentClient.updateNote({
+      path: 'LiveClean.md',
+      content: '# Live Clean Note\n\nMutated after Gateway Restart by Agent B.',
+      expectedVersion: { token: readClean.version.token },
+    });
+
+    // 7. Switch to LiveClean tab -> clean note reflects Agent B mutation immediately
+    await page.locator('.file-tree .tree-item:has-text("LiveClean")').first().click();
+    await expect(page.locator('.cm-content')).toContainText(
+      'Mutated after Gateway Restart by Agent B.',
+      { timeout: 10000 }
+    );
+  });
 });

@@ -347,4 +347,139 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
     expect(unknownRes.code).toBe(1);
     expect(unknownRes.stderr).toContain('Unknown command "invalid-unknown-cmd"');
   });
+
+  it('TEST H: Production Artifact Live Change Stream & Restart Resync (R3C-1)', async () => {
+    const token = 'test-token-artifact-restart-h';
+    const { child: childA, ready: readyA } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
+      '--token',
+      token,
+      '--scopes',
+      'workspace.read,workspace.write',
+    ]);
+
+    let capturedCursorA = '';
+    let portA: number;
+
+    try {
+      const { url: urlA, port } = await readyA;
+      portA = port;
+
+      // 1. Connect to Gateway A SSE stream
+      const sseResA = await fetch(`${urlA}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'text/event-stream',
+        },
+      });
+      const readerA = sseResA.body!.getReader();
+      const decoderA = new TextDecoder();
+
+      // 2. Perform mutation via REST on Gateway A
+      const createResA = await fetch(`${urlA}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: 'ArtifactNoteA.md',
+          content: '# Artifact Note A\n\nContent from Gateway A.',
+        }),
+      });
+      expect(createResA.status).toBe(201);
+
+      // 3. Read SSE event and capture emitted cursor
+      let readDoneA = false;
+      while (!readDoneA) {
+        const { value, done } = await readerA.read();
+        if (done) break;
+        const text = decoderA.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('id:')) {
+            capturedCursorA = line.slice(3).trim();
+            readDoneA = true;
+          }
+        }
+      }
+      readerA.cancel();
+      expect(capturedCursorA).toBeTruthy();
+      expect(capturedCursorA).toContain(':');
+    } finally {
+      childA.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    // 4. Start Gateway B on the same vault
+    const { child: childB, ready: readyB } = spawnGatewayProcess(gatewayBin, tempVaultDir, [
+      '--token',
+      token,
+      '--scopes',
+      'workspace.read,workspace.write',
+    ]);
+
+    try {
+      const { url: urlB } = await readyB;
+
+      // 5. Reconnect to Gateway B passing captured cursor from Gateway A
+      const sseResB = await fetch(`${urlB}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Last-Event-ID': capturedCursorA,
+          Accept: 'text/event-stream',
+        },
+      });
+      const readerB = sseResB.body!.getReader();
+      const decoderB = new TextDecoder();
+
+      // 6. Assert stream.reset is received with reason server_restarted
+      let resetReceived = false;
+      while (!resetReceived) {
+        const { value, done } = await readerB.read();
+        if (done) break;
+        const text = decoderB.decode(value);
+        if (text.includes('event: stream.reset') && text.includes('server_restarted')) {
+          resetReceived = true;
+        }
+      }
+      expect(resetReceived).toBe(true);
+
+      // 7. Perform mutation via Gateway B
+      const createResB = await fetch(`${urlB}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: 'ArtifactNoteB.md',
+          content: '# Artifact Note B\n\nContent from Gateway B.',
+        }),
+      });
+      expect(createResB.status).toBe(201);
+
+      // 8. Assert new event arrives with Gateway B's cursor
+      let capturedCursorB = '';
+      let readDoneB = false;
+      while (!readDoneB) {
+        const { value, done } = await readerB.read();
+        if (done) break;
+        const text = decoderB.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('id:')) {
+            capturedCursorB = line.slice(3).trim();
+            if (capturedCursorB !== capturedCursorA) {
+              readDoneB = true;
+            }
+          }
+        }
+      }
+      readerB.cancel();
+
+      expect(capturedCursorB).toBeTruthy();
+      expect(capturedCursorB).not.toBe(capturedCursorA);
+    } finally {
+      childB.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  });
 });

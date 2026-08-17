@@ -267,4 +267,444 @@ describe('Phase 3C Live Gateway Change Stream Integrity & Protocol Tests', () =>
       }
     }
   });
+
+  it('5. Cursor Encoders & Parsers: roundtrip, legacy compatibility, defensive bounds', async () => {
+    const { encodeEventCursor, parseEventCursor } = await import('@okw/workspace');
+
+    // 1. Valid instance-aware cursor
+    const cursor = encodeEventCursor('inst_12345', 42);
+    expect(cursor).toBe('inst_12345:42');
+
+    const parsed = parseEventCursor(cursor);
+    expect(parsed).toEqual({
+      serverInstanceId: 'inst_12345',
+      sequence: 42,
+      isLegacy: false,
+    });
+
+    // 2. Legacy evt_<seq>_<rand> format
+    const parsedLegacy = parseEventCursor('evt_15_abcdef12');
+    expect(parsedLegacy).toEqual({
+      sequence: 15,
+      isLegacy: true,
+    });
+
+    // 3. Plain integer format
+    const parsedPlain = parseEventCursor('7');
+    expect(parsedPlain).toEqual({
+      sequence: 7,
+      isLegacy: true,
+    });
+
+    // 4. Malformed and bounded inputs
+    expect(parseEventCursor('')).toBeNull();
+    expect(parseEventCursor(null)).toBeNull();
+    expect(parseEventCursor(undefined)).toBeNull();
+    expect(parseEventCursor('invalid_cursor_string')).toBeNull();
+    expect(parseEventCursor('a'.repeat(300))).toBeNull(); // Bound exceeded (>256)
+  });
+
+  it('6. R3C-1 HTTP-Level Gateway Restart Regression: reconnecting with old cursor triggers server_restarted reset', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openob-r3c1-'));
+    const testPort = await getFreePort();
+    const TOKEN = 'r3c1-test-token-secret';
+
+    try {
+      // Phase 1: Start Gateway A
+      const storageA = new MemoryVaultStorage('r3c1-vault');
+      const indexA = new MemoryDocumentIndex();
+      const parserA = new DefaultDocumentParser();
+      const safeWriterA = new SafeWriter(storageA);
+      const wsA = new OpenObWorkspace({
+        storage: storageA,
+        index: indexA,
+        parser: parserA,
+        safeWriter: safeWriterA,
+        readOnly: false,
+        vaultName: 'r3c1-vault',
+      });
+
+      const gwA = await startGateway({
+        workspace: wsA,
+        port: testPort,
+        token: TOKEN,
+      });
+
+      const clientA = new OpenObGatewayClient({
+        url: gwA.url,
+        token: TOKEN,
+        clientId: 'r3c1-test-client',
+      });
+
+      let capturedCursor = '';
+      const eventsA: WorkspaceChangeEvent[] = [];
+
+      // Use streaming fetch directly to capture the raw SSE id: header
+      const sseResA = await fetch(`${gwA.url}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          Accept: 'text/event-stream',
+        },
+      });
+      const readerA = sseResA.body!.getReader();
+      const decoderA = new TextDecoder();
+
+      // Perform mutation on Gateway A
+      await clientA.createNote({
+        path: 'NoteA.md',
+        content: '# Note A',
+      });
+
+      // Read SSE frame
+      let readDoneA = false;
+      while (!readDoneA) {
+        const { value, done } = await readerA.read();
+        if (done) break;
+        const text = decoderA.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('id:')) {
+            capturedCursor = line.slice(3).trim();
+          }
+          if (line.startsWith('data:')) {
+            const data = line.slice(5).trim();
+            if (data) {
+              const ev = JSON.parse(data);
+              eventsA.push(ev);
+              if (ev.type === 'note.created') {
+                readDoneA = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      readerA.cancel();
+
+      expect(capturedCursor).toBeTruthy();
+      expect(capturedCursor).toContain(':');
+      const instanceIdA = wsA.getEventPublisher().serverInstanceId;
+      expect(capturedCursor.startsWith(instanceIdA)).toBe(true);
+
+      // Stop Gateway A
+      await gwA.stop();
+
+      // Phase 2: Start Gateway B on the SAME port
+      const storageB = new MemoryVaultStorage('r3c1-vault');
+      const indexB = new MemoryDocumentIndex();
+      const parserB = new DefaultDocumentParser();
+      const safeWriterB = new SafeWriter(storageB);
+      const wsB = new OpenObWorkspace({
+        storage: storageB,
+        index: indexB,
+        parser: parserB,
+        safeWriter: safeWriterB,
+        readOnly: false,
+        vaultName: 'r3c1-vault',
+      });
+
+      const instanceIdB = wsB.getEventPublisher().serverInstanceId;
+      expect(instanceIdB).not.toBe(instanceIdA);
+
+      const gwB = await startGateway({
+        workspace: wsB,
+        port: testPort,
+        token: TOKEN,
+      });
+
+      // Reconnect with Last-Event-ID = capturedCursor from Gateway A
+      const sseResB = await fetch(`${gwB.url}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          'Last-Event-ID': capturedCursor,
+          Accept: 'text/event-stream',
+        },
+      });
+
+      const readerB = sseResB.body!.getReader();
+      const decoderB = new TextDecoder();
+
+      let resetReceived: WorkspaceChangeEvent | null = null;
+      let readDoneB = false;
+
+      while (!readDoneB) {
+        const { value, done } = await readerB.read();
+        if (done) break;
+        const text = decoderB.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data:')) {
+            const data = line.slice(5).trim();
+            if (data) {
+              const ev = JSON.parse(data);
+              if (ev.type === 'stream.reset') {
+                resetReceived = ev;
+                readDoneB = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      expect(resetReceived).not.toBeNull();
+      expect(resetReceived?.type).toBe('stream.reset');
+      expect(resetReceived?.reason).toBe('server_restarted');
+      expect(resetReceived?.serverInstanceId).toBe(instanceIdB);
+
+      // Perform a mutation on Gateway B and assert new event arrives with Gateway B's cursor
+      const clientB = new OpenObGatewayClient({
+        url: gwB.url,
+        token: TOKEN,
+        clientId: 'r3c1-test-client',
+      });
+
+      await clientB.createNote({
+        path: 'NoteB.md',
+        content: '# Note B',
+      });
+
+      let newEventCursorB = '';
+      let newEventB: WorkspaceChangeEvent | null = null;
+      let readDoneB2 = false;
+
+      while (!readDoneB2) {
+        const { value, done } = await readerB.read();
+        if (done) break;
+        const text = decoderB.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('id:')) {
+            newEventCursorB = line.slice(3).trim();
+          }
+          if (line.startsWith('data:')) {
+            const data = line.slice(5).trim();
+            if (data) {
+              const ev = JSON.parse(data);
+              if (ev.path === 'NoteB.md') {
+                newEventB = ev;
+                readDoneB2 = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      readerB.cancel();
+
+      expect(newEventB).not.toBeNull();
+      expect(newEventB?.serverInstanceId).toBe(instanceIdB);
+      expect(newEventCursorB.startsWith(instanceIdB)).toBe(true);
+
+      await gwB.stop();
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('7. R3C-1 20x Restart Stress Loop: proves restart resync is 100% deterministic', async () => {
+    const TOKEN = 'stress-test-token-20x';
+    const testPort = await getFreePort();
+
+    let previousCursor = '';
+
+    for (let i = 1; i <= 20; i++) {
+      const storage = new MemoryVaultStorage(`stress-vault-${i}`);
+      const index = new MemoryDocumentIndex();
+      const parser = new DefaultDocumentParser();
+      const safeWriter = new SafeWriter(storage);
+      const ws = new OpenObWorkspace({
+        storage,
+        index,
+        parser,
+        safeWriter,
+        readOnly: false,
+        vaultName: `stress-vault-${i}`,
+      });
+
+      const currentInstanceId = ws.getEventPublisher().serverInstanceId;
+      const gw = await startGateway({
+        workspace: ws,
+        port: testPort,
+        token: TOKEN,
+      });
+
+      if (previousCursor) {
+        // Reconnect with cursor from prior instance -> MUST receive stream.reset (server_restarted)
+        const sseRes = await fetch(`${gw.url}/api/v1/events`, {
+          headers: {
+            Authorization: `Bearer ${TOKEN}`,
+            'Last-Event-ID': previousCursor,
+            Accept: 'text/event-stream',
+          },
+        });
+        const reader = sseRes.body!.getReader();
+        const decoder = new TextDecoder();
+
+        let receivedReset = false;
+        while (!receivedReset) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value);
+          if (text.includes('event: stream.reset') && text.includes('server_restarted')) {
+            receivedReset = true;
+          }
+        }
+        reader.cancel();
+        expect(receivedReset).toBe(true);
+      }
+
+      // Perform a mutation and capture new cursor
+      const client = new OpenObGatewayClient({
+        url: gw.url,
+        token: TOKEN,
+        clientId: 'stress-client',
+      });
+
+      const sseRes2 = await fetch(`${gw.url}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          Accept: 'text/event-stream',
+        },
+      });
+      const reader2 = sseRes2.body!.getReader();
+      const decoder2 = new TextDecoder();
+
+      await client.createNote({
+        path: `StressNote_${i}.md`,
+        content: `# Stress Note ${i}`,
+      });
+
+      let captured = false;
+      while (!captured) {
+        const { value, done } = await reader2.read();
+        if (done) break;
+        const text = decoder2.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('id:')) {
+            previousCursor = line.slice(3).trim();
+            captured = true;
+          }
+        }
+      }
+      reader2.cancel();
+
+      expect(previousCursor.startsWith(currentInstanceId)).toBe(true);
+      await gw.stop();
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  });
+
+  it('8. R3C-3 HTTP-Level Index Degraded & Recovered Integration Coverage', async () => {
+    const testPort = await getFreePort();
+    const TOKEN = 'r3c3-index-token';
+    const storage = new MemoryVaultStorage('r3c3-vault');
+    const index = new MemoryDocumentIndex();
+    const parser = new DefaultDocumentParser();
+    const safeWriter = new SafeWriter(storage);
+
+    // Mock upsert failure on index to simulate derived index degradation
+    let shouldFailUpsert = false;
+    const originalUpsert = index.upsert.bind(index);
+    index.upsert = async (doc) => {
+      if (shouldFailUpsert) {
+        throw new Error('Injected derived index upsert error for R3C-3 test');
+      }
+      return originalUpsert(doc);
+    };
+
+    const ws = new OpenObWorkspace({
+      storage,
+      index,
+      parser,
+      safeWriter,
+      readOnly: false,
+      vaultName: 'r3c3-vault',
+    });
+
+    const gw = await startGateway({
+      workspace: ws,
+      port: testPort,
+      token: TOKEN,
+    });
+
+    const client = new OpenObGatewayClient({
+      url: gw.url,
+      token: TOKEN,
+      clientId: 'r3c3-client',
+    });
+
+    const eventsReceived: WorkspaceChangeEvent[] = [];
+    const sub = client.subscribeToEvents({
+      onEvent: (ev) => {
+        eventsReceived.push(ev);
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Step 1: Arm the index failure seam
+    shouldFailUpsert = true;
+
+    // Step 2: Perform createNote via Gateway REST client
+    const createRes = await client.createNote({
+      path: 'DegradedNote.md',
+      content: '# Degraded Note Content',
+    });
+
+    // Verify canonical write succeeded durably
+    expect(createRes.durableSuccess).toBe(true);
+    expect(createRes.indexStatus).toBe('degraded');
+    expect(createRes.indexError).toContain('Injected derived index upsert error');
+
+    const fileOnDisk = await storage.read('DegradedNote.md');
+    expect(fileOnDisk.textContent).toBe('# Degraded Note Content');
+
+    // Wait for SSE events over HTTP
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (
+          eventsReceived.some((e) => e.type === 'note.created' && e.indexStatus === 'degraded') &&
+          eventsReceived.some((e) => e.type === 'index.degraded')
+        ) {
+          resolve();
+        } else {
+          setTimeout(check, 20);
+        }
+      };
+      check();
+    });
+
+    const degradedEvent = eventsReceived.find((e) => e.type === 'index.degraded');
+    expect(degradedEvent).toBeDefined();
+    expect(degradedEvent?.indexStatus).toBe('degraded');
+
+    // Step 3: Disarm index failure and trigger index rebuild via HTTP endpoint
+    shouldFailUpsert = false;
+    const rebuildRes = await client.rebuildIndex();
+    expect(rebuildRes.status).toBe('verified');
+    expect(rebuildRes.count).toBeGreaterThanOrEqual(1);
+
+    // Wait for index.recovered event over HTTP SSE
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (eventsReceived.some((e) => e.type === 'index.recovered')) {
+          resolve();
+        } else {
+          setTimeout(check, 20);
+        }
+      };
+      check();
+    });
+
+    const recoveredEvent = eventsReceived.find((e) => e.type === 'index.recovered');
+    expect(recoveredEvent).toBeDefined();
+    expect(recoveredEvent?.type).toBe('index.recovered');
+    expect(recoveredEvent?.indexStatus).toBe('verified');
+
+    // Verify index is querying normally
+    const searchRes = await client.search({ query: 'Degraded' });
+    expect(searchRes.matches.length).toBe(1);
+    expect(searchRes.matches[0].path).toBe('DegradedNote.md');
+
+    sub.unsubscribe();
+    await gw.stop();
+  });
 });

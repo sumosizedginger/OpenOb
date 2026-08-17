@@ -6,9 +6,11 @@ import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   ClientContext,
+  encodeEventCursor,
   ForbiddenError,
   InvalidRequestError,
   OpenObWorkspace,
+  parseEventCursor,
   PayloadTooLargeError,
   toApiError,
   UnauthorizedError,
@@ -331,30 +333,14 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           parsedUrl.searchParams.get('lastEventId') ||
           '';
 
-        let lastSeq = 0;
-        let lastServerInstanceId: string | undefined;
-
-        if (lastEventIdHeader && typeof lastEventIdHeader === 'string') {
-          if (lastEventIdHeader.startsWith('evt_')) {
-            const parts = lastEventIdHeader.split('_');
-            const parsed = parseInt(parts[1], 10);
-            if (!isNaN(parsed)) lastSeq = parsed;
-          } else if (lastEventIdHeader.includes(':')) {
-            const [instId, seqStr] = lastEventIdHeader.split(':');
-            lastServerInstanceId = instId;
-            const parsed = parseInt(seqStr, 10);
-            if (!isNaN(parsed)) lastSeq = parsed;
-          } else {
-            const parsed = parseInt(lastEventIdHeader, 10);
-            if (!isNaN(parsed)) lastSeq = parsed;
-          }
-        }
+        const parsedCursor = parseEventCursor(lastEventIdHeader);
+        const lastSeq = parsedCursor ? parsedCursor.sequence : 0;
+        const lastServerInstanceId = parsedCursor?.serverInstanceId;
 
         const sendEvent = (event: WorkspaceChangeEvent) => {
           if (res.writableEnded || res.destroyed) return;
-          res.write(
-            `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
-          );
+          const sseId = encodeEventCursor(serverInstanceId, event.sequence);
+          res.write(`id: ${sseId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         };
 
         if (lastSeq > 0) {
@@ -599,6 +585,14 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           },
           clientContext
         );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // POST /api/v1/index/rebuild (Rebuild derived index and emit index.recovered)
+      if (pathname === '/api/v1/index/rebuild' && method === 'POST') {
+        const result = await workspace.rebuildIndex(clientContext);
         res.statusCode = 200;
         res.end(JSON.stringify(result));
         return;

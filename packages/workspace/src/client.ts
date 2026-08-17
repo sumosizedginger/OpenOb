@@ -25,6 +25,7 @@ export interface EventSubscriptionOptions {
   readonly onConnect?: () => void;
   readonly onDisconnect?: () => void;
   readonly initialLastEventId?: string;
+  readonly initialReconnectDelayMs?: number;
   readonly maxReconnectDelayMs?: number;
 }
 
@@ -287,6 +288,12 @@ export class OpenObGatewayClient {
     });
   }
 
+  async rebuildIndex(): Promise<{ count: number; status: 'verified' }> {
+    return this.request<{ count: number; status: 'verified' }>('/api/v1/index/rebuild', {
+      method: 'POST',
+    });
+  }
+
   /**
    * Subscribes to the live gateway change stream via SSE over streaming fetch.
    * Sends Authorization header with Bearer token, avoiding token leakage into query strings.
@@ -294,14 +301,12 @@ export class OpenObGatewayClient {
    */
   subscribeToEvents(options: EventSubscriptionOptions): EventSubscription {
     let isAborted = false;
-    let abortController: AbortController | null = null;
-    let reconnectTimer: any = null;
-    let reconnectDelay = 500;
-    const maxDelay = options.maxReconnectDelayMs || 10000;
     let connected = false;
-    let lastEventId: string | undefined = options.initialLastEventId;
-
-    const isBrowser = typeof window !== 'undefined';
+    let abortController: AbortController | null = null;
+    let lastEventId = options.initialLastEventId ?? '';
+    let reconnectTimer: any = null;
+    let reconnectDelay = options.initialReconnectDelayMs ?? 500;
+    const maxDelay = options.maxReconnectDelayMs ?? 10000;
 
     const connect = async () => {
       if (isAborted) return;
@@ -309,13 +314,7 @@ export class OpenObGatewayClient {
 
       const headers: Record<string, string> = {
         Accept: 'text/event-stream',
-        'X-OpenOb-Client-Id': this.clientId,
       };
-
-      if (!isBrowser) {
-        headers['User-Agent'] = `${this.clientId}/0.1.0`;
-      }
-
       if (this.token) {
         headers['Authorization'] = `Bearer ${this.token}`;
       }
@@ -324,34 +323,36 @@ export class OpenObGatewayClient {
       }
 
       try {
-        const res = await this.customFetch(`${this.baseUrl}/api/v1/events`, {
+        const url = `${this.baseUrl}/api/v1/events${
+          lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : ''
+        }`;
+        const response = await this.customFetch(url, {
           method: 'GET',
           headers,
           signal: abortController.signal,
         });
 
-        if (!res.ok) {
+        if (!response.ok) {
           throw new GatewayError(
-            res.status,
+            response.status,
             'SSE_ERROR',
-            `SSE event stream returned HTTP ${res.status}`
+            `SSE stream connection failed: HTTP ${response.status}`
           );
         }
 
-        if (!res.body) {
-          throw new Error('ReadableStream not supported on response body');
+        if (!response.body) {
+          throw new GatewayError(500, 'SSE_ERROR', 'ReadableStream body not available in response');
         }
 
         connected = true;
-        reconnectDelay = 500; // Reset backoff on successful connection
+        reconnectDelay = options.initialReconnectDelayMs ?? 500; // Reset backoff on successful connect
         options.onConnect?.();
 
-        const reader = res.body.getReader();
+        const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
-
-        let currentData = '';
         let currentId = '';
+        let currentData = '';
 
         while (!isAborted) {
           const { done, value } = await reader.read();
@@ -370,6 +371,11 @@ export class OpenObGatewayClient {
                   const parsedEvent: WorkspaceChangeEvent = JSON.parse(currentData);
                   if (currentId) {
                     lastEventId = currentId;
+                  } else if (
+                    parsedEvent.serverInstanceId &&
+                    typeof parsedEvent.sequence === 'number'
+                  ) {
+                    lastEventId = `${parsedEvent.serverInstanceId}:${parsedEvent.sequence}`;
                   } else if (parsedEvent.eventId) {
                     lastEventId = parsedEvent.eventId;
                   }
