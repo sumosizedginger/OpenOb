@@ -260,3 +260,38 @@ OpenOb supports two distinct web operating modes with strict mutual exclusivity:
 - **Strict Mode Exclusivity:** In Gateway-Managed Mode, `BrowserFSAVaultStorage`, OPFS vault authority, `NoteWriteCoordinator`, `SafeWriter`, and local `DocumentIndex` are **not** instantiated or used for canonical access.
 - **OCC Human-Agent Protection:** When an external MCP agent updates a note (e.g. V1 -> V2) while a human has unsaved edits in the browser, the human's subsequent save attempt returns `409 Conflict`. The UI preserves the human's buffer, displays the conflict modal with disk vs local content, and prevents overwriting the agent's V2 update.
 - **Static Web Delivery:** The Gateway binary supports `--serve-web` and `--web-dist <dir>` to serve the production Web UI SPA directly from the local gateway process with single-page app fallback.
+
+---
+
+## 10. Live Gateway Change Stream (Phase 3C)
+
+To allow the human Web UI to reflect agent and CLI mutations immediately without manual polling or refresh, OpenOb provides a real-time server-sent change stream.
+
+### Architecture
+
+```text
+Web / CLI / MCP
+       ↓
+    Gateway
+       ↓
+ OpenObWorkspace
+       ↓
+Canonical Mutation
+       ↓
+WorkspaceChangeEvent
+       ↓
+SSE: GET /api/v1/events (Bearer auth)
+       ↓
+Gateway-Managed Web UI (streaming fetch)
+```
+
+### Protocol & Guarantees
+
+1. **Application-Level Event Authority:** Emitted exclusively by `OpenObWorkspace` after durable canonical write and index synchronization have succeeded.
+2. **Strict Monotonic Sequence & Ring Buffer:** Every process maintains a strictly monotonic sequence counter and a bounded ring buffer (default 1024 events).
+3. **Reconnection & Resumption:** Clients reconnect with `Last-Event-ID: <id>`. If within the buffer window, missed events are replayed in order. If expired or across gateway restart, `event: stream.reset` is sent, triggering a clean vault refresh.
+4. **Bearer Token Safety:** The browser client uses streaming `fetch()` with the `Authorization: Bearer <token>` header, avoiding exposing credentials in URL query strings or browser access logs.
+5. **Human Buffer Protection:**
+   - **Clean Open Note:** Auto-updates immediately to authoritative latest V2 content.
+   - **Dirty Open Note:** 100% preserves human buffer in editor, never auto-saves or auto-overwrites, surfaces conflict status, and preserves OCC 409 protection.
+   - **External Delete / Rename:** Clean tabs are closed/migrated; dirty tabs preserve user content without ghost creation or resurrection.

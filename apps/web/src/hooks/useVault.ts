@@ -23,6 +23,7 @@ import {
   OpenObWorkspace,
   WorkspaceBackend,
   GatewayUnavailableError,
+  WorkspaceChangeEvent,
 } from '@okw/workspace';
 
 export interface OpenTab {
@@ -448,6 +449,236 @@ export function useVault() {
       console.error(`Failed to open gateway note "${path}":`, err);
     }
   };
+
+  // Live Gateway Change Stream SSE Subscription (Phase 3C)
+  useEffect(() => {
+    if (
+      vaultMode !== 'gateway' ||
+      !gatewayConnected ||
+      !(backend instanceof GatewayWorkspaceBackend)
+    ) {
+      return;
+    }
+
+    const client = backend.getClient();
+    let isSubscribed = true;
+
+    const handleEvent = async (event: WorkspaceChangeEvent) => {
+      if (!isSubscribed) return;
+
+      // 1. Reset event -> full refresh
+      if (event.type === 'stream.reset') {
+        await refreshVault();
+        return;
+      }
+
+      // 2. Index degraded / recovered events
+      if (event.type === 'index.degraded' || event.type === 'index.recovered') {
+        return;
+      }
+
+      // 3. Structural & note mutations
+      const affectedPath = event.path;
+      const oldPath = event.oldPath;
+      const newPath = event.newPath;
+
+      // Invalidate directory entries for file creation, deletion, or renaming
+      if (
+        event.type === 'note.created' ||
+        event.type === 'note.deleted' ||
+        event.type === 'note.renamed'
+      ) {
+        try {
+          const list = await backendRef.current.listEntries('');
+          setEntries(list);
+        } catch {}
+      }
+
+      // Handle DELETE
+      if (event.type === 'note.deleted' && affectedPath) {
+        setOpenTabs((prev) => {
+          const targetTab = prev.find((t) => t.path === affectedPath);
+          if (!targetTab) return prev;
+          if (targetTab.isDirty) {
+            // Keep dirty buffer, mark as deleted externally
+            return prev;
+          }
+          // Clean tab -> close or remove
+          return prev.filter((t) => t.path !== affectedPath);
+        });
+
+        if (activeTabPathRef.current === affectedPath) {
+          const currentActive = openTabsRef.current.find((t) => t.path === affectedPath);
+          if (currentActive?.isDirty) {
+            setSaveStatus('conflict');
+            setConflictData({ path: affectedPath, diskContent: undefined });
+          } else {
+            setActiveTabPath(null);
+            activeTabPathRef.current = null;
+            setParsedDoc(null);
+            setBacklinks([]);
+            setSaveStatus('saved');
+          }
+        }
+        return;
+      }
+
+      // Handle RENAME
+      if (event.type === 'note.renamed' && oldPath && newPath) {
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            if (t.path !== oldPath) return t;
+            if (t.isDirty) {
+              // Keep dirty buffer intact
+              return t;
+            }
+            return {
+              ...t,
+              path: newPath,
+              title: newPath.replace(/\.md$/, '').split('/').pop() || newPath,
+            };
+          })
+        );
+
+        if (activeTabPathRef.current === oldPath) {
+          const currentActive = openTabsRef.current.find((t) => t.path === oldPath);
+          if (currentActive?.isDirty) {
+            setSaveStatus('conflict');
+            setConflictData({ path: oldPath, diskContent: undefined });
+          } else {
+            setActiveTabPath(newPath);
+            activeTabPathRef.current = newPath;
+            // Refetch authoritative renamed note content
+            try {
+              const note = await backendRef.current.readNote(newPath);
+              const snapshot: FileSnapshot = {
+                path: note.path,
+                content: new TextEncoder().encode(note.textContent),
+                textContent: note.textContent,
+                size: note.version.size ?? note.textContent.length,
+                modifiedAt: note.version.modifiedAt ?? Date.now(),
+                version: {
+                  token: note.version.token,
+                  hash: note.version.hash,
+                  modifiedAt: note.version.modifiedAt ?? Date.now(),
+                  size: note.version.size ?? note.textContent.length,
+                },
+              };
+              const parsed = await parser.parse(note.path, note.textContent, note.version.hash);
+              setOpenTabs((prev) =>
+                prev.map((t) =>
+                  t.path === newPath
+                    ? {
+                        ...t,
+                        content: note.textContent,
+                        initialSnapshot: snapshot,
+                        title: parsed.title,
+                      }
+                    : t
+                )
+              );
+              setParsedDoc(parsed);
+              const bl = await backendRef.current.getBacklinks(newPath);
+              setBacklinks(bl);
+              setSaveStatus('saved');
+            } catch {}
+          }
+        }
+        return;
+      }
+
+      // Handle CREATE
+      if (event.type === 'note.created') {
+        return;
+      }
+
+      // Handle MODIFY & PROPERTY_CHANGED
+      if (
+        (event.type === 'note.modified' || event.type === 'note.property_changed') &&
+        affectedPath
+      ) {
+        const currentTab = openTabsRef.current.find((t) => t.path === affectedPath);
+        if (!currentTab) return;
+
+        // If self-event that we already applied:
+        if (
+          event.version?.token &&
+          currentTab.initialSnapshot?.version.token === event.version.token &&
+          !currentTab.isDirty
+        ) {
+          return;
+        }
+
+        if (currentTab.isDirty) {
+          // DIRTY TAB: MUST PRESERVE HUMAN BUFFER!
+          if (activeTabPathRef.current === affectedPath) {
+            setSaveStatus('conflict');
+            try {
+              const latest = await backendRef.current.readNote(affectedPath);
+              setConflictData({ path: affectedPath, diskContent: latest.textContent });
+            } catch {
+              setConflictData({ path: affectedPath });
+            }
+          }
+        } else {
+          // CLEAN TAB: Auto-update to authoritative latest version V2!
+          try {
+            const note = await backendRef.current.readNote(affectedPath);
+            const snapshot: FileSnapshot = {
+              path: note.path,
+              content: new TextEncoder().encode(note.textContent),
+              textContent: note.textContent,
+              size: note.version.size ?? note.textContent.length,
+              modifiedAt: note.version.modifiedAt ?? Date.now(),
+              version: {
+                token: note.version.token,
+                hash: note.version.hash,
+                modifiedAt: note.version.modifiedAt ?? Date.now(),
+                size: note.version.size ?? note.textContent.length,
+              },
+            };
+            const parsed = await parser.parse(note.path, note.textContent, note.version.hash);
+            setOpenTabs((prev) =>
+              prev.map((t) =>
+                t.path === affectedPath
+                  ? {
+                      ...t,
+                      content: note.textContent,
+                      initialSnapshot: snapshot,
+                      title: parsed.title || t.title,
+                      isDirty: false,
+                    }
+                  : t
+              )
+            );
+
+            if (activeTabPathRef.current === affectedPath) {
+              setParsedDoc(parsed);
+              const bl = await backendRef.current.getBacklinks(affectedPath);
+              setBacklinks(bl);
+              setSaveStatus('saved');
+              setConflictData(null);
+            }
+          } catch (readErr) {
+            console.error(`Failed to auto-update note "${affectedPath}":`, readErr);
+          }
+        }
+      }
+    };
+
+    const subscription = client.subscribeToEvents({
+      onEvent: handleEvent,
+      onConnect: () => {
+        setGatewayReachable(true);
+      },
+      onDisconnect: () => {},
+    });
+
+    return () => {
+      isSubscribed = false;
+      subscription.unsubscribe();
+    };
+  }, [vaultMode, gatewayConnected, backend, parser, refreshVault]);
 
   // Connect to Gateway Flow
   const connectToGateway = useCallback(

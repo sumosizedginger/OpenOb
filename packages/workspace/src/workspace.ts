@@ -19,6 +19,7 @@ import { buildGraphData, rewriteNoteWikilinks } from '@okw/index';
 import { DefaultDocumentParser, parseFrontmatter, updateDocumentFrontmatter } from '@okw/markdown';
 import { NoteWriteCoordinator, SafeWriter } from '@okw/vault';
 import { InMemoryAuditSink } from './audit.js';
+import { WorkspaceEventPublisher } from './events.js';
 import {
   ForbiddenError,
   IndexDegradedError,
@@ -56,6 +57,8 @@ export interface OpenObWorkspaceOptions {
   readonly safeWriter?: SafeWriter;
   readonly coordinator?: NoteWriteCoordinator;
   readonly auditSink?: AuditSink;
+  readonly eventPublisher?: WorkspaceEventPublisher;
+  readonly serverInstanceId?: string;
   readonly vaultName?: string;
   readonly readOnly?: boolean;
 }
@@ -120,6 +123,7 @@ export class OpenObWorkspace {
   private readonly safeWriter: SafeWriter;
   private readonly coordinator: NoteWriteCoordinator;
   private readonly auditSink: AuditSink;
+  private readonly eventPublisher: WorkspaceEventPublisher;
   private readonly structuralGate = new StructuralGate();
   private readonly pathLocks = new Map<string, Promise<void>>();
   private indexHealth: 'verified' | 'degraded' = 'verified';
@@ -135,12 +139,18 @@ export class OpenObWorkspace {
     this.coordinator =
       options.coordinator ?? new NoteWriteCoordinator(this.storage, this.safeWriter);
     this.auditSink = options.auditSink ?? new InMemoryAuditSink();
+    this.eventPublisher =
+      options.eventPublisher ?? new WorkspaceEventPublisher(options.serverInstanceId);
     this.vaultName = options.vaultName ?? (this.storage as any).name ?? 'default-vault';
     this.readOnly = options.readOnly ?? true;
   }
 
   public getCoordinator(): NoteWriteCoordinator {
     return this.coordinator;
+  }
+
+  public getEventPublisher(): WorkspaceEventPublisher {
+    return this.eventPublisher;
   }
 
   /**
@@ -573,6 +583,24 @@ export class OpenObWorkspace {
           indexStatus,
         });
 
+        this.eventPublisher.publish({
+          type: 'note.created',
+          path: normalizedPath,
+          version: result.currentVersion,
+          operation: 'create',
+          requestId: context?.requestId,
+          clientId: context?.clientId,
+          indexStatus,
+        });
+
+        if (indexStatus === 'degraded') {
+          this.eventPublisher.publish({
+            type: 'index.degraded',
+            path: normalizedPath,
+            indexStatus: 'degraded',
+          });
+        }
+
         return result;
       });
     });
@@ -726,6 +754,24 @@ export class OpenObWorkspace {
           grantedScope: 'workspace.write',
           indexStatus,
         });
+
+        this.eventPublisher.publish({
+          type: 'note.modified',
+          path: normalizedPath,
+          version: result.currentVersion,
+          operation: 'update',
+          requestId: context?.requestId,
+          clientId: context?.clientId,
+          indexStatus,
+        });
+
+        if (indexStatus === 'degraded') {
+          this.eventPublisher.publish({
+            type: 'index.degraded',
+            path: normalizedPath,
+            indexStatus: 'degraded',
+          });
+        }
 
         return result;
       });
@@ -896,6 +942,24 @@ export class OpenObWorkspace {
           grantedScope: 'properties.write',
           indexStatus,
         });
+
+        this.eventPublisher.publish({
+          type: 'note.property_changed',
+          path: normalizedPath,
+          version: result.currentVersion,
+          operation: 'set_property',
+          requestId: context?.requestId,
+          clientId: context?.clientId,
+          indexStatus,
+        });
+
+        if (indexStatus === 'degraded') {
+          this.eventPublisher.publish({
+            type: 'index.degraded',
+            path: normalizedPath,
+            indexStatus: 'degraded',
+          });
+        }
 
         return result;
       });
@@ -1349,6 +1413,38 @@ export class OpenObWorkspace {
         rewrittenLinkCount: totalRewrittenCount,
       });
 
+      this.eventPublisher.publish({
+        type: 'note.renamed',
+        path: normNewPath,
+        oldPath: normOldPath,
+        newPath: normNewPath,
+        version: result.currentVersion,
+        operation: 'rename',
+        requestId: context?.requestId,
+        clientId: context?.clientId,
+        indexStatus,
+        affectedPaths: updatedFiles,
+      });
+
+      for (const affected of updatedFiles) {
+        this.eventPublisher.publish({
+          type: 'note.modified',
+          path: affected,
+          operation: 'refactor_backlinks',
+          requestId: context?.requestId,
+          clientId: context?.clientId,
+          indexStatus,
+        });
+      }
+
+      if (indexStatus === 'degraded') {
+        this.eventPublisher.publish({
+          type: 'index.degraded',
+          path: normNewPath,
+          indexStatus: 'degraded',
+        });
+      }
+
       return result;
     });
   }
@@ -1480,6 +1576,24 @@ export class OpenObWorkspace {
         grantedScope: 'workspace.delete',
         indexStatus,
       });
+
+      this.eventPublisher.publish({
+        type: 'note.deleted',
+        path: normalizedPath,
+        version: result.previousVersion,
+        operation: 'delete',
+        requestId: context?.requestId,
+        clientId: context?.clientId,
+        indexStatus,
+      });
+
+      if (indexStatus === 'degraded') {
+        this.eventPublisher.publish({
+          type: 'index.degraded',
+          path: normalizedPath,
+          indexStatus: 'degraded',
+        });
+      }
 
       return result;
     });

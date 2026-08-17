@@ -15,8 +15,23 @@ import {
   SetPropertyRequest,
   SingleNoteMutationResultDTO,
   UpdateNoteRequest,
+  WorkspaceChangeEvent,
   WorkspaceInfo,
 } from './types.js';
+
+export interface EventSubscriptionOptions {
+  readonly onEvent: (event: WorkspaceChangeEvent) => void;
+  readonly onError?: (err: Error) => void;
+  readonly onConnect?: () => void;
+  readonly onDisconnect?: () => void;
+  readonly initialLastEventId?: string;
+  readonly maxReconnectDelayMs?: number;
+}
+
+export interface EventSubscription {
+  readonly unsubscribe: () => void;
+  readonly isConnected: () => boolean;
+}
 
 export interface GatewayClientOptions {
   readonly url: string;
@@ -270,5 +285,149 @@ export class OpenObGatewayClient {
         expectedVersion: req.expectedVersion,
       },
     });
+  }
+
+  /**
+   * Subscribes to the live gateway change stream via SSE over streaming fetch.
+   * Sends Authorization header with Bearer token, avoiding token leakage into query strings.
+   * Handles automatic reconnection with exponential backoff and Last-Event-ID resumption.
+   */
+  subscribeToEvents(options: EventSubscriptionOptions): EventSubscription {
+    let isAborted = false;
+    let abortController: AbortController | null = null;
+    let reconnectTimer: any = null;
+    let reconnectDelay = 500;
+    const maxDelay = options.maxReconnectDelayMs || 10000;
+    let connected = false;
+    let lastEventId: string | undefined = options.initialLastEventId;
+
+    const isBrowser = typeof window !== 'undefined';
+
+    const connect = async () => {
+      if (isAborted) return;
+      abortController = new AbortController();
+
+      const headers: Record<string, string> = {
+        Accept: 'text/event-stream',
+        'X-OpenOb-Client-Id': this.clientId,
+      };
+
+      if (!isBrowser) {
+        headers['User-Agent'] = `${this.clientId}/0.1.0`;
+      }
+
+      if (this.token) {
+        headers['Authorization'] = `Bearer ${this.token}`;
+      }
+      if (lastEventId) {
+        headers['Last-Event-ID'] = lastEventId;
+      }
+
+      try {
+        const res = await this.customFetch(`${this.baseUrl}/api/v1/events`, {
+          method: 'GET',
+          headers,
+          signal: abortController.signal,
+        });
+
+        if (!res.ok) {
+          throw new GatewayError(
+            res.status,
+            'SSE_ERROR',
+            `SSE event stream returned HTTP ${res.status}`
+          );
+        }
+
+        if (!res.body) {
+          throw new Error('ReadableStream not supported on response body');
+        }
+
+        connected = true;
+        reconnectDelay = 500; // Reset backoff on successful connection
+        options.onConnect?.();
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        let currentData = '';
+        let currentId = '';
+
+        while (!isAborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (let line of lines) {
+            line = line.replace(/\r$/, '');
+            if (!line.trim()) {
+              // Empty line represents event dispatch boundary
+              if (currentData) {
+                try {
+                  const parsedEvent: WorkspaceChangeEvent = JSON.parse(currentData);
+                  if (currentId) {
+                    lastEventId = currentId;
+                  } else if (parsedEvent.eventId) {
+                    lastEventId = parsedEvent.eventId;
+                  }
+                  options.onEvent(parsedEvent);
+                } catch (parseErr) {
+                  console.error('[OpenObGatewayClient] SSE parse error:', parseErr, currentData);
+                }
+              }
+              currentData = '';
+              currentId = '';
+              continue;
+            }
+
+            if (line.startsWith(':')) {
+              // Comment / heartbeat frame
+              continue;
+            }
+
+            if (line.startsWith('id:')) {
+              currentId = line.slice(3).trim();
+            } else if (line.startsWith('data:')) {
+              const dataVal = line.slice(5).trim();
+              currentData = currentData ? `${currentData}\n${dataVal}` : dataVal;
+            }
+          }
+        }
+      } catch (err: any) {
+        if (isAborted) return;
+        connected = false;
+        options.onDisconnect?.();
+        options.onError?.(err);
+      } finally {
+        if (!isAborted) {
+          connected = false;
+          options.onDisconnect?.();
+          // Schedule background reconnect with exponential backoff
+          reconnectTimer = setTimeout(() => {
+            reconnectDelay = Math.min(reconnectDelay * 1.5, maxDelay);
+            void connect();
+          }, reconnectDelay);
+        }
+      }
+    };
+
+    void connect();
+
+    return {
+      unsubscribe: () => {
+        isAborted = true;
+        connected = false;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (abortController) {
+          try {
+            abortController.abort();
+          } catch {}
+        }
+      },
+      isConnected: () => connected,
+    };
   }
 }

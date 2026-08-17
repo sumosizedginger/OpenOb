@@ -316,3 +316,5 @@ export interface ClientContext {
   readonly timestamp?: number;
   readonly scopes?: string[];
 }
+
+export type { WorkspaceChangeEvent, WorkspaceChangeEventType } from './events.js';

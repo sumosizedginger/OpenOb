@@ -6,11 +6,13 @@ import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   ClientContext,
+  ForbiddenError,
   InvalidRequestError,
   OpenObWorkspace,
   PayloadTooLargeError,
   toApiError,
   UnauthorizedError,
+  WorkspaceChangeEvent,
 } from '@okw/workspace';
 
 export interface GatewayOptions {
@@ -123,6 +125,8 @@ async function readJsonBody(
  */
 export function createGatewayServer(options: GatewayOptions): http.Server {
   const { workspace, token, scopes, maxBodyBytes } = options;
+  const activeSseConnections = new Set<http.ServerResponse>();
+  const activeSockets = new Set<import('node:net').Socket>();
 
   const server = http.createServer(async (req, res) => {
     // Standard secure headers
@@ -296,6 +300,110 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
 
     // 3. Route Dispatch
     try {
+      // GET /api/v1/events (Live Workspace Change Stream via SSE)
+      if (pathname === '/api/v1/events' && method === 'GET') {
+        if (!clientContext.scopes?.includes('workspace.read')) {
+          const err = toApiError(
+            new ForbiddenError('Forbidden: events stream requires workspace.read scope')
+          );
+          res.statusCode = err.status;
+          res.end(JSON.stringify(err.body));
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        if (typeof res.flushHeaders === 'function') {
+          res.flushHeaders();
+        }
+        res.write(': connected\n\n');
+
+        const publisher = workspace.getEventPublisher();
+        const serverInstanceId = publisher.serverInstanceId;
+
+        const lastEventIdHeader =
+          (req.headers['last-event-id'] as string) ||
+          (req.headers['x-last-event-id'] as string) ||
+          parsedUrl.searchParams.get('lastEventId') ||
+          '';
+
+        let lastSeq = 0;
+        let lastServerInstanceId: string | undefined;
+
+        if (lastEventIdHeader && typeof lastEventIdHeader === 'string') {
+          if (lastEventIdHeader.startsWith('evt_')) {
+            const parts = lastEventIdHeader.split('_');
+            const parsed = parseInt(parts[1], 10);
+            if (!isNaN(parsed)) lastSeq = parsed;
+          } else if (lastEventIdHeader.includes(':')) {
+            const [instId, seqStr] = lastEventIdHeader.split(':');
+            lastServerInstanceId = instId;
+            const parsed = parseInt(seqStr, 10);
+            if (!isNaN(parsed)) lastSeq = parsed;
+          } else {
+            const parsed = parseInt(lastEventIdHeader, 10);
+            if (!isNaN(parsed)) lastSeq = parsed;
+          }
+        }
+
+        const sendEvent = (event: WorkspaceChangeEvent) => {
+          if (res.writableEnded || res.destroyed) return;
+          res.write(
+            `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+          );
+        };
+
+        if (lastSeq > 0) {
+          const replay = publisher.getEventsSince(lastSeq, lastServerInstanceId);
+          if (replay.reset) {
+            const resetEvent: WorkspaceChangeEvent = {
+              schemaVersion: 1,
+              eventId: `reset_${Date.now()}`,
+              sequence: publisher.getCurrentSequence(),
+              serverInstanceId,
+              timestamp: Date.now(),
+              type: 'stream.reset',
+              reason: replay.reason,
+            };
+            sendEvent(resetEvent);
+          } else {
+            for (const missed of replay.events) {
+              sendEvent(missed);
+            }
+          }
+        }
+
+        const unsubscribe = publisher.subscribe((event) => {
+          sendEvent(event);
+        });
+
+        const heartbeatTimer = setInterval(() => {
+          if (res.writableEnded || res.destroyed) {
+            clearInterval(heartbeatTimer);
+            return;
+          }
+          res.write(': heartbeat\n\n');
+        }, 15000);
+
+        activeSseConnections.add(res);
+
+        const cleanup = () => {
+          clearInterval(heartbeatTimer);
+          unsubscribe();
+          activeSseConnections.delete(res);
+        };
+
+        req.on('close', cleanup);
+        req.on('end', cleanup);
+        res.on('close', cleanup);
+        res.on('finish', cleanup);
+        return;
+      }
+
       // POST /api/v1/notes (Create note)
       if (pathname === '/api/v1/notes' && method === 'POST') {
         const body = await readJsonBody(req, maxBodyBytes);
@@ -652,6 +760,26 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
     }
   });
 
+  server.on('connection', (socket) => {
+    activeSockets.add(socket);
+    socket.on('close', () => activeSockets.delete(socket));
+  });
+
+  server.on('close', () => {
+    for (const conn of activeSseConnections) {
+      try {
+        if (!conn.writableEnded) conn.end();
+      } catch {}
+    }
+    activeSseConnections.clear();
+    for (const socket of activeSockets) {
+      try {
+        socket.destroy();
+      } catch {}
+    }
+    activeSockets.clear();
+  });
+
   return server;
 }
 
@@ -709,6 +837,9 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     url,
     server,
     async stop() {
+      if (typeof (server as any).closeAllConnections === 'function') {
+        (server as any).closeAllConnections();
+      }
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });

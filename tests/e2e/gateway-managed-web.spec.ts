@@ -247,18 +247,21 @@ Native vault project documentation.
       }
     });
     await page.locator('.file-tree .tree-item:has-text("Temporary")').first().click();
-    await expect(page.locator('.cm-content')).toContainText('To be deleted.');
+    // 2. Human types into editor making tab dirty
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('\nTrying to save to deleted note');
+    await expect(page.locator('.tab-bar .tab.active .tab-dirty-indicator')).toBeVisible({
+      timeout: 5000,
+    });
 
-    // 2. External agent deletes Temporary.md
+    // 3. External agent deletes Temporary.md concurrently
     const current = await agentClient.readNote('Temporary.md');
     await agentClient.deleteNote({
       path: 'Temporary.md',
       expectedVersion: { token: current.version.token },
     });
 
-    // 3. Human types into stale editor and attempts save
-    await page.locator('.cm-content').click();
-    await page.keyboard.type('\nTrying to save to deleted note');
+    // 4. Human attempts save on deleted note
     await page.keyboard.press('Control+s');
 
     // UI surfaces conflict / not found and does NOT resurrect file on disk
