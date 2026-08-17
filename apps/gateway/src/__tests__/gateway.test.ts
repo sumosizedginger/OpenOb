@@ -578,4 +578,51 @@ This note is literally named backlinks inside a subfolder.
     expect(parsed.readOnly).toBe(true);
     expect(parsed.noteCount).toBe(5);
   });
+
+  it('21. CLI help semantics: help, --help, -h, no-command exit 0; unknown command exits 1', async () => {
+    // 1. --help exits 0
+    const helpFlagRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['--help'],
+    });
+    expect(helpFlagRes.exitCode).toBe(0);
+    expect(helpFlagRes.output).toContain('OpenOb Local CLI');
+
+    // 2. -h exits 0
+    const shortHelpRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['-h'],
+    });
+    expect(shortHelpRes.exitCode).toBe(0);
+    expect(shortHelpRes.output).toContain('OpenOb Local CLI');
+
+    // 3. help command exits 0
+    const helpCmdRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['help'],
+    });
+    expect(helpCmdRes.exitCode).toBe(0);
+    expect(helpCmdRes.output).toContain('OpenOb Local CLI');
+
+    // 4. empty command (no args) exits 0
+    const noCmdRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: [],
+    });
+    expect(noCmdRes.exitCode).toBe(0);
+    expect(noCmdRes.output).toContain('OpenOb Local CLI');
+
+    // 5. unknown command exits 1 with error
+    const unknownRes = await runCli({
+      url: gateway.url,
+      token: TEST_TOKEN,
+      args: ['foobar-command'],
+    });
+    expect(unknownRes.exitCode).toBe(1);
+    expect(unknownRes.output).toContain('Unknown command "foobar-command"');
+  });
 });

@@ -15,6 +15,30 @@ export interface CliOptions {
   readonly args: string[];
 }
 
+export const CLI_HELP_TEXT = `OpenOb Local CLI (Read-Only)
+
+Usage:
+  openob info [--json] [--url <url>] [--token <token>]
+  openob list [subpath] [--json] [--url <url>] [--token <token>]
+  openob read <path> [--json] [--url <url>] [--token <token>]
+  openob search <query> [--json] [--url <url>] [--token <token>]
+  openob backlinks <path> [--json] [--url <url>] [--token <token>]
+  openob help
+`;
+
+export function handleHelpOrUnknown(
+  command?: string,
+  isJson?: boolean
+): { exitCode: number; output: string } {
+  if (!command || command === 'help' || command === '--help' || command === '-h') {
+    return { exitCode: 0, output: CLI_HELP_TEXT };
+  }
+  const errorMsg = isJson
+    ? JSON.stringify({ error: `Unknown command: "${command}"` }, null, 2)
+    : `Error: Unknown command "${command}".\n\n${CLI_HELP_TEXT}`;
+  return { exitCode: 1, output: errorMsg };
+}
+
 export async function runCli(options: CliOptions): Promise<{ exitCode: number; output: string }> {
   const { workspace, args } = options;
   const isJson = args.includes('--json');
@@ -108,16 +132,7 @@ async function runCliDirect(
       case '--help':
       case '-h':
       default: {
-        const helpText = `OpenOb Local CLI (Read-Only)
-
-Usage:
-  openob info [--json] [--url <url>] [--token <token>]
-  openob list [subpath] [--json] [--url <url>] [--token <token>]
-  openob read <path> [--json] [--url <url>] [--token <token>]
-  openob search <query> [--json] [--url <url>] [--token <token>]
-  openob backlinks <path> [--json] [--url <url>] [--token <token>]
-`;
-        return { exitCode: command ? 1 : 0, output: helpText };
+        return handleHelpOrUnknown(command, isJson);
       }
     }
   } catch (err: any) {
@@ -135,6 +150,16 @@ async function runCliRemote(
   isJson: boolean
 ): Promise<{ exitCode: number; output: string }> {
   const command = args[0];
+
+  // If command is help or unknown, resolve immediately without needing an HTTP request
+  if (!command || command === 'help' || command === '--help' || command === '-h') {
+    return handleHelpOrUnknown(command, isJson);
+  }
+
+  const validCommands = new Set(['info', 'list', 'read', 'search', 'backlinks']);
+  if (!validCommands.has(command)) {
+    return handleHelpOrUnknown(command, isJson);
+  }
 
   const headers: Record<string, string> = {
     'User-Agent': 'openob-cli/0.1.0',
@@ -235,20 +260,8 @@ async function runCliRemote(
         return { exitCode: 0, output };
       }
 
-      case 'help':
-      case '--help':
-      case '-h':
       default: {
-        const helpText = `OpenOb Local CLI (Read-Only)
-
-Usage:
-  openob info [--json] [--url <url>] [--token <token>]
-  openob list [subpath] [--json] [--url <url>] [--token <token>]
-  openob read <path> [--json] [--url <url>] [--token <token>]
-  openob search <query> [--json] [--url <url>] [--token <token>]
-  openob backlinks <path> [--json] [--url <url>] [--token <token>]
-`;
-        return { exitCode: command ? 1 : 0, output: helpText };
+        return handleHelpOrUnknown(command, isJson);
       }
     }
   } catch (err: any) {
