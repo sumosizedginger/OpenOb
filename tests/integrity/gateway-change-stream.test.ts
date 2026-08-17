@@ -707,4 +707,357 @@ describe('Phase 3C Live Gateway Change Stream Integrity & Protocol Tests', () =>
     sub.unsubscribe();
     await gw.stop();
   });
+
+  it('9. P2-LEGACY: Legacy cursor against advanced new gateway instance triggers reset and NEVER partially replays events', async () => {
+    const testPort = await getFreePort();
+    const TOKEN = 'legacy-cursor-test-token-p2';
+
+    // Step 1: Start Gateway A and create an initial note
+    const storageA = new MemoryVaultStorage('p2-vault');
+    const indexA = new MemoryDocumentIndex();
+    const parserA = new DefaultDocumentParser();
+    const safeWriterA = new SafeWriter(storageA);
+    const wsA = new OpenObWorkspace({
+      storage: storageA,
+      index: indexA,
+      parser: parserA,
+      safeWriter: safeWriterA,
+      readOnly: false,
+      vaultName: 'p2-vault',
+    });
+
+    const gwA = await startGateway({
+      workspace: wsA,
+      port: testPort,
+      token: TOKEN,
+    });
+
+    const clientA = new OpenObGatewayClient({
+      url: gwA.url,
+      token: TOKEN,
+      clientId: 'legacy-client',
+    });
+
+    await clientA.createNote({
+      path: 'A1.md',
+      content: '# Note A1',
+    });
+
+    const legacyCursor = 'evt_1_legacyA';
+    await gwA.stop();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Step 2: Start Gateway B on same port and vault
+    const storageB = new MemoryVaultStorage('p2-vault');
+    const indexB = new MemoryDocumentIndex();
+    const parserB = new DefaultDocumentParser();
+    const safeWriterB = new SafeWriter(storageB);
+    const wsB = new OpenObWorkspace({
+      storage: storageB,
+      index: indexB,
+      parser: parserB,
+      safeWriter: safeWriterB,
+      readOnly: false,
+      vaultName: 'p2-vault',
+    });
+
+    const gwB = await startGateway({
+      workspace: wsB,
+      port: testPort,
+      token: TOKEN,
+    });
+
+    const clientB = new OpenObGatewayClient({
+      url: gwB.url,
+      token: TOKEN,
+      clientId: 'agent-b',
+    });
+
+    // Step 3: Advance Gateway B to sequence 3 (B:1, B:2, B:3)
+    await clientB.createNote({ path: 'B1.md', content: '# B1' });
+    await clientB.createNote({ path: 'B2.md', content: '# B2' });
+    await clientB.createNote({ path: 'B3.md', content: '# B3' });
+
+    // Step 4: Reconnect with legacy cursor evt_1_legacyA
+    const sseRes = await fetch(`${gwB.url}/api/v1/events`, {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        'Last-Event-ID': legacyCursor,
+        Accept: 'text/event-stream',
+      },
+    });
+
+    const reader = sseRes.body!.getReader();
+    const decoder = new TextDecoder();
+
+    let resetReceived: WorkspaceChangeEvent | null = null;
+    const receivedEvents: WorkspaceChangeEvent[] = [];
+    let readDone = false;
+
+    // Read initial stream burst
+    while (!readDone) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value);
+      for (const line of text.split('\n')) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim();
+          if (data) {
+            const ev: WorkspaceChangeEvent = JSON.parse(data);
+            receivedEvents.push(ev);
+            if (ev.type === 'stream.reset') {
+              resetReceived = ev;
+              readDone = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Critical assertion: First semantic response MUST be stream.reset (legacy_cursor)
+    expect(resetReceived).not.toBeNull();
+    expect(resetReceived?.type).toBe('stream.reset');
+    expect(resetReceived?.reason).toBe('legacy_cursor');
+
+    // Critical assertion: NO partial replay of B2/B3 occurred as if evt_1 belonged to B
+    const noteEvents = receivedEvents.filter((e) => e.type.startsWith('note.'));
+    expect(noteEvents.length).toBe(0);
+
+    // Step 5: After reset/resync, mutate Gateway B (B4) and verify new events arrive
+    await clientB.createNote({ path: 'B4.md', content: '# B4' });
+
+    let b4Event: WorkspaceChangeEvent | null = null;
+    let readDone2 = false;
+    while (!readDone2) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value);
+      for (const line of text.split('\n')) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim();
+          if (data) {
+            const ev: WorkspaceChangeEvent = JSON.parse(data);
+            if (ev.path === 'B4.md') {
+              b4Event = ev;
+              readDone2 = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+    reader.cancel();
+
+    expect(b4Event).not.toBeNull();
+    expect(b4Event?.path).toBe('B4.md');
+    expect(b4Event?.serverInstanceId).toBe(wsB.getEventPublisher().serverInstanceId);
+
+    await gwB.stop();
+  });
+
+  it('10. P2-LEGACY: Legacy cursor on SAME process unconditionally triggers reset', async () => {
+    const testPort = await getFreePort();
+    const TOKEN = 'same-process-legacy-token';
+
+    const storage = new MemoryVaultStorage('same-proc-vault');
+    const index = new MemoryDocumentIndex();
+    const parser = new DefaultDocumentParser();
+    const safeWriter = new SafeWriter(storage);
+    const ws = new OpenObWorkspace({
+      storage,
+      index,
+      parser,
+      safeWriter,
+      readOnly: false,
+      vaultName: 'same-proc-vault',
+    });
+
+    const gw = await startGateway({
+      workspace: ws,
+      port: testPort,
+      token: TOKEN,
+    });
+
+    const client = new OpenObGatewayClient({
+      url: gw.url,
+      token: TOKEN,
+      clientId: 'same-proc-client',
+    });
+
+    // Create 3 notes on current instance (seq 1, 2, 3)
+    await client.createNote({ path: 'Note1.md', content: '# Note 1' });
+    await client.createNote({ path: 'Note2.md', content: '# Note 2' });
+    await client.createNote({ path: 'Note3.md', content: '# Note 3' });
+
+    // Connect with legacy cursor evt_1_rand
+    const sseRes = await fetch(`${gw.url}/api/v1/events`, {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        'Last-Event-ID': 'evt_1_samerun',
+        Accept: 'text/event-stream',
+      },
+    });
+
+    const reader = sseRes.body!.getReader();
+    const decoder = new TextDecoder();
+
+    let receivedReset = false;
+    let resetReason = '';
+
+    while (!receivedReset) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value);
+      for (const line of text.split('\n')) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim();
+          if (data) {
+            const ev = JSON.parse(data);
+            if (ev.type === 'stream.reset') {
+              receivedReset = true;
+              resetReason = ev.reason;
+              break;
+            }
+          }
+        }
+      }
+    }
+    reader.cancel();
+
+    expect(receivedReset).toBe(true);
+    expect(resetReason).toBe('legacy_cursor');
+
+    await gw.stop();
+  });
+
+  it('11. Malformed and near-legacy cursor inputs fail safely without crash', async () => {
+    const testPort = await getFreePort();
+    const TOKEN = 'malformed-cursor-token';
+
+    const storage = new MemoryVaultStorage('malformed-vault');
+    const index = new MemoryDocumentIndex();
+    const parser = new DefaultDocumentParser();
+    const safeWriter = new SafeWriter(storage);
+    const ws = new OpenObWorkspace({
+      storage,
+      index,
+      parser,
+      safeWriter,
+      readOnly: false,
+      vaultName: 'malformed-vault',
+    });
+
+    const gw = await startGateway({
+      workspace: ws,
+      port: testPort,
+      token: TOKEN,
+    });
+
+    const badCursors = [
+      'evt_',
+      'evt_bad_rand',
+      'evt_-1_rand',
+      'evt_999999999999999999999_rand',
+      'EVT_1_rand',
+      'random text string with spaces',
+      'a'.repeat(300),
+    ];
+
+    for (const badCursor of badCursors) {
+      const sseRes = await fetch(`${gw.url}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          'Last-Event-ID': badCursor,
+          Accept: 'text/event-stream',
+        },
+      });
+
+      expect(sseRes.status).toBe(200);
+      const reader = sseRes.body!.getReader();
+      const { value } = await reader.read();
+      reader.cancel();
+      expect(value).toBeDefined();
+    }
+
+    await gw.stop();
+  });
+
+  it('12. P2-LEGACY: 20x Advanced-Instance Legacy Cursor Stress Loop', async () => {
+    const testPort = await getFreePort();
+    const TOKEN = 'legacy-stress-20x-token';
+
+    for (let i = 1; i <= 20; i++) {
+      const storage = new MemoryVaultStorage(`legacy-stress-${i}`);
+      const index = new MemoryDocumentIndex();
+      const parser = new DefaultDocumentParser();
+      const safeWriter = new SafeWriter(storage);
+      const ws = new OpenObWorkspace({
+        storage,
+        index,
+        parser,
+        safeWriter,
+        readOnly: false,
+        vaultName: `legacy-stress-${i}`,
+      });
+
+      const gw = await startGateway({
+        workspace: ws,
+        port: testPort,
+        token: TOKEN,
+      });
+
+      const client = new OpenObGatewayClient({
+        url: gw.url,
+        token: TOKEN,
+        clientId: 'legacy-stress-client',
+      });
+
+      // Advance instance to sequence 3
+      await client.createNote({ path: `N1_${i}.md`, content: '# N1' });
+      await client.createNote({ path: `N2_${i}.md`, content: '# N2' });
+      await client.createNote({ path: `N3_${i}.md`, content: '# N3' });
+
+      // Connect with legacy cursor evt_1_old
+      const sseRes = await fetch(`${gw.url}/api/v1/events`, {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          'Last-Event-ID': `evt_1_old_${i}`,
+          Accept: 'text/event-stream',
+        },
+      });
+
+      const reader = sseRes.body!.getReader();
+      const decoder = new TextDecoder();
+
+      let resetReceived = false;
+      let resetReason = '';
+
+      while (!resetReceived) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value);
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data:')) {
+            const data = line.slice(5).trim();
+            if (data) {
+              const ev = JSON.parse(data);
+              if (ev.type === 'stream.reset') {
+                resetReceived = true;
+                resetReason = ev.reason;
+                break;
+              }
+            }
+          }
+        }
+      }
+      reader.cancel();
+
+      expect(resetReceived).toBe(true);
+      expect(resetReason).toBe('legacy_cursor');
+
+      await gw.stop();
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  });
 });

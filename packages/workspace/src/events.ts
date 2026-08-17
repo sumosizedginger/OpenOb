@@ -79,10 +79,7 @@ export function parseEventCursor(cursor: string | null | undefined): ParsedEvent
   if (trimmed.startsWith('evt_')) {
     const parts = trimmed.split('_');
     const seq = parseInt(parts[1], 10);
-    if (!isNaN(seq) && seq >= 0) {
-      return { sequence: seq, isLegacy: true };
-    }
-    return null;
+    return { sequence: isNaN(seq) ? 0 : seq, isLegacy: true };
   }
 
   // Format 3: plain integer "<seq>"
@@ -166,26 +163,27 @@ export class WorkspaceEventPublisher {
   /**
    * Replay missed events starting after lastSequence.
    * If lastSequence is 0, returns empty list (fresh connection).
+   * If clientServerInstanceId is omitted (legacy cursor), unconditionally returns reset.
    * If clientServerInstanceId doesn't match this process, or requested sequence is older than
-   * the retained ring buffer / comes from an unverified legacy run, returns reset.
+   * the retained ring buffer, returns reset.
    */
   getEventsSince(lastSequence: number, clientServerInstanceId?: string): EventReplayResult {
-    // 1. Explicit server instance mismatch -> reset due to server restart
-    if (clientServerInstanceId && clientServerInstanceId !== this.serverInstanceId) {
-      return { reset: true, reason: 'server_restarted' };
-    }
-
-    // 2. Fresh subscription (lastSequence <= 0)
-    if (lastSequence <= 0) {
+    // 1. Legacy cursor lacking serverInstanceId cannot prove process identity -> reset
+    if (!clientServerInstanceId) {
+      if (lastSequence > 0) {
+        return { reset: true, reason: 'legacy_cursor' };
+      }
       return { reset: false, events: [] };
     }
 
-    // 3. If no instance ID was provided (legacy cursor), fail safe on fresh/mismatched runs:
-    // If current instance sequenceCounter < lastSequence or buffer is empty, it came from prior run.
-    if (!clientServerInstanceId) {
-      if (this.sequenceCounter < lastSequence || this.buffer.length === 0) {
-        return { reset: true, reason: 'server_restarted' };
-      }
+    // 2. Explicit server instance mismatch -> reset due to server restart
+    if (clientServerInstanceId !== this.serverInstanceId) {
+      return { reset: true, reason: 'server_restarted' };
+    }
+
+    // 3. Fresh subscription (lastSequence <= 0)
+    if (lastSequence <= 0) {
+      return { reset: false, events: [] };
     }
 
     // 4. If client requested sequence ahead of current process sequenceCounter

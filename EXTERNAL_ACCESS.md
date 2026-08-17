@@ -296,7 +296,7 @@ Gateway-Managed Web UI (streaming fetch)
    - **Same Server Instance + Retained Sequence:** Missed events are replayed strictly in order (`{ reset: false, events: [...] }`).
    - **Same Server Instance + Expired Sequence:** When requested sequence has fallen outside the bounded ring buffer (1024 events), returns `event: stream.reset` with `reason: replay_window_expired`.
    - **Different Server Instance (Gateway Restart):** When client reconnects to a restarted gateway process with a different `serverInstanceId`, returns `event: stream.reset` with `reason: server_restarted`. The web client triggers a clean full vault refresh.
-   - **Legacy Cursor Compatibility (`evt_<seq>_<rand>`):** Parsed safely. If unverified across process restarts, fails safe by emitting `event: stream.reset` (`server_restarted`).
+   - **Legacy Cursor Compatibility (`evt_<seq>_<rand>`):** Accepted for backward compatibility. Because legacy cursors lack server-instance identity, any reconnect using a legacy cursor unconditionally triggers `event: stream.reset` with `reason: legacy_cursor`, guaranteeing safe full resynchronization without risk of partial/gapped replay.
 4. **Bearer Token Safety:** The browser client uses streaming `fetch()` with the `Authorization: Bearer <token>` header, avoiding exposing credentials in URL query strings or browser access logs.
 5. **Human Buffer Protection:**
    - **Clean Open Note:** Auto-updates immediately to authoritative latest V2 content.

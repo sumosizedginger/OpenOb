@@ -336,6 +336,7 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         const parsedCursor = parseEventCursor(lastEventIdHeader);
         const lastSeq = parsedCursor ? parsedCursor.sequence : 0;
         const lastServerInstanceId = parsedCursor?.serverInstanceId;
+        const isLegacy = parsedCursor?.isLegacy ?? false;
 
         const sendEvent = (event: WorkspaceChangeEvent) => {
           if (res.writableEnded || res.destroyed) return;
@@ -343,7 +344,19 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           res.write(`id: ${sseId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         };
 
-        if (lastSeq > 0) {
+        if (isLegacy) {
+          // Legacy cursors lack serverInstanceId and must unconditionally trigger stream.reset
+          const resetEvent: WorkspaceChangeEvent = {
+            schemaVersion: 1,
+            eventId: `reset_${Date.now()}`,
+            sequence: publisher.getCurrentSequence(),
+            serverInstanceId,
+            timestamp: Date.now(),
+            type: 'stream.reset',
+            reason: 'legacy_cursor',
+          };
+          sendEvent(resetEvent);
+        } else if (lastSeq > 0) {
           const replay = publisher.getEventsSince(lastSeq, lastServerInstanceId);
           if (replay.reset) {
             const resetEvent: WorkspaceChangeEvent = {
