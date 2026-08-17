@@ -184,9 +184,59 @@ export interface SetPropertyRequest {
 }
 
 /**
- * Structured response for any note mutation operation.
+ * Request payload to rename an existing note and refactor wikilinks.
  */
-export interface MutationResultDTO {
+export interface RenameNoteRequest {
+  readonly oldPath: string;
+  readonly newPath: string;
+  readonly expectedVersion: ExpectedVersionDTO;
+  readonly updateLinks?: boolean;
+}
+
+/**
+ * Request payload to delete an existing note.
+ */
+export interface DeleteNoteRequest {
+  readonly path: string;
+  readonly expectedVersion: ExpectedVersionDTO;
+}
+
+/**
+ * Structured response for a note rename operation.
+ */
+export interface RenameResultDTO {
+  readonly operation: 'rename';
+  readonly oldPath: VaultPath;
+  readonly newPath: VaultPath;
+  readonly previousVersion: ExpectedVersionDTO;
+  readonly currentVersion: ExpectedVersionDTO;
+  readonly updatedFiles: VaultPath[];
+  readonly rewrittenLinkCount: number;
+  readonly durableSuccess: boolean;
+  readonly indexStatus: 'verified' | 'degraded';
+  readonly indexError?: string;
+  readonly requestId?: string;
+  readonly clientId?: string;
+}
+
+/**
+ * Structured response for a note deletion operation.
+ */
+export interface DeleteResultDTO {
+  readonly operation: 'delete';
+  readonly path: VaultPath;
+  readonly previousVersion: ExpectedVersionDTO;
+  readonly durableSuccess: boolean;
+  readonly indexStatus: 'verified' | 'degraded';
+  readonly indexError?: string;
+  readonly requestId?: string;
+  readonly clientId?: string;
+}
+
+/**
+ * Structured response for single-note content and property mutations (create, update, set_property).
+ */
+export interface SingleNoteMutationResultDTO {
   readonly operation: 'create' | 'update' | 'set_property';
   readonly path: VaultPath;
   readonly previousVersion: ExpectedVersionDTO | null;
@@ -199,20 +249,28 @@ export interface MutationResultDTO {
 }
 
 /**
+ * Structured response for any note mutation operation.
+ */
+export type MutationResultDTO = SingleNoteMutationResultDTO | RenameResultDTO | DeleteResultDTO;
+
+/**
  * Structured audit record captured for every mutation attempt.
  */
 export interface MutationAuditEvent {
   readonly timestamp: string;
   readonly requestId?: string;
   readonly clientId?: string;
-  readonly operation: 'create' | 'update' | 'set_property';
+  readonly operation: 'create' | 'update' | 'set_property' | 'rename' | 'delete';
   readonly path: VaultPath;
+  readonly newPath?: VaultPath;
   readonly success: boolean;
   readonly previousVersion?: ExpectedVersionDTO | null;
   readonly currentVersion?: ExpectedVersionDTO | null;
   readonly grantedScope: string;
   readonly indexStatus: 'verified' | 'degraded';
   readonly errorMessage?: string;
+  readonly updatedFiles?: VaultPath[];
+  readonly rewrittenLinkCount?: number;
 }
 
 /**
@@ -233,6 +291,8 @@ export type ApiErrorCode =
   | 'FORBIDDEN'
   | 'CONFLICT'
   | 'PAYLOAD_TOO_LARGE'
+  | 'INDEX_DEGRADED'
+  | 'RECOVERY_REQUIRED'
   | 'STORAGE_ERROR'
   | 'UNSUPPORTED'
   | 'INTERNAL_ERROR';

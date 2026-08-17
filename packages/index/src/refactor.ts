@@ -208,7 +208,7 @@ export async function renameDocument(
               let replacementTarget = newBasename;
               if (targetName.includes('/')) {
                 const sourceDir = dirnameVaultPath(sourcePath);
-                if (targetName.startsWith(sourceDir ? `${sourceDir}/` : '')) {
+                if (sourceDir && targetName.startsWith(`${sourceDir}/`)) {
                   replacementTarget = newBasename;
                 } else {
                   replacementTarget = normNewPath.replace(/\.md$/, '');

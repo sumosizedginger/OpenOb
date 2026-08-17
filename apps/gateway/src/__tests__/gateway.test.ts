@@ -314,13 +314,13 @@ This note is literally named backlinks inside a subfolder.
     expect(err.code).toBe('NOT_FOUND');
   });
 
-  it('11. Mutating HTTP methods are rejected with 405 UNSUPPORTED in Phase 1', async () => {
-    const resPost = await apiFetch('/api/v1/notes/New.md', { method: 'POST' });
+  it('11. Mutating HTTP methods on read-only endpoints are rejected with 405 UNSUPPORTED', async () => {
+    const resPost = await apiFetch('/api/v1/entries', { method: 'POST' });
     expect(resPost.status).toBe(405);
     const errPost = await resPost.json();
     expect(errPost.code).toBe('UNSUPPORTED');
 
-    const resDelete = await apiFetch('/api/v1/notes/Welcome.md', { method: 'DELETE' });
+    const resDelete = await apiFetch('/api/v1/workspace', { method: 'DELETE' });
     expect(resDelete.status).toBe(405);
     const errDelete = await resDelete.json();
     expect(errDelete.code).toBe('UNSUPPORTED');
@@ -935,12 +935,15 @@ This note is literally named backlinks inside a subfolder.
     const malformedData = await malformedRes.json();
     expect(malformedData.code).toBe('INVALID_REQUEST');
 
-    // 2. DELETE method -> 405 UNSUPPORTED
+    // 2. DELETE method without workspace.delete scope -> 403 FORBIDDEN
     const deleteRes = await fetch(`${gateway.url}/api/v1/notes/Welcome.md`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'If-Match': '"tok-123"',
+      },
     });
-    expect(deleteRes.status).toBe(405);
+    expect(deleteRes.status).toBe(403);
   });
 
   it('27. P2A-1: Oversized REST request bodies reliably return HTTP 413 PAYLOAD_TOO_LARGE without ECONNRESET', async () => {
@@ -1056,5 +1059,193 @@ This note is literally named backlinks inside a subfolder.
     expect(res.exitCode).toBe(1);
     expect(res.output).toContain('Invalid or missing arguments');
     expect(res.output).toContain('Usage: openob set-property');
+  });
+
+  it('29. Phase 2B: REST Rename and Delete Note Endpoints with Concurrency Control', async () => {
+    const structPort = await getFreePort();
+    const structStorage = new MemoryVaultStorage('struct-vault');
+    const structIndex = new MemoryDocumentIndex();
+    const structWs = new OpenObWorkspace({
+      storage: structStorage,
+      index: structIndex,
+      readOnly: false,
+    });
+
+    const structGateway = await startGateway({
+      workspace: structWs,
+      port: structPort,
+      token: 'struct-token',
+      scopes: [
+        'workspace.read',
+        'workspace.search',
+        'workspace.write',
+        'properties.write',
+        'workspace.rename',
+        'workspace.delete',
+      ],
+    });
+
+    try {
+      // 1. Create a note and backlink note
+      const createRes = await fetch(`${structGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer struct-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: 'OriginalNote.md',
+          content: '# Original Body\nDetails here.',
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const createData = await createRes.json();
+      const origVersion = createData.currentVersion;
+
+      await fetch(`${structGateway.url}/api/v1/notes`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer struct-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: 'Referrer.md',
+          content: 'Reference to [[OriginalNote]] in text.',
+        }),
+      });
+
+      // 2. Rename note via POST /api/v1/notes/:path/rename
+      const renameRes = await fetch(`${structGateway.url}/api/v1/notes/OriginalNote.md/rename`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer struct-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          newPath: 'RenamedNote.md',
+          expectedVersion: origVersion,
+          updateLinks: true,
+        }),
+      });
+      expect(renameRes.status).toBe(200);
+      const renameData = await renameRes.json();
+      expect(renameData.operation).toBe('rename');
+      expect(renameData.oldPath).toBe('OriginalNote.md');
+      expect(renameData.newPath).toBe('RenamedNote.md');
+      expect(renameData.updatedFiles).toContain('Referrer.md');
+
+      const renamedVersion = renameData.currentVersion;
+
+      // 3. Verify referencing file updated
+      const refRes = await fetch(`${structGateway.url}/api/v1/notes/Referrer.md`, {
+        headers: { Authorization: 'Bearer struct-token' },
+      });
+      const refData = await refRes.json();
+      expect(refData.textContent).toContain('[[RenamedNote]]');
+
+      // 4. Stale delete attempt -> 409 CONFLICT
+      const staleDelRes = await fetch(`${structGateway.url}/api/v1/notes/RenamedNote.md`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: 'Bearer struct-token',
+          'If-Match': `"${origVersion.token}"`, // STALE
+        },
+      });
+      expect(staleDelRes.status).toBe(409);
+
+      // 5. Valid delete via DELETE /api/v1/notes/:path with If-Match header -> 200 OK
+      const delRes = await fetch(`${structGateway.url}/api/v1/notes/RenamedNote.md`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: 'Bearer struct-token',
+          'If-Match': `"${renamedVersion.token}"`,
+        },
+      });
+      expect(delRes.status).toBe(200);
+      const delData = await delRes.json();
+      expect(delData.operation).toBe('delete');
+      expect(delData.path).toBe('RenamedNote.md');
+
+      // 6. Verify note is deleted -> 404 NOT_FOUND
+      const checkDelRes = await fetch(`${structGateway.url}/api/v1/notes/RenamedNote.md`, {
+        headers: { Authorization: 'Bearer struct-token' },
+      });
+      expect(checkDelRes.status).toBe(404);
+    } finally {
+      await structGateway.stop();
+    }
+  });
+
+  it('30. Phase 2B: CLI rename and delete commands via REST gateway', async () => {
+    const cliPort = await getFreePort();
+    const cliStorage = new MemoryVaultStorage('cli-struct-vault');
+    const cliIndex = new MemoryDocumentIndex();
+    const cliWs = new OpenObWorkspace({
+      storage: cliStorage,
+      index: cliIndex,
+      readOnly: false,
+    });
+
+    const cliGateway = await startGateway({
+      workspace: cliWs,
+      port: cliPort,
+      token: 'cli-struct-token',
+      scopes: [
+        'workspace.read',
+        'workspace.search',
+        'workspace.write',
+        'properties.write',
+        'workspace.rename',
+        'workspace.delete',
+      ],
+    });
+
+    try {
+      // 1. Create note
+      const createCliRes = await runCli({
+        url: cliGateway.url,
+        token: 'cli-struct-token',
+        args: ['create', 'CliToRename.md', '--content', 'Initial CLI note', '--json'],
+      });
+      expect(createCliRes.exitCode).toBe(0);
+      const created = JSON.parse(createCliRes.output);
+
+      // 2. Rename via CLI
+      const renameCliRes = await runCli({
+        url: cliGateway.url,
+        token: 'cli-struct-token',
+        args: [
+          'rename',
+          'CliToRename.md',
+          'CliRenamed.md',
+          '--expected-version',
+          created.currentVersion.token,
+          '--json',
+        ],
+      });
+      expect(renameCliRes.exitCode).toBe(0);
+      const renamed = JSON.parse(renameCliRes.output);
+      expect(renamed.operation).toBe('rename');
+      expect(renamed.newPath).toBe('CliRenamed.md');
+
+      // 3. Delete via CLI
+      const deleteCliRes = await runCli({
+        url: cliGateway.url,
+        token: 'cli-struct-token',
+        args: [
+          'delete',
+          'CliRenamed.md',
+          '--expected-version',
+          renamed.currentVersion.token,
+          '--json',
+        ],
+      });
+      expect(deleteCliRes.exitCode).toBe(0);
+      const deleted = JSON.parse(deleteCliRes.output);
+      expect(deleted.operation).toBe('delete');
+      expect(deleted.path).toBe('CliRenamed.md');
+    } finally {
+      await cliGateway.stop();
+    }
   });
 });

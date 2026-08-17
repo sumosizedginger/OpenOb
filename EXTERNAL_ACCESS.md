@@ -81,8 +81,8 @@ External operations are gated by explicit capability scopes. **The gateway serve
 | `workspace.search` | Execute lexical query and tag search across the vault index                             | Phase 1  |
 | `workspace.write`  | Create new notes and update body content of existing notes                              | Phase 2A |
 | `properties.write` | Set or remove frontmatter properties on existing notes                                  | Phase 2A |
-| `workspace.rename` | Rename notes and update inbound wikilinks (Deferred)                                    | Phase 2B |
-| `workspace.delete` | Delete notes from vault (Deferred)                                                      | Phase 2B |
+| `workspace.rename` | Rename notes and update inbound wikilinks across vault                                  | Phase 2B |
+| `workspace.delete` | Delete notes from vault                                                                 | Phase 2B |
 
 ### Default Safe Configuration
 
@@ -96,9 +96,9 @@ npx openob-gateway /path/to/vault
 To enable mutation capabilities, explicit `--scopes` must be supplied:
 
 ```bash
-npx openob-gateway /path/to/vault --scopes workspace.read,workspace.search,workspace.write,properties.write
+npx openob-gateway /path/to/vault --scopes workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete
 # Or via environment variable:
-# OPENOB_SCOPES=workspace.read,workspace.search,workspace.write,properties.write
+# OPENOB_SCOPES=workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete
 ```
 
 ---
@@ -113,20 +113,22 @@ All endpoints bind strictly to loopback (`127.0.0.1`).
 
 ### Endpoints
 
-| Method  | Route                                                | Description                                                      | Required Scope     | Auth Required |
-| :------ | :--------------------------------------------------- | :--------------------------------------------------------------- | :----------------- | :------------ |
-| `GET`   | `/health`                                            | Server status, vault name, readOnly status                       | None               | No            |
-| `GET`   | `/api/v1/workspace`                                  | Workspace metadata, capabilities, and index health               | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/entries?path=`                              | List files and directories at subpath                            | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/notes/:path`                                | Read note metadata, headings, wikilinks, properties, raw body    | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/search?q=&tags=&pathPrefix=&limit=&offset=` | Search notes with lexical query and optional filters             | `workspace.search` | Yes           |
-| `GET`   | `/api/v1/notes/:path/backlinks`                      | Retrieve incoming backlinks referencing the note                 | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/notes/:path/links`                          | Retrieve outgoing wikilinks and resolution targets               | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/notes/:path/properties`                     | Retrieve YAML frontmatter properties                             | `workspace.read`   | Yes           |
-| `GET`   | `/api/v1/notes/:path/graph-neighbors`                | Retrieve local 1-hop graph structure                             | `workspace.read`   | Yes           |
-| `POST`  | `/api/v1/notes`                                      | Create a new note (fails if note exists; expectedVersion=null)   | `workspace.write`  | Yes           |
-| `PUT`   | `/api/v1/notes/:path`                                | Update note body content with optimistic concurrency control     | `workspace.write`  | Yes           |
-| `PATCH` | `/api/v1/notes/:path/properties`                     | Set or remove a frontmatter property with optimistic concurrency | `properties.write` | Yes           |
+| Method   | Route                                                | Description                                                      | Required Scope     | Auth Required |
+| :------- | :--------------------------------------------------- | :--------------------------------------------------------------- | :----------------- | :------------ |
+| `GET`    | `/health`                                            | Server status, vault name, readOnly status                       | None               | No            |
+| `GET`    | `/api/v1/workspace`                                  | Workspace metadata, capabilities, and index health               | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/entries?path=`                              | List files and directories at subpath                            | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/notes/:path`                                | Read note metadata, headings, wikilinks, properties, raw body    | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/search?q=&tags=&pathPrefix=&limit=&offset=` | Search notes with lexical query and optional filters             | `workspace.search` | Yes           |
+| `GET`    | `/api/v1/notes/:path/backlinks`                      | Retrieve incoming backlinks referencing the note                 | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/notes/:path/links`                          | Retrieve outgoing wikilinks and resolution targets               | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/notes/:path/properties`                     | Retrieve YAML frontmatter properties                             | `workspace.read`   | Yes           |
+| `GET`    | `/api/v1/notes/:path/graph-neighbors`                | Retrieve local 1-hop graph structure                             | `workspace.read`   | Yes           |
+| `POST`   | `/api/v1/notes`                                      | Create a new note (fails if note exists; expectedVersion=null)   | `workspace.write`  | Yes           |
+| `PUT`    | `/api/v1/notes/:path`                                | Update note body content with optimistic concurrency control     | `workspace.write`  | Yes           |
+| `PATCH`  | `/api/v1/notes/:path/properties`                     | Set or remove a frontmatter property with optimistic concurrency | `properties.write` | Yes           |
+| `POST`   | `/api/v1/notes/:path/rename`                         | Rename note and refactor inbound wikilinks with expectedVersion  | `workspace.rename` | Yes           |
+| `DELETE` | `/api/v1/notes/:path`                                | Delete note with optimistic concurrency expectedVersion          | `workspace.delete` | Yes           |
 
 ### Error Status Codes & Limits
 
@@ -140,7 +142,7 @@ All endpoints bind strictly to loopback (`127.0.0.1`).
 | `403`       | `FORBIDDEN`                        | Gateway started without required capability scope             |
 | `404`       | `NOT_FOUND`                        | Target note file does not exist                               |
 | `405`       | `UNSUPPORTED`                      | HTTP method not supported in gateway mode                     |
-| `409`       | `CONFLICT`                         | Optimistic concurrency mismatch or target file already exists |
+| `409`       | `CONFLICT` / `INDEX_DEGRADED`      | Optimistic concurrency mismatch, target exists, or index down |
 | `413`       | `PAYLOAD_TOO_LARGE`                | Request payload exceeds maximum body size limit               |
 | `500`       | `INTERNAL_ERROR`                   | Unexpected internal runtime exception                         |
 
@@ -158,10 +160,12 @@ openob read Notes/Welcome.md --json
 openob search "Architecture" --json
 openob backlinks Notes/Welcome.md --json
 
-# Mutation operations (requires running gateway with write scopes)
+# Mutation operations (requires running gateway with write/rename/delete scopes)
 openob create Notes/NewNote.md --content "Hello World" --json
 cat content.md | openob update Notes/NewNote.md --expected-version <token> --stdin --json
 openob set-property Notes/NewNote.md status "published" --expected-version <token> --json
+openob rename Notes/NewNote.md Notes/RenamedNote.md --expected-version <token> --json
+openob delete Notes/RenamedNote.md --expected-version <token> --json
 ```
 
 ---
@@ -179,3 +183,5 @@ openob set-property Notes/NewNote.md status "published" --expected-version <toke
 | `openob_create_note`    | Create a new note                           | `workspace.write`  |
 | `openob_update_note`    | Update note content with expectedVersion    | `workspace.write`  |
 | `openob_set_property`   | Set or remove property with expectedVersion | `properties.write` |
+| `openob_rename_note`    | Rename note and refactor wikilinks with OCC | `workspace.rename` |
+| `openob_delete_note`    | Delete note with expectedVersion OCC        | `workspace.delete` |

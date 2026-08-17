@@ -200,6 +200,67 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
       required: ['path', 'key', 'expectedVersion'],
     },
   },
+  {
+    name: 'openob_rename_note',
+    description:
+      'Safely rename a Markdown note and refactor incoming wikilinks across the vault using strict optimistic concurrency control.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        oldPath: {
+          type: 'string',
+          description: 'Current vault-relative path to the note (e.g. "Notes/OldName.md").',
+        },
+        newPath: {
+          type: 'string',
+          description: 'New vault-relative target path (e.g. "Notes/NewName.md").',
+        },
+        expectedVersion: {
+          type: 'object',
+          properties: {
+            token: {
+              type: 'string',
+              description: 'Version token previously returned by readNote.',
+            },
+          },
+          required: ['token'],
+          description:
+            'Expected version token of the source note for optimistic concurrency control.',
+        },
+        updateLinks: {
+          type: 'boolean',
+          description: 'Whether to refactor inbound wikilinks across the vault (default: true).',
+        },
+      },
+      required: ['oldPath', 'newPath', 'expectedVersion'],
+    },
+  },
+  {
+    name: 'openob_delete_note',
+    description:
+      'Safely delete a Markdown note from the vault using strict optimistic concurrency control.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Vault-relative path to the note to delete (e.g. "Notes/OldNote.md").',
+        },
+        expectedVersion: {
+          type: 'object',
+          properties: {
+            token: {
+              type: 'string',
+              description: 'Version token previously returned by readNote.',
+            },
+          },
+          required: ['token'],
+          description: 'Expected version token of the note for optimistic concurrency control.',
+        },
+      },
+      required: ['path', 'expectedVersion'],
+    },
+  },
 ];
 
 /**
@@ -373,6 +434,74 @@ export async function handleMcpToolCall(
             path: args.path,
             key: args.key,
             value: args.value,
+            expectedVersion: args.expectedVersion,
+          },
+          context
+        );
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'openob_rename_note': {
+        if (!args.oldPath || typeof args.oldPath !== 'string') {
+          return {
+            content: [{ type: 'text', text: 'Missing required argument: "oldPath"' }],
+            isError: true,
+          };
+        }
+        if (!args.newPath || typeof args.newPath !== 'string') {
+          return {
+            content: [{ type: 'text', text: 'Missing required argument: "newPath"' }],
+            isError: true,
+          };
+        }
+        if (!args.expectedVersion || typeof args.expectedVersion.token !== 'string') {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Missing required argument: "expectedVersion" with valid "token"',
+              },
+            ],
+            isError: true,
+          };
+        }
+        const res = await workspace.renameNote(
+          {
+            oldPath: args.oldPath,
+            newPath: args.newPath,
+            expectedVersion: args.expectedVersion,
+            updateLinks: args.updateLinks,
+          },
+          context
+        );
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'openob_delete_note': {
+        if (!args.path || typeof args.path !== 'string') {
+          return {
+            content: [{ type: 'text', text: 'Missing required argument: "path"' }],
+            isError: true,
+          };
+        }
+        if (!args.expectedVersion || typeof args.expectedVersion.token !== 'string') {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Missing required argument: "expectedVersion" with valid "token"',
+              },
+            ],
+            isError: true,
+          };
+        }
+        const res = await workspace.deleteNote(
+          {
+            path: args.path,
             expectedVersion: args.expectedVersion,
           },
           context

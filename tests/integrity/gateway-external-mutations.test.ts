@@ -98,7 +98,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
       '--token',
       token,
       '--scopes',
-      'workspace.read,workspace.search,workspace.write,properties.write',
+      'workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete',
     ]);
 
     try {
@@ -196,6 +196,7 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
       expect(propRes.code).toBe(0);
       const propObj = JSON.parse(propRes.stdout);
       expect(propObj.operation).toBe('set_property');
+      const v3Token = propObj.currentVersion.token;
 
       // Verify canonical frontmatter and body on disk
       const diskContent3 = await fs.readFile(path.join(tempVaultDir, 'CreatedByCli.md'), 'utf8');
@@ -229,14 +230,110 @@ describe('Gateway External Mutations Process-Level Suite (Phase 2A Real Artifact
       expect(staleRes.stderr).toMatch(/Conflict on/);
       expect(staleRes.stderr).toMatch(/CreatedByCli\.md/);
 
-      // Disk content remains unchanged
-      const diskContent4 = await fs.readFile(path.join(tempVaultDir, 'CreatedByCli.md'), 'utf8');
-      expect(diskContent4).toBe(diskContent3);
+      // 6. Create referencing note to verify wikilink refactoring during rename
+      const refCreateRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
+        execFile(
+          process.execPath,
+          [
+            cliBin,
+            '--url',
+            gatewayUrl,
+            '--token',
+            token,
+            'create',
+            'ReferencingCli.md',
+            '--content',
+            'Check out [[CreatedByCli]] for more info.\n',
+            '--json',
+          ],
+          (err, stdout) => {
+            resolve({ code: err ? 1 : 0, stdout });
+          }
+        );
+      });
+      expect(refCreateRes.code).toBe(0);
+
+      // 7. Rename note via CLI binary
+      const renameCliRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
+        execFile(
+          process.execPath,
+          [
+            cliBin,
+            '--url',
+            gatewayUrl,
+            '--token',
+            token,
+            'rename',
+            'CreatedByCli.md',
+            'RenamedByCli.md',
+            '--expected-version',
+            v3Token,
+            '--json',
+          ],
+          (err, stdout) => {
+            resolve({ code: err ? 1 : 0, stdout });
+          }
+        );
+      });
+      expect(renameCliRes.code).toBe(0);
+      const renameObj = JSON.parse(renameCliRes.stdout);
+      expect(renameObj.operation).toBe('rename');
+      expect(renameObj.newPath).toBe('RenamedByCli.md');
+      expect(renameObj.updatedFiles).toContain('ReferencingCli.md');
+      const v4Token = renameObj.currentVersion.token;
+
+      // Verify old file gone from disk, new file on disk, and referencing file rewritten
+      await expect(fs.access(path.join(tempVaultDir, 'CreatedByCli.md'))).rejects.toThrow();
+      const renamedDiskContent = await fs.readFile(
+        path.join(tempVaultDir, 'RenamedByCli.md'),
+        'utf8'
+      );
+      expect(renamedDiskContent).toContain('Second revision of text.');
+
+      const refDiskContent = await fs.readFile(
+        path.join(tempVaultDir, 'ReferencingCli.md'),
+        'utf8'
+      );
+      expect(refDiskContent).toContain('Check out [[RenamedByCli]] for more info.');
+
+      // 8. Delete note via CLI binary
+      const deleteCliRes = await new Promise<{ code: number; stdout: string }>((resolve) => {
+        execFile(
+          process.execPath,
+          [
+            cliBin,
+            '--url',
+            gatewayUrl,
+            '--token',
+            token,
+            'delete',
+            'RenamedByCli.md',
+            '--expected-version',
+            v4Token,
+            '--json',
+          ],
+          (err, stdout) => {
+            resolve({ code: err ? 1 : 0, stdout });
+          }
+        );
+      });
+      expect(deleteCliRes.code).toBe(0);
+      const deleteObj = JSON.parse(deleteCliRes.stdout);
+      expect(deleteObj.operation).toBe('delete');
+      expect(deleteObj.path).toBe('RenamedByCli.md');
+
+      // Verify file gone from disk, referencing note remains canonical Markdown
+      await expect(fs.access(path.join(tempVaultDir, 'RenamedByCli.md'))).rejects.toThrow();
+      const refFinalDiskContent = await fs.readFile(
+        path.join(tempVaultDir, 'ReferencingCli.md'),
+        'utf8'
+      );
+      expect(refFinalDiskContent).toBe(refDiskContent);
     } finally {
       gatewayChild.kill('SIGTERM');
       await new Promise((r) => setTimeout(r, 100));
     }
-  }, 15000);
+  }, 20000);
 
   it('Default gateway starting with no --scopes starts read-only and rejects CLI mutations with 403', async () => {
     const token = 'readonly-token-abc';

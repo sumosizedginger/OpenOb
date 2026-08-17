@@ -1,11 +1,13 @@
 import { VaultEntry } from '@okw/core';
 import {
   BacklinkDTO,
-  MutationResultDTO,
+  DeleteResultDTO,
   NoteReadResult,
   OpenObWorkspace,
+  RenameResultDTO,
   SearchResultDTO,
   SearchResultMatch,
+  SingleNoteMutationResultDTO,
   WorkspaceInfo,
 } from '@okw/workspace';
 
@@ -28,6 +30,8 @@ Usage:
   openob create <path> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
   openob update <path> --expected-version <token> [--content <content>] [--stdin] [--json] [--url <url>] [--token <token>]
   openob set-property <path> <key> [value] --expected-version <token> [--json] [--url <url>] [--token <token>]
+  openob rename <old> <new> --expected-version <token> [--json] [--url <url>] [--token <token>]
+  openob delete <path> --expected-version <token> [--json] [--url <url>] [--token <token>]
   openob help
 `;
 
@@ -265,6 +269,56 @@ async function runCliDirect(
         return { exitCode: 0, output };
       }
 
+      case 'rename': {
+        const oldPath = args[1];
+        const newPath = args[2];
+        if (!oldPath || !newPath || oldPath.startsWith('-') || newPath.startsWith('-')) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Invalid or missing arguments. Usage: openob rename <old> <new> --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for rename',
+          };
+        }
+        const result = await workspace.renameNote({
+          oldPath,
+          newPath,
+          expectedVersion: { token: expectedVersion },
+        });
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Renamed note: ${result.oldPath} -> ${result.newPath} (version: ${result.currentVersion.token}, updated ${result.updatedFiles.length} files)`;
+        return { exitCode: 0, output };
+      }
+
+      case 'delete': {
+        const path = args[1];
+        if (!path || path.startsWith('-')) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Invalid or missing path argument. Usage: openob delete <path> --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for delete',
+          };
+        }
+        const result = await workspace.deleteNote({
+          path,
+          expectedVersion: { token: expectedVersion },
+        });
+        const output = isJson ? JSON.stringify(result, null, 2) : `Deleted note: ${result.path}`;
+        return { exitCode: 0, output };
+      }
+
       case 'help':
       case '--help':
       case '-h':
@@ -304,6 +358,8 @@ async function runCliRemote(
     'create',
     'update',
     'set-property',
+    'rename',
+    'delete',
   ]);
   if (!validCommands.has(command)) {
     return handleHelpOrUnknown(command, isJson);
@@ -320,7 +376,7 @@ async function runCliRemote(
 
   async function remoteFetch(
     apiPath: string,
-    fetchMethod: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET',
+    fetchMethod: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET',
     body?: any
   ): Promise<any> {
     const targetUrl = `${cleanBase}${apiPath}`;
@@ -433,7 +489,7 @@ async function runCliRemote(
               'Error: Missing path argument. Usage: openob create <path> [--content <content>] [--stdin]',
           };
         }
-        const result: MutationResultDTO = await remoteFetch('/api/v1/notes', 'POST', {
+        const result: SingleNoteMutationResultDTO = await remoteFetch('/api/v1/notes', 'POST', {
           path,
           content: content ?? '',
         });
@@ -458,7 +514,7 @@ async function runCliRemote(
             output: 'Error: Missing required --expected-version <token> flag for note update',
           };
         }
-        const result: MutationResultDTO = await remoteFetch(
+        const result: SingleNoteMutationResultDTO = await remoteFetch(
           `/api/v1/notes/${encodeURIComponent(path)}`,
           'PUT',
           {
@@ -501,7 +557,7 @@ async function runCliRemote(
           }
         }
 
-        const result: MutationResultDTO = await remoteFetch(
+        const result: SingleNoteMutationResultDTO = await remoteFetch(
           `/api/v1/notes/${encodeURIComponent(path)}/properties`,
           'PATCH',
           {
@@ -513,6 +569,64 @@ async function runCliRemote(
         const output = isJson
           ? JSON.stringify(result, null, 2)
           : `Set property "${key}" on ${result.path} (version: ${result.currentVersion.token})`;
+        return { exitCode: 0, output };
+      }
+
+      case 'rename': {
+        const oldPath = args[1];
+        const newPath = args[2];
+        if (!oldPath || !newPath || oldPath.startsWith('-') || newPath.startsWith('-')) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Invalid or missing arguments. Usage: openob rename <old> <new> --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for rename',
+          };
+        }
+
+        const result: RenameResultDTO = await remoteFetch(
+          `/api/v1/notes/${encodeURIComponent(oldPath)}/rename`,
+          'POST',
+          {
+            newPath,
+            expectedVersion: { token: expectedVersion },
+          }
+        );
+        const output = isJson
+          ? JSON.stringify(result, null, 2)
+          : `Renamed note: ${result.oldPath} -> ${result.newPath} (version: ${result.currentVersion.token}, updated ${result.updatedFiles.length} files)`;
+        return { exitCode: 0, output };
+      }
+
+      case 'delete': {
+        const path = args[1];
+        if (!path || path.startsWith('-')) {
+          return {
+            exitCode: 1,
+            output:
+              'Error: Invalid or missing path argument. Usage: openob delete <path> --expected-version <token>',
+          };
+        }
+        if (!expectedVersion) {
+          return {
+            exitCode: 1,
+            output: 'Error: Missing required --expected-version <token> flag for delete',
+          };
+        }
+
+        const result: DeleteResultDTO = await remoteFetch(
+          `/api/v1/notes/${encodeURIComponent(path)}`,
+          'DELETE',
+          {
+            expectedVersion: { token: expectedVersion },
+          }
+        );
+        const output = isJson ? JSON.stringify(result, null, 2) : `Deleted note: ${result.path}`;
         return { exitCode: 0, output };
       }
 

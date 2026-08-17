@@ -283,6 +283,105 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         return;
       }
 
+      // POST /api/v1/notes/:path/rename (Rename note)
+      if (
+        pathname.startsWith('/api/v1/notes/') &&
+        pathname.endsWith('/rename') &&
+        method === 'POST'
+      ) {
+        const rawNoteSegment = pathname.slice(
+          '/api/v1/notes/'.length,
+          pathname.length - '/rename'.length
+        );
+        if (!rawNoteSegment) {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_REQUEST',
+              message: 'Source note path must be specified',
+            })
+          );
+          return;
+        }
+
+        let decodedSegment: string;
+        try {
+          decodedSegment = decodeURIComponent(rawNoteSegment);
+        } catch {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_PATH',
+              message: `Malformed URI encoding in source note path: "${rawNoteSegment}"`,
+            })
+          );
+          return;
+        }
+
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.renameNote(
+          {
+            oldPath: decodedSegment,
+            newPath: body.newPath,
+            expectedVersion: body.expectedVersion,
+            updateLinks: body.updateLinks,
+          },
+          clientContext
+        );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // DELETE /api/v1/notes/:path (Delete note)
+      if (pathname.startsWith('/api/v1/notes/') && method === 'DELETE') {
+        const rawNoteSegment = pathname.slice('/api/v1/notes/'.length);
+        if (!rawNoteSegment) {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_REQUEST',
+              message: 'Note path must be specified',
+            })
+          );
+          return;
+        }
+
+        let decodedSegment: string;
+        try {
+          decodedSegment = decodeURIComponent(rawNoteSegment);
+        } catch {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_PATH',
+              message: `Malformed URI encoding in note path: "${rawNoteSegment}"`,
+            })
+          );
+          return;
+        }
+
+        let expectedVersion: any;
+        const ifMatch = req.headers['if-match'];
+        if (ifMatch && typeof ifMatch === 'string') {
+          expectedVersion = { token: ifMatch.replace(/^"|"$/g, '').trim() };
+        } else {
+          const body = await readJsonBody(req, maxBodyBytes);
+          expectedVersion = body?.expectedVersion;
+        }
+
+        const result = await workspace.deleteNote(
+          {
+            path: decodedSegment,
+            expectedVersion,
+          },
+          clientContext
+        );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
       // GET routes
       if (method === 'GET') {
         // GET /api/v1/workspace

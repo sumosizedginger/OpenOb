@@ -59,6 +59,22 @@ export class PayloadTooLargeError extends WorkspaceError {
   }
 }
 
+export class IndexDegradedError extends WorkspaceError {
+  constructor(
+    message = 'Index Degraded: Workspace index must be rebuilt before structural operations'
+  ) {
+    super(message, 'INDEX_DEGRADED', 409);
+    this.name = 'IndexDegradedError';
+  }
+}
+
+export class RecoveryRequiredError extends WorkspaceError {
+  constructor(message: string, path?: string, details?: Record<string, any>) {
+    super(message, 'RECOVERY_REQUIRED', 500, path, details);
+    this.name = 'RecoveryRequiredError';
+  }
+}
+
 /**
  * Maps an internal exception to a structured API error status code and DTO.
  */
