@@ -20,6 +20,8 @@ async function getFreePort(): Promise<number> {
 describe('OpenOb Gateway REST API & Security Tests (@okw/gateway)', () => {
   let gateway: RunningGateway;
   let workspace: OpenObWorkspace;
+  let tempDist: string;
+  let cliBinPath: string;
   const TEST_TOKEN = 'secret-test-token-xyz-123';
 
   beforeAll(async () => {
@@ -96,11 +98,34 @@ This note is literally named backlinks inside a subfolder.
       port: 0, // dynamic port for clean test isolation
       token: TEST_TOKEN,
     });
+
+    // 1. Build an isolated production gateway artifact specifically for CLI process tests
+    const { execFile } = await import('node:child_process');
+    const path = await import('node:path');
+    const BUILD_SCRIPT = path.resolve(__dirname, '../../build.js');
+    tempDist = path.resolve(
+      __dirname,
+      `../../.dist-gw-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    await new Promise<void>((resolve, reject) => {
+      execFile(process.execPath, [BUILD_SCRIPT, '--outdir', tempDist], (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`Failed to build isolated gateway CLI: ${stderr || stdout}`));
+        } else {
+          resolve();
+        }
+      });
+    });
+    cliBinPath = path.join(tempDist, 'bin/cli.js');
   });
 
   afterAll(async () => {
     if (gateway) {
       await gateway.stop();
+    }
+    if (tempDist) {
+      const fs = await import('node:fs/promises');
+      await fs.rm(tempDist, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -566,10 +591,13 @@ This note is literally named backlinks inside a subfolder.
 
   it('20. Clean State Executable Test: Spawns built CLI executable as real process', async () => {
     const { execFile } = await import('node:child_process');
-    const path = await import('node:path');
-    const cliBinPath = path.resolve(__dirname, '../../dist/bin/cli.js');
+    const fs = await import('node:fs/promises');
 
-    // Run `node <cliBinPath> --url <gateway.url> --token <TEST_TOKEN> info --json`
+    // 1. Verify that cliBinPath is the self-contained esbuild bundle (does not contain unbundled relative package src imports)
+    const cliSource = await fs.readFile(cliBinPath, 'utf8');
+    expect(cliSource).not.toMatch(/from\s+['"][^'"]*packages\/[^'"]*\/src/);
+
+    // 2. Run `node <cliBinPath> --url <gateway.url> --token <TEST_TOKEN> info --json`
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile(
         process.execPath,

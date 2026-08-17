@@ -45,15 +45,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run Test Suites
-        run: npm test
-
       - name: Build Production Artifacts (Gateway & Web)
         run: npm run build
 
       - name: Verify Executable Packaging & Binary Invocation
         run: |
           node apps/gateway/dist/bin/cli.js --help
+
+      - name: Run Test Suites
+        run: npm test
 
   e2e:
     name: Playwright E2E Browser Concurrency Tests
