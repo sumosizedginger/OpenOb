@@ -143,6 +143,23 @@ Diagnostics should prefer:
 - timing
 - anonymized size/count information
 
+## Gateway Authorization & Capability Scopes
+
+The OpenOb service boundary enforces explicit capability scoping on all operations:
+
+- **`workspace.read`**: Reading notes, attachments, metadata, links, backlinks, event stream, and querying/listing views.
+- **`workspace.search`**: Full-text and tag searches across vault indices.
+- **`workspace.write`**: Creating and editing markdown notes with OCC version token protection.
+- **`properties.write`**: Modifying note frontmatter key-value pairs with OCC version token protection.
+- **`workspace.rename`**: Atomic rename/move operations with automated wikilink reference updates.
+- **`workspace.delete`**: Deleting notes and directories.
+- **`workspace.views.write`**: Creating, updating, and deleting persisted database views under `.openob/views/`.
+
+### Default Security Posture
+
+- **Read-Only by Default**: The standalone Gateway binary defaults to read-only mode (`[workspace.read, workspace.search]`).
+- **Server Authority**: Scopes are configured exclusively by the operator on the server side and can never be forged or escalated via client HTTP headers, query parameters, or MCP payloads.
+
 ## Security Review Triggers
 
 Require focused review when adding:

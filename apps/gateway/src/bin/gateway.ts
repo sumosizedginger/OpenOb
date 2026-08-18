@@ -16,7 +16,41 @@ export interface GatewayCliOptions {
   scopes: string[];
   serveWeb: boolean;
   webDistPath?: string;
+  showHelp?: boolean;
 }
+
+export const GATEWAY_HELP_TEXT = `OpenOb Gateway Server
+
+Usage:
+  openob-gateway [vault-path] [options]
+
+Options:
+  --vault <path>       Path to the note vault directory (defaults to current working directory)
+  --port <port>        Port to listen on (default: 4200, env: OPENOB_PORT)
+  --host <ip>          Loopback IP to bind to (default: 127.0.0.1)
+  --token <token>      Bearer authentication token (auto-generated if omitted)
+  --scopes <scopes>    Comma-separated list of capability scopes (default: read-only)
+  --serve-web          Enable static web client delivery on the gateway server
+  --web-dist <path>    Custom path to web distribution assets directory
+  --help, -h           Show this help message and exit
+
+Capability Scopes:
+  workspace.read         Read notes, metadata, links, backlinks, event stream, and run queries
+  workspace.search       Execute keyword and tag searches across vault documents
+  workspace.write        Create and update markdown notes with OCC version protection
+  properties.write       Modify note frontmatter properties with OCC version protection
+  workspace.rename       Rename notes and folders with atomic link reference migration
+  workspace.delete       Delete notes and folders
+  workspace.views.write  Create, update, and delete persisted saved views in .openob/views/
+
+Security & Defaults:
+  By default, the gateway runs in READ-ONLY mode with scopes:
+    workspace.read, workspace.search
+
+Example (Writable Gateway with Web UI):
+  openob-gateway --vault ./notes --serve-web \\
+    --scopes workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete,workspace.views.write
+`;
 
 export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
   let vaultPath = process.env.OPENOB_VAULT || '';
@@ -26,10 +60,14 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
   let rawScopes = process.env.OPENOB_SCOPES || '';
   let serveWeb = process.env.OPENOB_SERVE_WEB === 'true' || process.env.OPENOB_SERVE_WEB === '1';
   let webDistPath = process.env.OPENOB_WEB_DIST || undefined;
+  let showHelp = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--vault' && i + 1 < argv.length) {
+    if (arg === '--help' || arg === '-h') {
+      showHelp = true;
+      return { vaultPath, host, port, token, scopes: [], serveWeb, webDistPath, showHelp: true };
+    } else if (arg === '--vault' && i + 1 < argv.length) {
       vaultPath = argv[++i];
     } else if (arg === '--port' && i + 1 < argv.length) {
       port = parseInt(argv[++i], 10);
@@ -45,6 +83,8 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
       webDistPath = argv[++i];
     } else if (!arg.startsWith('-') && !vaultPath) {
       vaultPath = arg;
+    } else {
+      throw new Error(`Unknown or invalid command line option: "${arg}". Use --help for usage.`);
     }
   }
 
@@ -59,11 +99,22 @@ export function parseGatewayArgs(argv: string[]): GatewayCliOptions {
         .filter(Boolean)
     : ['workspace.read', 'workspace.search'];
 
-  return { vaultPath, host, port, token, scopes, serveWeb, webDistPath };
+  return { vaultPath, host, port, token, scopes, serveWeb, webDistPath, showHelp };
 }
 
 export async function runGatewayProcess(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const options = parseGatewayArgs(argv);
+  let options: GatewayCliOptions;
+  try {
+    options = parseGatewayArgs(argv);
+  } catch (err: any) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exit(1);
+  }
+
+  if (options.showHelp) {
+    process.stdout.write(GATEWAY_HELP_TEXT);
+    process.exit(0);
+  }
 
   // Validate host loopback binding
   try {
@@ -104,7 +155,9 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
   await rebuildVaultIndex(storage, index, parser);
 
   const isReadOnly =
-    !options.scopes.includes('workspace.write') && !options.scopes.includes('properties.write');
+    !options.scopes.includes('workspace.write') &&
+    !options.scopes.includes('properties.write') &&
+    !options.scopes.includes('workspace.views.write');
 
   const workspace = new OpenObWorkspace({
     storage,

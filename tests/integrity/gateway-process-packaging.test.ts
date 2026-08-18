@@ -482,4 +482,62 @@ describe('Gateway Process Packaging & Runtime Closure (Tests A-F)', () => {
       await new Promise((r) => setTimeout(r, 200));
     }
   });
+
+  it('TEST I: openob-gateway --help -> exit 0, prints usage and capability scope vocabulary', async () => {
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (resolve) => {
+        const child = spawn(process.execPath, [gatewayBin, '--help'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk.toString();
+        });
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+        });
+
+        child.on('exit', (code) => {
+          resolve({ code, stdout, stderr });
+        });
+      }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('OpenOb Gateway Server');
+    expect(result.stdout).toContain('Usage:');
+    expect(result.stdout).toContain('--vault');
+    expect(result.stdout).toContain('--scopes');
+    expect(result.stdout).toContain('workspace.read');
+    expect(result.stdout).toContain('workspace.views.write');
+    expect(result.stdout).toContain('READ-ONLY mode');
+  });
+
+  it('TEST J: openob-gateway with unknown flags -> non-zero exit code and error diagnostic', async () => {
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (resolve) => {
+        const child = spawn(process.execPath, [gatewayBin, '--unknown-flag-xyz'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk.toString();
+        });
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+        });
+
+        child.on('exit', (code) => {
+          resolve({ code, stdout, stderr });
+        });
+      }
+    );
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toMatch(/Unknown or invalid command line option/);
+  });
 });

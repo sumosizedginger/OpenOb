@@ -101,6 +101,29 @@ export interface EmbeddingProvider {
 }
 ```
 
+## Workspace Capability Scopes
+
+All operations through `OpenObWorkspace` and Gateway REST endpoints are governed by capability scopes:
+
+| Scope                   | Authorization & Actions                                                                             |
+| :---------------------- | :-------------------------------------------------------------------------------------------------- |
+| `workspace.read`        | Read note contents, metadata, links, backlinks, event stream, and list/get/run queries/saved views. |
+| `workspace.search`      | Execute keyword and tag searches across vault documents.                                            |
+| `workspace.write`       | Create new notes and update markdown note contents with OCC version protection.                     |
+| `properties.write`      | Modify note frontmatter properties with OCC version protection.                                     |
+| `workspace.rename`      | Move and rename notes and folders with atomic link reference migration.                             |
+| `workspace.delete`      | Delete notes and folders with OCC protection.                                                       |
+| `workspace.views.write` | Create, update, and delete persisted saved views in `.openob/views/` with OCC protection.           |
+
+### Gateway Defaults & Operations
+
+- **Default Posture (Read-Only)**: When started without explicit write scopes, `openob-gateway` runs in read-only mode with `[workspace.read, workspace.search]`.
+- **Writable Invocations**: An operator must explicitly specify write capability scopes when launching a writable gateway:
+  ```bash
+  openob-gateway --vault ./notes --serve-web \
+    --scopes workspace.read,workspace.search,workspace.write,properties.write,workspace.rename,workspace.delete,workspace.views.write
+  ```
+
 ## Plugin Host
 
 ```ts

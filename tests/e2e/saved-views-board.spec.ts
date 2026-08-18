@@ -179,4 +179,68 @@ Third details.`
     // The "todo" column count should now be 0 or empty, and "done" column should have First Task and Third Task
     await expect(page.locator('text=First Task').first()).toBeVisible({ timeout: 10000 });
   });
+
+  test('Documented default writable gateway allows Web UI to Save, Update, and Delete views without manual scope injection', async ({
+    page,
+  }) => {
+    // Start a separate gateway without explicit scopes (using default writable scopes)
+    const defPort = await getFreePort();
+    const defGateway = await startGateway({
+      workspace,
+      port: defPort,
+      token: 'def-writable-token',
+      serveWeb: true,
+      // No explicit scopes -> server infers default writable scopes including workspace.views.write
+    });
+
+    try {
+      await page.goto('/');
+      await expect(page.locator('.logo-text')).toBeVisible({ timeout: 15000 });
+
+      const connectRes = await page.evaluate(
+        async ({ url, token }) => {
+          if ((window as any).__connectToGateway) {
+            return await (window as any).__connectToGateway(url, token);
+          }
+          return { success: false, error: '__connectToGateway not found' };
+        },
+        { url: defGateway.url, token: 'def-writable-token' }
+      );
+      expect(connectRes.success).toBe(true);
+
+      // 1. Open Database Views
+      const viewsButton = page.locator('button[title="Database Views"]').first();
+      await expect(viewsButton).toBeVisible();
+      await viewsButton.click();
+
+      // 2. Save View
+      const saveBtn = page.locator('button:has-text("Save View")').first();
+      await expect(saveBtn).toBeVisible();
+      await saveBtn.click();
+
+      const nameInput = page.locator('input[placeholder*="Active Tasks"]').first();
+      await expect(nameInput).toBeVisible();
+      await nameInput.fill('Default Writable View');
+      await page.locator('button[type="submit"]:has-text("Save View")').click();
+
+      // 3. Verify Saved View is loaded
+      const select = page.locator('select').first();
+      await expect(select).toContainText('Default Writable View', { timeout: 5000 });
+
+      // 4. Delete View
+      const deleteBtn = page.locator('button[title="Delete Saved View"]').first();
+      await expect(deleteBtn).toBeVisible();
+      await deleteBtn.click();
+
+      // Confirm Delete Modal
+      const confirmDeleteBtn = page.locator('button:has-text("Delete View")').last();
+      await expect(confirmDeleteBtn).toBeVisible();
+      await confirmDeleteBtn.click();
+
+      // View removed
+      await expect(select).not.toContainText('Default Writable View');
+    } finally {
+      await defGateway.stop();
+    }
+  });
 });

@@ -229,6 +229,7 @@ export function useVault() {
       safeWriter,
       coordinator: coordinatorRef.current,
       vaultName: 'Open Knowledge Workspace',
+      readOnly: false,
     });
     return new LocalWorkspaceBackend(ws);
   });
@@ -769,6 +770,7 @@ export function useVault() {
         parser,
         safeWriter: newWriter,
         vaultName: 'Open Knowledge Workspace',
+        readOnly: false,
       });
       setStorage(memStorage);
       setSafeWriter(newWriter);
@@ -830,6 +832,7 @@ export function useVault() {
           parser,
           safeWriter: newWriter,
           vaultName: handle.name,
+          readOnly: false,
         });
 
         setStorage(fsaStorage);

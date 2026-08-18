@@ -286,6 +286,7 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           'properties.write',
           'workspace.rename',
           'workspace.delete',
+          'workspace.views.write',
         ]
       : ['workspace.read', 'workspace.search'];
 

@@ -397,7 +397,8 @@ export class SavedViewStore {
     };
 
     const json = JSON.stringify(envelope, null, 2);
-    // Expected absence (null) ensures we don't accidentally overwrite
+    // Creation safety is guaranteed by high-entropy UUID-based view ID uniqueness and path validation.
+    // expectedVersion: null indicates no version precondition is required on initial file creation.
     const writeResult = await this.safeWriter.safeSave(path, json, {
       expectedVersion: null,
     });

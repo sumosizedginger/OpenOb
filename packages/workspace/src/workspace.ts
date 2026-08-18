@@ -1803,7 +1803,8 @@ export class OpenObWorkspace {
       (requiredScope === 'workspace.write' ||
         requiredScope === 'properties.write' ||
         requiredScope === 'workspace.rename' ||
-        requiredScope === 'workspace.delete')
+        requiredScope === 'workspace.delete' ||
+        requiredScope === 'workspace.views.write')
     ) {
       throw new ForbiddenError(
         `Forbidden: Workspace is mounted in read-only mode and cannot execute "${requiredScope}" operations`

@@ -246,4 +246,80 @@ Task B body.`
 
     await workspace.deleteSavedView(created.view.id, { expectedVersion: created.version });
   });
+
+  it('5. R3E-2 / P3E-P2: Default writable gateway (no explicit scopes) infers workspace.views.write and allows Saved View CRUD', async () => {
+    const rwIndex = await SqliteDocumentIndex.create();
+    const rwWorkspace = new OpenObWorkspace({
+      storage: new NodeFsVaultStorage(tempVaultDir),
+      index: rwIndex,
+      readOnly: false, // Writable workspace
+    });
+    // Start gateway with NO explicit scopes parameter
+    const rwServer = createGatewayServer({
+      workspace: rwWorkspace,
+      token: 'rw-token',
+    });
+    await new Promise<void>((resolve) => {
+      rwServer.listen(0, '127.0.0.1', () => resolve());
+    });
+    const rwAddr = rwServer.address() as { port: number };
+    const rwClient = new OpenObGatewayClient({
+      url: `http://127.0.0.1:${rwAddr.port}`,
+      token: 'rw-token',
+    });
+
+    // Create Saved View succeeds on default writable gateway
+    const created = await rwClient.createSavedView({
+      name: 'Default Writable View',
+      type: 'table',
+    });
+    expect(created.view.id).toMatch(/^view_/);
+    expect(created.view.name).toBe('Default Writable View');
+
+    // Clean up
+    await rwClient.deleteSavedView(created.view.id, { expectedVersion: created.version });
+    await new Promise<void>((resolve) => rwServer.close(() => resolve()));
+    await rwIndex.close?.();
+  });
+
+  it('6. Explicit scopes missing workspace.views.write strictly blocks view mutations (403)', async () => {
+    const customIndex = await SqliteDocumentIndex.create();
+    const customWorkspace = new OpenObWorkspace({
+      storage: new NodeFsVaultStorage(tempVaultDir),
+      index: customIndex,
+      readOnly: false,
+    });
+    // Explicit scopes grant workspace.write but NOT workspace.views.write
+    const customServer = createGatewayServer({
+      workspace: customWorkspace,
+      token: 'custom-token',
+      scopes: ['workspace.read', 'workspace.write'],
+    });
+    await new Promise<void>((resolve) => {
+      customServer.listen(0, '127.0.0.1', () => resolve());
+    });
+    const customAddr = customServer.address() as { port: number };
+    const customClient = new OpenObGatewayClient({
+      url: `http://127.0.0.1:${customAddr.port}`,
+      token: 'custom-token',
+    });
+
+    // Creating note succeeds
+    const note = await customClient.createNote({
+      path: 'CustomScopeNote.md',
+      content: 'Hello with custom scope',
+    });
+    expect(note.path).toBe('CustomScopeNote.md');
+
+    // Creating saved view fails with 403 Forbidden
+    await expect(
+      customClient.createSavedView({
+        name: 'Forbidden Custom View',
+        type: 'table',
+      })
+    ).rejects.toThrow(GatewayError);
+
+    await new Promise<void>((resolve) => customServer.close(() => resolve()));
+    await customIndex.close?.();
+  });
 });

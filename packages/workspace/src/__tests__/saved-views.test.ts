@@ -216,4 +216,94 @@ describe('Phase 3E: Saved Views Persistence & Validation Unit Tests', () => {
     const searchRes = await workspace.search({ query: 'Hidden View' });
     expect(searchRes.total).toBe(0);
   });
+
+  it('6. R3E-1 / P3E-P1: Context-less readOnly workspace centrally blocks all view mutations with ForbiddenError', async () => {
+    // 1. Create a genuinely read-only workspace with NO client context
+    const roStorage = new MemoryVaultStorage();
+    const roIndex = new MemoryDocumentIndex();
+    const roWorkspace = new OpenObWorkspace({
+      storage: roStorage,
+      index: roIndex,
+      readOnly: true, // Read-only!
+    });
+
+    // 2. Note write blocked
+    await expect(
+      roWorkspace.createNote({ path: 'New.md', content: 'Blocked note' })
+    ).rejects.toThrow();
+
+    // 3. Context-less createSavedView MUST throw ForbiddenError
+    await expect(
+      roWorkspace.createSavedView({
+        name: 'Blocked View',
+        type: 'table',
+      })
+    ).rejects.toThrow(/Forbidden/);
+
+    // 4. Context-less updateSavedView MUST throw ForbiddenError
+    await expect(
+      roWorkspace.updateSavedView('view_12345', {
+        name: 'Blocked Update',
+        expectedVersion: { token: 'tok_1' },
+      })
+    ).rejects.toThrow(/Forbidden/);
+
+    // 5. Context-less deleteSavedView MUST throw ForbiddenError
+    await expect(
+      roWorkspace.deleteSavedView('view_12345', {
+        expectedVersion: { token: 'tok_1' },
+      })
+    ).rejects.toThrow(/Forbidden/);
+
+    // 6. Context-less read/list/run are ALLOWED
+    const list = await roWorkspace.listSavedViews();
+    expect(list).toEqual([]);
+  });
+
+  it('7. Standalone web mode integration: explicitly writable local workspace supports complete saved-view CRUD', async () => {
+    const standaloneStorage = new MemoryVaultStorage();
+    const standaloneIndex = new MemoryDocumentIndex();
+    const standaloneWs = new OpenObWorkspace({
+      storage: standaloneStorage,
+      index: standaloneIndex,
+      readOnly: false, // Truthful standalone editing application
+    });
+
+    await standaloneWs.createNote({
+      path: 'Doc.md',
+      content: '---\ntitle: Standalone Note\nstatus: active\n---\nBody',
+    });
+
+    // Create
+    const created = await standaloneWs.createSavedView({
+      name: 'Local Board',
+      type: 'board',
+      groupBy: 'status',
+    });
+    expect(created.view.id).toBeDefined();
+
+    // List
+    const list = await standaloneWs.listSavedViews();
+    expect(list.length).toBe(1);
+
+    // Run
+    const runRes = await standaloneWs.runSavedView(created.view.id);
+    expect(runRes.total).toBe(1);
+    expect(runRes.rows[0].title).toBe('Standalone Note');
+
+    // Update
+    const updated = await standaloneWs.updateSavedView(created.view.id, {
+      name: 'Local Board Renamed',
+      expectedVersion: created.version,
+    });
+    expect(updated.view.name).toBe('Local Board Renamed');
+
+    // Delete
+    const delRes = await standaloneWs.deleteSavedView(created.view.id, {
+      expectedVersion: updated.version,
+    });
+    expect(delRes.durableSuccess).toBe(true);
+
+    expect(await standaloneWs.listSavedViews()).toEqual([]);
+  });
 });
