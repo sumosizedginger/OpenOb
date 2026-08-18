@@ -1,5 +1,8 @@
 {
   "files": [],
+  "compilerOptions": {
+    "types": []
+  },
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/vault" },
