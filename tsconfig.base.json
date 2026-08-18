@@ -13,7 +13,6 @@
     "sourceMap": true,
     "composite": true,
     "isolatedModules": true,
-    "types": [],
-    "typeRoots": []
+    "types": []
   }
 }
