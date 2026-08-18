@@ -30,9 +30,16 @@ const ISO_DATE_REGEX =
   /^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
 
 function isIsoDate(str: string): boolean {
-  return (
-    typeof str === 'string' && ISO_DATE_REGEX.test(str.trim()) && !isNaN(Date.parse(str.trim()))
-  );
+  if (typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (!ISO_DATE_REGEX.test(trimmed)) return false;
+  const timestamp = Date.parse(trimmed);
+  if (isNaN(timestamp)) return false;
+  const parts = trimmed.split(/[-T\s]/);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  return true;
 }
 
 function parseBoolean(val: any): boolean | null {
@@ -170,35 +177,39 @@ export function matchPropertyFilter(doc: ParsedDocument, filter: PropertyFilter)
     }
 
     case 'greater_than': {
-      if (val === undefined || val === null) return false;
+      if (val === undefined || val === null || target === undefined || target === null)
+        return false;
       if (isValNum && isTargetNum) return val > target;
       if (typeof val === 'string' && typeof target === 'string') {
-        if (isIsoDate(val) && isIsoDate(target)) {
+        const valIsIso = isIsoDate(val);
+        const targetIsIso = isIsoDate(target);
+        if (valIsIso && targetIsIso) {
           return Date.parse(val) > Date.parse(target);
         }
+        if (valIsIso || targetIsIso) {
+          return false;
+        }
+        return val.localeCompare(target) > 0;
       }
-      const numV = Number(val);
-      const numT = Number(target);
-      if (!isNaN(numV) && !isNaN(numT)) {
-        return numV > numT;
-      }
-      return String(val).localeCompare(String(target)) > 0;
+      return false;
     }
 
     case 'less_than': {
-      if (val === undefined || val === null) return false;
+      if (val === undefined || val === null || target === undefined || target === null)
+        return false;
       if (isValNum && isTargetNum) return val < target;
       if (typeof val === 'string' && typeof target === 'string') {
-        if (isIsoDate(val) && isIsoDate(target)) {
+        const valIsIso = isIsoDate(val);
+        const targetIsIso = isIsoDate(target);
+        if (valIsIso && targetIsIso) {
           return Date.parse(val) < Date.parse(target);
         }
+        if (valIsIso || targetIsIso) {
+          return false;
+        }
+        return val.localeCompare(target) < 0;
       }
-      const numV = Number(val);
-      const numT = Number(target);
-      if (!isNaN(numV) && !isNaN(numT)) {
-        return numV < numT;
-      }
-      return String(val).localeCompare(String(target)) < 0;
+      return false;
     }
 
     default:

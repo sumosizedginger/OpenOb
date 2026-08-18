@@ -166,4 +166,67 @@ Archived note.`
     expect(data.total).toBe(1);
     expect(data.rows[0].title).toBe('Project Beta');
   });
+
+  it('proves typed comparison semantics across REST, MCP, and CLI (R3D-1)', async () => {
+    // 1. REST: target "2" (string) against numeric priority: 1, 2, 99 -> MUST NOT match any numeric priority
+    const restStringTarget = await client.queryNotes({
+      filters: [{ field: 'priority', operator: 'greater_than', value: '2' }],
+    });
+    expect(restStringTarget.total).toBe(0);
+
+    // REST: target 2 (number) against numeric priority: 1, 2, 99 -> matches OldTask (priority: 99)
+    const restNumTarget = await client.queryNotes({
+      filters: [{ field: 'priority', operator: 'greater_than', value: 2 }],
+    });
+    expect(restNumTarget.total).toBe(1);
+    expect(restNumTarget.rows[0].title).toBe('Old Task');
+
+    // 2. MCP: target "2" (string) -> 0 matches; target 2 (number) -> 1 match
+    const mcpStringTarget = await handleMcpToolCall(workspace, 'openob_query_notes', {
+      filters: [{ field: 'priority', operator: 'greater_than', value: '2' }],
+    });
+    const mcpStrData = JSON.parse(mcpStringTarget.content[0].text);
+    expect(mcpStrData.total).toBe(0);
+
+    const mcpNumTarget = await handleMcpToolCall(workspace, 'openob_query_notes', {
+      filters: [{ field: 'priority', operator: 'greater_than', value: 2 }],
+    });
+    const mcpNumData = JSON.parse(mcpNumTarget.content[0].text);
+    expect(mcpNumData.total).toBe(1);
+    expect(mcpNumData.rows[0].title).toBe('Old Task');
+
+    // 3. CLI: target "2" (string) via --json-query -> 0 matches; target 2 (number) -> 1 match
+    const cliStrRes = await runCli({
+      url: serverUrl,
+      token,
+      args: [
+        'query',
+        '--json-query',
+        JSON.stringify({
+          filters: [{ field: 'priority', operator: 'greater_than', value: '2' }],
+        }),
+        '--json',
+      ],
+    });
+    expect(cliStrRes.exitCode).toBe(0);
+    const cliStrData = JSON.parse(cliStrRes.output);
+    expect(cliStrData.total).toBe(0);
+
+    const cliNumRes = await runCli({
+      url: serverUrl,
+      token,
+      args: [
+        'query',
+        '--json-query',
+        JSON.stringify({
+          filters: [{ field: 'priority', operator: 'greater_than', value: 2 }],
+        }),
+        '--json',
+      ],
+    });
+    expect(cliNumRes.exitCode).toBe(0);
+    const cliNumData = JSON.parse(cliNumRes.output);
+    expect(cliNumData.total).toBe(1);
+    expect(cliNumData.rows[0].title).toBe('Old Task');
+  });
 });

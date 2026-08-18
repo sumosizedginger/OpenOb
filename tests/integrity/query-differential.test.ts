@@ -170,6 +170,36 @@ describe('SQLite vs Memory Query Differential Suite (Phase 3D)', () => {
         offset: 1,
       },
     },
+    {
+      name: 'Coercion Matrix: Number vs String target (priority > "2" should NOT match numeric 10/5)',
+      query: {
+        filters: [{ field: 'priority', operator: 'greater_than', value: '2' }],
+      },
+    },
+    {
+      name: 'Coercion Matrix: Number vs Number target (priority > 2 matches 5, 10)',
+      query: {
+        filters: [{ field: 'priority', operator: 'greater_than', value: 2 }],
+      },
+    },
+    {
+      name: 'Coercion Matrix: String field vs numeric target (status > 0 should NOT match open/backlog/done)',
+      query: {
+        filters: [{ field: 'status', operator: 'greater_than', value: 0 }],
+      },
+    },
+    {
+      name: 'Coercion Matrix: Strict Date Target (dueDate > 2026-02-01 rejects non-dates)',
+      query: {
+        filters: [{ field: 'dueDate', operator: 'greater_than', value: '2026-02-01' }],
+      },
+    },
+    {
+      name: 'Coercion Matrix: Invalid Date Target (dueDate > 2026-99-99 matches 0 notes)',
+      query: {
+        filters: [{ field: 'dueDate', operator: 'greater_than', value: '2026-99-99' }],
+      },
+    },
   ];
 
   for (const t of queriesToTest) {
