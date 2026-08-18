@@ -167,9 +167,16 @@ export class LocalWorkspaceBackend implements WorkspaceBackend {
  */
 export class GatewayWorkspaceBackend implements WorkspaceBackend {
   readonly mode = 'gateway' as const;
-  private _isReadOnly = true;
+  private _isReadOnly = false;
 
-  constructor(private readonly client: OpenObGatewayClient) {}
+  constructor(
+    private readonly client: OpenObGatewayClient,
+    isReadOnly?: boolean
+  ) {
+    if (isReadOnly !== undefined) {
+      this._isReadOnly = isReadOnly;
+    }
+  }
 
   get isReadOnly(): boolean {
     return this._isReadOnly;

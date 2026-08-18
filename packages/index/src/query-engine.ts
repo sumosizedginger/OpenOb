@@ -1,4 +1,5 @@
 import {
+  createVersionToken,
   DocumentIndex,
   normalizeVaultPath,
   ParsedDocument,
@@ -323,7 +324,14 @@ export async function executeProtocolPropertyQuery(
           modifiedAt: rawVersion.modifiedAt,
           size: rawVersion.size,
         }
-      : undefined;
+      : doc.sourceHash
+        ? {
+            token: createVersionToken(doc.sourceHash, doc.modifiedAt, doc.size),
+            hash: doc.sourceHash,
+            modifiedAt: doc.modifiedAt,
+            size: doc.size,
+          }
+        : undefined;
 
     return {
       path: doc.path,

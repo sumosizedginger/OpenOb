@@ -688,8 +688,8 @@ export function useVault() {
     async (url: string, token?: string): Promise<{ success: boolean; error?: string }> => {
       try {
         const client = new OpenObGatewayClient({ url, token, clientId: 'openob-web' });
-        const info = await client.getWorkspaceInfo();
         const gatewayBackend = new GatewayWorkspaceBackend(client);
+        const info = await gatewayBackend.getWorkspaceInfo();
 
         setBackend(gatewayBackend);
         backendRef.current = gatewayBackend;

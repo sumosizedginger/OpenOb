@@ -742,7 +742,12 @@ export class OpenObWorkspace {
         let indexError: string | undefined;
         try {
           const parsed = await this.parser.parse(normalizedPath, textContent, durableVersion.hash);
-          await this.index.upsert(parsed);
+          await this.index.upsert({
+            ...parsed,
+            modifiedAt: durableVersion.modifiedAt,
+            size: durableVersion.size,
+            version: durableVersion,
+          } as any);
         } catch (err: any) {
           indexStatus = 'degraded';
           this.indexHealth = 'degraded';
@@ -909,7 +914,12 @@ export class OpenObWorkspace {
         let indexError: string | undefined;
         try {
           const parsed = await this.parser.parse(normalizedPath, textContent, durableVersion.hash);
-          await this.index.upsert(parsed);
+          await this.index.upsert({
+            ...parsed,
+            modifiedAt: durableVersion.modifiedAt,
+            size: durableVersion.size,
+            version: durableVersion,
+          } as any);
         } catch (err: any) {
           indexStatus = 'degraded';
           this.indexHealth = 'degraded';
@@ -1097,7 +1107,12 @@ export class OpenObWorkspace {
         let indexError: string | undefined;
         try {
           const parsed = await this.parser.parse(normalizedPath, newContent, durableVersion.hash);
-          await this.index.upsert(parsed);
+          await this.index.upsert({
+            ...parsed,
+            modifiedAt: durableVersion.modifiedAt,
+            size: durableVersion.size,
+            version: durableVersion,
+          } as any);
         } catch (err: any) {
           indexStatus = 'degraded';
           this.indexHealth = 'degraded';

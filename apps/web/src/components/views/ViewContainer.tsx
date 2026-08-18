@@ -119,11 +119,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
         if (isMounted) {
           setAvailableProps(propsRes.properties);
           setSavedViews(viewsRes);
-          setSelectedColumns((prev) =>
-            prev.length === 0 && propsRes.properties.length > 0
-              ? propsRes.properties.slice(0, 4)
-              : prev
-          );
+          setSelectedColumns(propsRes.properties);
         }
       } catch (err: any) {
         console.error('ViewContainer init error:', err);
@@ -162,7 +158,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
   useEffect(() => {
     void runQuery();
-  }, [runQuery, refreshKey]);
+  }, [runQuery, groupBy, refreshKey]);
 
   // Load a saved view into the builder
   const handleLoadSavedView = (savedViewDto: SavedViewDTO) => {
@@ -351,6 +347,29 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
     });
     setPage(0);
   };
+
+  const canEdit = !backend.isReadOnly;
+
+  const handleSetProperty = useCallback(
+    async (path: string, key: string, value: any, expectedVersion: ExpectedVersionDTO) => {
+      if (backend.isReadOnly) {
+        throw new Error('Workspace is read-only');
+      }
+      const res = await backend.setProperty({
+        path,
+        key,
+        value,
+        expectedVersion,
+      });
+
+      if (res.indexStatus === 'degraded') {
+        console.warn(`Saved property "${key}" to "${path}", but index status is degraded.`);
+      }
+
+      await runQuery();
+    },
+    [backend, runQuery]
+  );
 
   const primarySort = sorts[0];
   const totalPages = Math.ceil(queryResult.total / PAGE_SIZE) || 1;
@@ -699,8 +718,10 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             }
             sortField={primarySort?.field}
             sortDirection={primarySort?.direction}
+            canEdit={canEdit}
             onSortChange={handleSortChange}
             onNavigate={onNavigate}
+            onSetProperty={handleSetProperty}
           />
         ) : viewType === 'list' ? (
           <ListView rows={queryResult.rows} onNavigate={onNavigate} />
@@ -710,7 +731,9 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             groupBy={groupBy}
             visibleProperties={selectedColumns}
             total={queryResult.total}
+            canEdit={canEdit}
             onNavigate={onNavigate}
+            onSetProperty={handleSetProperty}
           />
         )}
       </div>
