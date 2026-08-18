@@ -8,4 +8,6 @@ test-results/
 *.tsbuildinfo
 *.log
 *.tmp
+.temp-*
+.dist-*
 tests/_reaudit-tmp/
