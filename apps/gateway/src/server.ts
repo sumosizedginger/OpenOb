@@ -5,9 +5,28 @@ import { fileURLToPath } from 'node:url';
 import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
+  AIKnowledgeSource,
+  AIManager,
+  AIProviderId,
+  AIProviderInfo,
+  AIResponseMetadata,
+  ChatMessage,
+  Citation,
+  extractCitations,
+  formatContextPrompt,
+  parseProposedEditFromResponse,
+  ProposedEdit,
+  redactSecrets,
+  retrieveContext,
+  ServerSecretStore,
+  isReservedOpenObPath,
+} from '@okw/ai';
+import { VaultPath } from '@okw/core';
+import {
   ClientContext,
   encodeEventCursor,
   ForbiddenError,
+  InvalidPathError,
   InvalidRequestError,
   OpenObWorkspace,
   parseEventCursor,
@@ -26,6 +45,8 @@ export interface GatewayOptions {
   readonly maxBodyBytes?: number;
   readonly serveWeb?: boolean;
   readonly webDistPath?: string;
+  readonly secretStore?: ServerSecretStore;
+  readonly aiManager?: AIManager;
 }
 
 const STATIC_MIME_TYPES: Record<string, string> = {
@@ -127,6 +148,8 @@ async function readJsonBody(
  */
 export function createGatewayServer(options: GatewayOptions): http.Server {
   const { workspace, token, scopes, maxBodyBytes } = options;
+  const secretStore = options.secretStore ?? new ServerSecretStore();
+  const aiManager = options.aiManager ?? new AIManager({}, secretStore);
   const activeSseConnections = new Set<http.ServerResponse>();
   const activeSockets = new Set<import('node:net').Socket>();
 
@@ -703,8 +726,408 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         return;
       }
 
+      // PUT /api/v1/ai/secrets/:provider (Configure AI Secret)
+      if (
+        pathname.startsWith('/api/v1/ai/secrets/') &&
+        !pathname.endsWith('/status') &&
+        method === 'PUT'
+      ) {
+        if (!clientContext.scopes?.includes('workspace.ai.configure')) {
+          const err = toApiError(
+            new ForbiddenError(
+              'Forbidden: configuring AI secrets requires workspace.ai.configure scope'
+            )
+          );
+          res.statusCode = err.status;
+          res.end(JSON.stringify(err.body));
+          return;
+        }
+
+        const rawProvider = pathname.slice('/api/v1/ai/secrets/'.length);
+        const providerId = decodeURIComponent(rawProvider).toLowerCase();
+
+        const body = await readJsonBody(req, maxBodyBytes);
+        if (!body || typeof body.secret !== 'string') {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_REQUEST',
+              message: 'Missing or invalid "secret" in body',
+            })
+          );
+          return;
+        }
+
+        await secretStore.setSecret(providerId, body.secret);
+        const masked = await secretStore.getMaskedSecret(providerId);
+
+        res.statusCode = 200;
+        res.end(
+          JSON.stringify({ success: true, provider: providerId, masked: masked ?? undefined })
+        );
+        return;
+      }
+
+      // DELETE /api/v1/ai/secrets/:provider (Clear AI Secret)
+      if (
+        pathname.startsWith('/api/v1/ai/secrets/') &&
+        !pathname.endsWith('/status') &&
+        method === 'DELETE'
+      ) {
+        if (!clientContext.scopes?.includes('workspace.ai.configure')) {
+          const err = toApiError(
+            new ForbiddenError(
+              'Forbidden: clearing AI secrets requires workspace.ai.configure scope'
+            )
+          );
+          res.statusCode = err.status;
+          res.end(JSON.stringify(err.body));
+          return;
+        }
+
+        const rawProvider = pathname.slice('/api/v1/ai/secrets/'.length);
+        const providerId = decodeURIComponent(rawProvider).toLowerCase();
+
+        await secretStore.clearSecret(providerId);
+
+        res.statusCode = 200;
+        res.end(JSON.stringify({ success: true, provider: providerId }));
+        return;
+      }
+
+      // POST /api/v1/ai/chat (Streaming AI Chat & Retrieval)
+      if (pathname === '/api/v1/ai/chat' && method === 'POST') {
+        if (!clientContext.scopes?.includes('workspace.ai.use')) {
+          const err = toApiError(
+            new ForbiddenError('Forbidden: AI chat requires workspace.ai.use scope')
+          );
+          res.statusCode = err.status;
+          res.end(JSON.stringify(err.body));
+          return;
+        }
+
+        const body = await readJsonBody(req, maxBodyBytes);
+        const {
+          provider: providerId,
+          model,
+          messages,
+          retrievalScope,
+          activeNoteContext,
+          temperature,
+          maxTokens,
+        } = body || {};
+
+        if (!providerId || !model || !Array.isArray(messages)) {
+          res.statusCode = 400;
+          res.end(
+            JSON.stringify({
+              code: 'INVALID_REQUEST',
+              message: 'Missing required fields: provider, model, messages',
+            })
+          );
+          return;
+        }
+
+        if (retrievalScope && !clientContext.scopes?.includes('workspace.read')) {
+          const err = toApiError(
+            new ForbiddenError('Forbidden: AI retrieval requires workspace.read scope')
+          );
+          res.statusCode = err.status;
+          res.end(JSON.stringify(err.body));
+          return;
+        }
+
+        // 1. Knowledge Retrieval via OpenObWorkspace
+        let retrievedContextPrompt = '';
+        let retrievedMetadata: AIResponseMetadata | undefined;
+        let retrievedSources: {
+          path: VaultPath;
+          title: string;
+          lineStart?: number;
+          lineEnd?: number;
+        }[] = [];
+
+        if (retrievalScope) {
+          const knowledgeSource: AIKnowledgeSource = {
+            async readNote(notePath: VaultPath) {
+              if (isReservedOpenObPath(notePath)) {
+                throw new InvalidPathError(
+                  notePath,
+                  'Access to reserved ".openob" folder is forbidden'
+                );
+              }
+              const note = await workspace.readNote(notePath, clientContext);
+              return { text: note.textContent, version: note.version };
+            },
+            async search(query: string, scope?: { folders?: string[] }, limit?: number) {
+              const queryRes = await workspace.queryNotes(
+                {
+                  folderScope: scope?.folders?.[0],
+                  limit: limit || 10,
+                },
+                clientContext
+              );
+              return queryRes.rows
+                .filter((r) => !isReservedOpenObPath(r.path))
+                .map((r) => ({
+                  path: r.path,
+                  title: r.title || r.path.replace(/\.md$/, ''),
+                }));
+            },
+          };
+
+          const userPrompt = messages[messages.length - 1]?.content || '';
+          const retrieved = await retrieveContext(knowledgeSource, userPrompt, retrievalScope, {
+            maxChunks: 5,
+            maxTokens: 4096,
+          });
+          retrievedContextPrompt = formatContextPrompt(retrieved);
+          retrievedSources = retrieved.chunks.map((c) => ({
+            path: c.notePath,
+            title: c.noteTitle,
+            lineStart: c.lineStart,
+            lineEnd: c.lineEnd,
+          }));
+          retrievedMetadata = {
+            retrievalScope,
+            retrievedSources,
+            provider: providerId,
+            model,
+          };
+        }
+
+        // 2. Prepare Messages
+        const finalMessages: ChatMessage[] = [];
+        if (retrievedContextPrompt) {
+          finalMessages.push({
+            role: 'system',
+            content: `You are an intelligent AI assistant integrated into Open Knowledge Workspace. Ground your responses strictly in the provided Vault Context.\n\n${retrievedContextPrompt}`,
+          });
+        }
+        finalMessages.push(...messages);
+
+        // 3. Connect to Provider
+        let providerInstance;
+        try {
+          providerInstance = await aiManager.getProvider(providerId as AIProviderId);
+        } catch (err: any) {
+          const known = secretStore.getAllKnownSecrets();
+          const redactedMsg = redactSecrets(
+            err?.message || 'Failed to initialize AI provider',
+            known
+          );
+          res.statusCode = 502;
+          res.end(JSON.stringify({ code: 'AI_PROVIDER_ERROR', message: redactedMsg }));
+          return;
+        }
+
+        // 4. Stream response
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        if (typeof res.flushHeaders === 'function') {
+          res.flushHeaders();
+        }
+
+        const abortController = new AbortController();
+        req.on('close', () => {
+          abortController.abort();
+        });
+
+        let accumulatedResponse = '';
+
+        try {
+          const stream = providerInstance.chat({
+            model,
+            messages: finalMessages,
+            temperature,
+            maxTokens,
+            signal: abortController.signal,
+          });
+
+          for await (const chunk of stream) {
+            accumulatedResponse += chunk.content;
+
+            let citations: Citation[] | undefined;
+            let proposal: ProposedEdit | undefined;
+
+            if (chunk.isDone) {
+              citations = extractCitations(accumulatedResponse, retrievedSources);
+              if (activeNoteContext) {
+                const parsed = parseProposedEditFromResponse(
+                  accumulatedResponse,
+                  activeNoteContext.path,
+                  activeNoteContext.content,
+                  activeNoteContext.expectedVersion
+                );
+                if (parsed) {
+                  proposal = parsed;
+                }
+              }
+            }
+
+            const chunkResponse = {
+              chunk,
+              metadata: chunk.isDone ? retrievedMetadata : undefined,
+              citations,
+              proposal,
+            };
+
+            res.write(`data: ${JSON.stringify(chunkResponse)}\n\n`);
+          }
+
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } catch (err: any) {
+          const known = secretStore.getAllKnownSecrets();
+          const redactedMsg = redactSecrets(err?.message || 'AI generation failed', known);
+          if (!res.headersSent) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ code: 'AI_GENERATION_FAILED', message: redactedMsg }));
+          } else {
+            res.write(
+              `data: ${JSON.stringify({
+                chunk: {
+                  content: `\n\n[Error: ${redactedMsg}]`,
+                  isDone: true,
+                  finishReason: 'error',
+                },
+              })}\n\n`
+            );
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
+        }
+        return;
+      }
+
       // GET routes
       if (method === 'GET') {
+        // GET /api/v1/ai/providers (List AI Providers)
+        if (pathname === '/api/v1/ai/providers') {
+          if (!clientContext.scopes?.includes('workspace.ai.use')) {
+            const err = toApiError(
+              new ForbiddenError('Forbidden: listing AI providers requires workspace.ai.use scope')
+            );
+            res.statusCode = err.status;
+            res.end(JSON.stringify(err.body));
+            return;
+          }
+
+          const providers: AIProviderInfo[] = [
+            {
+              id: 'ollama',
+              name: 'Ollama (Local)',
+              type: 'local',
+              configured: true,
+              defaultModel: 'llama3',
+            },
+            {
+              id: 'lmstudio',
+              name: 'LM Studio (Local)',
+              type: 'local',
+              configured: true,
+              defaultModel: 'local-model',
+            },
+            {
+              id: 'openai',
+              name: 'OpenAI',
+              type: 'cloud',
+              configured: await secretStore.hasSecret('openai'),
+              maskedSecret: (await secretStore.getMaskedSecret('openai')) ?? undefined,
+              defaultModel: 'gpt-4o',
+            },
+            {
+              id: 'anthropic',
+              name: 'Anthropic Claude',
+              type: 'cloud',
+              configured: await secretStore.hasSecret('anthropic'),
+              maskedSecret: (await secretStore.getMaskedSecret('anthropic')) ?? undefined,
+              defaultModel: 'claude-3-5-sonnet-20241022',
+            },
+            {
+              id: 'gemini',
+              name: 'Google Gemini',
+              type: 'cloud',
+              configured: await secretStore.hasSecret('gemini'),
+              maskedSecret: (await secretStore.getMaskedSecret('gemini')) ?? undefined,
+              defaultModel: 'gemini-2.0-flash',
+            },
+            {
+              id: 'openrouter',
+              name: 'OpenRouter',
+              type: 'cloud',
+              configured: await secretStore.hasSecret('openrouter'),
+              maskedSecret: (await secretStore.getMaskedSecret('openrouter')) ?? undefined,
+              defaultModel: 'anthropic/claude-3.5-sonnet',
+            },
+          ];
+
+          res.statusCode = 200;
+          res.end(JSON.stringify({ providers }));
+          return;
+        }
+
+        // GET /api/v1/ai/models (List Models for Provider)
+        if (pathname === '/api/v1/ai/models') {
+          if (!clientContext.scopes?.includes('workspace.ai.use')) {
+            const err = toApiError(
+              new ForbiddenError('Forbidden: listing AI models requires workspace.ai.use scope')
+            );
+            res.statusCode = err.status;
+            res.end(JSON.stringify(err.body));
+            return;
+          }
+
+          const providerId = (parsedUrl.searchParams.get('provider') || 'ollama') as AIProviderId;
+          try {
+            const provider = await aiManager.getProvider(providerId);
+            const models = await provider.listModels();
+            res.statusCode = 200;
+            res.end(JSON.stringify({ models }));
+            return;
+          } catch (err: any) {
+            const known = secretStore.getAllKnownSecrets();
+            const redactedMsg = redactSecrets(err?.message || 'Failed to list models', known);
+            res.statusCode = 502;
+            res.end(JSON.stringify({ code: 'AI_PROVIDER_ERROR', message: redactedMsg }));
+            return;
+          }
+        }
+
+        // GET /api/v1/ai/secrets/:provider/status (Get Secret Status)
+        if (pathname.startsWith('/api/v1/ai/secrets/') && pathname.endsWith('/status')) {
+          if (
+            !clientContext.scopes?.includes('workspace.ai.use') &&
+            !clientContext.scopes?.includes('workspace.ai.configure')
+          ) {
+            const err = toApiError(
+              new ForbiddenError(
+                'Forbidden: AI secret status requires workspace.ai.use or workspace.ai.configure scope'
+              )
+            );
+            res.statusCode = err.status;
+            res.end(JSON.stringify(err.body));
+            return;
+          }
+
+          const rawProvider = pathname.slice(
+            '/api/v1/ai/secrets/'.length,
+            pathname.length - '/status'.length
+          );
+          const providerId = decodeURIComponent(rawProvider).toLowerCase();
+
+          const configured = await secretStore.hasSecret(providerId);
+          const masked = await secretStore.getMaskedSecret(providerId);
+
+          res.statusCode = 200;
+          res.end(JSON.stringify({ configured, masked: masked ?? undefined }));
+          return;
+        }
+
         // GET /api/v1/views (List saved views)
         if (pathname === '/api/v1/views') {
           const views = await workspace.listSavedViews(clientContext);

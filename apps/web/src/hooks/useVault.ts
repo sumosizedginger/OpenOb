@@ -1577,31 +1577,39 @@ export function useVault() {
     proposal: any
   ): Promise<{ success: boolean; error?: string }> => {
     const targetPath = proposal.path;
+    const nextContent = proposal.proposedContent ?? proposal.newContent;
 
     if (vaultModeRef.current === 'gateway') {
       try {
         const tab = openTabsRef.current.find((t) => t.path === targetPath);
-        const expectedToken = tab?.initialSnapshot?.version.token || '';
+        const expectedVersion =
+          proposal.expectedVersion ??
+          (tab?.initialSnapshot
+            ? {
+                token: tab.initialSnapshot.version.token,
+                hash: tab.initialSnapshot.version.hash,
+                modifiedAt: tab.initialSnapshot.version.modifiedAt,
+                size: tab.initialSnapshot.version.size,
+              }
+            : undefined);
+
         const res = await backendRef.current.updateNote({
           path: targetPath,
-          content: proposal.newContent,
-          expectedVersion: {
-            token: expectedToken,
-            hash: tab?.initialSnapshot?.version.hash,
-          },
+          content: nextContent,
+          expectedVersion,
         });
 
         const snapshot: FileSnapshot = {
           path: targetPath,
-          content: new TextEncoder().encode(proposal.newContent),
-          textContent: proposal.newContent,
-          size: res.currentVersion.size ?? proposal.newContent.length,
+          content: new TextEncoder().encode(nextContent),
+          textContent: nextContent,
+          size: res.currentVersion.size ?? nextContent.length,
           modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
           version: {
             token: res.currentVersion.token,
             hash: res.currentVersion.hash ?? '',
             modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
-            size: res.currentVersion.size ?? proposal.newContent.length,
+            size: res.currentVersion.size ?? nextContent.length,
           },
         };
 
@@ -1610,7 +1618,7 @@ export function useVault() {
             if (t.path !== targetPath) return t;
             return {
               ...t,
-              content: proposal.newContent,
+              content: nextContent,
               isDirty: false,
               initialSnapshot: snapshot,
             };
@@ -1618,11 +1626,7 @@ export function useVault() {
         );
 
         if (activeTabPathRef.current === targetPath) {
-          const parsed = await parser.parse(
-            targetPath,
-            proposal.newContent,
-            res.currentVersion.hash || ''
-          );
+          const parsed = await parser.parse(targetPath, nextContent, res.currentVersion.hash || '');
           setParsedDoc(parsed);
         }
         return { success: true };
@@ -1635,7 +1639,10 @@ export function useVault() {
     const startRebuildEpoch = vaultRebuildEpochRef.current;
     const currentSeq = ++saveSequenceRef.current;
 
-    const res = await coordinatorRef.current.applyAI(proposal);
+    const res = await coordinatorRef.current.applyAI({
+      ...proposal,
+      newContent: nextContent,
+    });
     if (res.success) {
       const state = coordinatorRef.current.getNoteState(targetPath);
       if (state && state.committedSnapshot) {

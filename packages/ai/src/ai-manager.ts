@@ -39,10 +39,10 @@ export class AIManager {
     this.activeProviderId = id;
   }
 
-  async getActiveProvider(): Promise<AIProvider> {
-    const apiKey = (await this.secretStore.getSecret(this.activeProviderId)) || '';
+  async getProvider(id: AIProviderId): Promise<AIProvider> {
+    const apiKey = (await this.secretStore.getSecret(id)) || '';
 
-    switch (this.activeProviderId) {
+    switch (id) {
       case 'openai':
         return new OpenAIProvider({ apiKey });
 
@@ -70,13 +70,13 @@ export class AIManager {
     }
   }
 
+  async getActiveProvider(): Promise<AIProvider> {
+    return this.getProvider(this.activeProviderId);
+  }
+
   async listModels(): Promise<AIModel[]> {
-    try {
-      const provider = await this.getActiveProvider();
-      return await provider.listModels();
-    } catch {
-      return [{ id: 'default-model', name: 'Default Model', isDefault: true }];
-    }
+    const provider = await this.getActiveProvider();
+    return await provider.listModels();
   }
 
   async *chat(request: ChatRequest): AsyncIterable<AIChunk> {

@@ -17,6 +17,7 @@ import { CommandPalette } from './components/CommandPalette.js';
 import { ParsedHeading, VaultPath } from '@okw/core';
 import { updateDocumentFrontmatter } from '@okw/markdown';
 import { ProposedEdit } from '@okw/ai';
+import { GatewayAIBackend, LocalAIBackend } from '@okw/workspace';
 import {
   PluginHost,
   wordCountManifest,
@@ -263,12 +264,20 @@ export const App: React.FC = () => {
     }
   };
 
+  const aiBackend = React.useMemo(() => {
+    if (vaultMode === 'gateway' && gatewayUrl) {
+      const token = (backend as any)?.getClient?.()?.getToken?.() || (backend as any)?.token || '';
+      return new GatewayAIBackend({
+        url: gatewayUrl,
+        token,
+      });
+    }
+    return new LocalAIBackend(backend);
+  }, [vaultMode, gatewayUrl, backend]);
+
   // Phase 7: Apply user-accepted AI proposed edit (Constitution Law 19)
   const handleApplyProposedEdit = async (proposal: ProposedEdit) => {
-    const res = await applyAIProposedEdit(proposal);
-    if (!res.success && res.error) {
-      alert(`Could not apply edit: ${res.error}`);
-    }
+    return await applyAIProposedEdit(proposal);
   };
 
   return (
@@ -631,10 +640,20 @@ export const App: React.FC = () => {
         {showRightPanel === 'ai' && (
           <div style={{ width: '340px', height: '100%' }}>
             <AIChatDrawer
-              storage={storage}
-              index={index}
+              aiBackend={aiBackend}
+              workspaceBackend={backend}
               activeNotePath={activeTabPath}
               activeNoteContent={activeTab?.content}
+              activeNoteVersion={
+                activeTab?.initialSnapshot?.version
+                  ? {
+                      token: activeTab.initialSnapshot.version.token,
+                      hash: activeTab.initialSnapshot.version.hash,
+                      modifiedAt: activeTab.initialSnapshot.version.modifiedAt,
+                      size: activeTab.initialSnapshot.version.size,
+                    }
+                  : undefined
+              }
               onNavigate={(path) => {
                 setMainMode('editor');
                 void openNote(path);

@@ -28,14 +28,13 @@ describe('Phase 7 Exit Gate: Local AI, Scoped Retrieval & Proposal Safety (Const
       await index.upsert(await parser.parse(path, content));
     }
 
-    // 2. Simulate AI provider failing / offline
+    // 2. Simulate AI provider failing / offline (truthfully throws, leaves core functional)
     const brokenProvider = new OpenAICompatibleProvider({
       endpointUrl: 'http://127.0.0.1:99999/v1',
       defaultModel: 'offline-model',
     });
 
-    const models = await brokenProvider.listModels();
-    expect(models).toHaveLength(1); // Graceful fallback, no thrown exception
+    await expect(brokenProvider.listModels()).rejects.toThrow();
 
     // 3. Verify Search is 100% functional
     const searchResults = await index.query({ query: 'Note' });
@@ -218,20 +217,16 @@ All passwords wiped.
     expect(promptText).toContain('Budget 2026');
     expect(promptText).not.toContain('Private Thoughts');
 
-    // Extract citation from response
-    const availableDocs = [
-      { path: 'Finance/Budget.md', title: 'Budget 2026' },
-      { path: 'Engineering/Specs.md', title: 'Architecture Specs' },
-    ];
+    // Extract citation from response using retrieved context chunks
     const citations = extractCitations(
       'The allocated funds are detailed in [[Budget 2026]] (and [Source: Finance/Budget.md (Lines 1-10)]).',
-      availableDocs
+      financeContext.chunks
     );
 
     expect(citations).toHaveLength(1);
     expect(citations[0].notePath).toBe('Finance/Budget.md');
     expect(citations[0].noteTitle).toBe('Budget 2026');
     expect(citations[0].lineStart).toBe(1);
-    expect(citations[0].lineEnd).toBe(10);
+    expect(citations[0].lineEnd).toBe(3); // Clamped to actual note chunk bounds (1-3) per G3G-1
   });
 });

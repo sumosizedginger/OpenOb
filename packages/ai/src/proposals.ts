@@ -8,7 +8,13 @@ import { ProposedEdit } from './types.js';
 export function parseProposedEditFromResponse(
   aiResponse: string,
   targetPath: VaultPath,
-  originalContent: string
+  originalContent: string,
+  expectedVersion?: {
+    token: string;
+    hash?: string;
+    modifiedAt?: number;
+    size?: number;
+  }
 ): ProposedEdit | null {
   // 1. Look for ```proposal:path.md or ```markdown codeblock with new content
   const proposalMatch =
@@ -38,6 +44,7 @@ export function parseProposedEditFromResponse(
     originalContent,
     proposedContent,
     explanation,
+    expectedVersion,
     createdAt: Date.now(),
   };
 }

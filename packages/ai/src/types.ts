@@ -90,7 +90,46 @@ export interface ProposedEdit {
   readonly originalContent: string;
   readonly proposedContent: string;
   readonly explanation: string;
+  readonly expectedVersion?: {
+    readonly token: string;
+    readonly hash?: string;
+    readonly modifiedAt?: number;
+    readonly size?: number;
+  };
   readonly createdAt: number;
+}
+
+export interface AIResponseMetadata {
+  readonly retrievalScope: RetrievalScope;
+  readonly retrievedSources: {
+    readonly path: VaultPath;
+    readonly title: string;
+    readonly lineStart?: number;
+    readonly lineEnd?: number;
+  }[];
+  readonly provider: string;
+  readonly model: string;
+}
+
+export interface AIProviderInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly type: 'local' | 'cloud';
+  readonly configured: boolean;
+  readonly maskedSecret?: string;
+  readonly defaultModel?: string;
+}
+
+export interface AIKnowledgeSource {
+  readNote(path: VaultPath): Promise<{
+    text: string;
+    version?: { token: string; hash?: string; modifiedAt?: number; size?: number };
+  }>;
+  search(
+    query: string,
+    scope?: { folders?: string[] },
+    limit?: number
+  ): Promise<{ path: VaultPath; title: string }[]>;
 }
 
 export interface LocalAIConfig {

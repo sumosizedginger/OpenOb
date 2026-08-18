@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  AIManager,
   AIModel,
   AIProviderId,
+  AIProviderInfo,
+  AIResponseMetadata,
   ChatMessage,
   Citation,
+  cleanupLegacyBrowserSecrets,
   ProposedEdit,
-  RetrievalScope,
   RetrievalScopeType,
-  StandardSecretStore,
-  extractCitations,
-  formatContextPrompt,
-  parseProposedEditFromResponse,
-  retrieveContext,
 } from '@okw/ai';
-import { DocumentIndex, VaultPath, VaultStorage } from '@okw/core';
+import { VaultPath } from '@okw/core';
+import { AIBackend, WorkspaceBackend } from '@okw/workspace';
 import {
   Bot,
   Send,
@@ -26,53 +23,125 @@ import {
   CheckCircle2,
   XCircle,
   Link,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 
-interface AIChatDrawerProps {
-  storage: VaultStorage;
-  index: DocumentIndex;
+export interface AIChatDrawerProps {
+  aiBackend: AIBackend;
+  workspaceBackend: WorkspaceBackend;
   activeNotePath?: VaultPath | null;
   activeNoteContent?: string;
+  activeNoteVersion?: { token: string; hash?: string; modifiedAt?: number; size?: number };
   onNavigate: (path: VaultPath) => void;
-  onApplyProposedEdit: (proposal: ProposedEdit) => Promise<void>;
+  onApplyProposedEdit?: (proposal: ProposedEdit) => Promise<{ success: boolean; error?: string }>;
   onClose?: () => void;
 }
 
-const secretStore = new StandardSecretStore();
+const DEFAULT_PROVIDERS: AIProviderInfo[] = [
+  { id: 'ollama', name: 'Ollama (Local)', type: 'local', configured: true },
+  { id: 'lmstudio', name: 'LM Studio (Local)', type: 'local', configured: true },
+  { id: 'openai', name: 'OpenAI', type: 'cloud', configured: false },
+  { id: 'anthropic', name: 'Anthropic Claude', type: 'cloud', configured: false },
+  { id: 'gemini', name: 'Google Gemini', type: 'cloud', configured: false },
+  { id: 'openrouter', name: 'OpenRouter', type: 'cloud', configured: false },
+];
 
 export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
-  storage,
-  index,
+  aiBackend,
+  workspaceBackend,
   activeNotePath,
   activeNoteContent,
+  activeNoteVersion,
   onNavigate,
   onApplyProposedEdit,
   onClose,
 }) => {
+  const [providers, setProviders] = useState<AIProviderInfo[]>(DEFAULT_PROVIDERS);
   const [providerId, setProviderId] = useState<AIProviderId>(() => {
     return (localStorage.getItem('okw_ai_provider') as AIProviderId) || 'ollama';
   });
 
-  const [aiManager] = useState<AIManager>(
-    () => new AIManager({ activeProviderId: providerId }, secretStore)
-  );
   const [models, setModels] = useState<AIModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(false);
   const [scopeType, setScopeType] = useState<RetrievalScopeType>('current_note');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeProposal, setActiveProposal] = useState<ProposedEdit | null>(null);
+  const [proposalConflictError, setProposalConflictError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [availableDocs, setAvailableDocs] = useState<{ path: VaultPath; title: string }[]>([]);
+  const [responseMetadata, setResponseMetadata] = useState<AIResponseMetadata | null>(null);
 
   // Secret settings
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
   const [inputApiKey, setInputApiKey] = useState('');
   const [keySavedMessage, setKeySavedMessage] = useState(false);
+  const [secretError, setSecretError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Clean legacy browser sessionStorage secrets on startup (Constitution Law 17)
+  useEffect(() => {
+    cleanupLegacyBrowserSecrets();
+  }, []);
+
+  // Fetch available providers
+  useEffect(() => {
+    let isMounted = true;
+    const loadProviders = async () => {
+      try {
+        const list = await aiBackend.listProviders();
+        if (isMounted) {
+          setProviders(list);
+          if (list.length > 0 && !list.some((p) => p.id === providerId)) {
+            setProviderId(list[0].id as AIProviderId);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to load AI providers:', err);
+      }
+    };
+    void loadProviders();
+    return () => {
+      isMounted = false;
+    };
+  }, [aiBackend, providerId]);
+
+  const refreshProviderData = useCallback(async () => {
+    setModelError(null);
+    setModels([]);
+    setSelectedModel('');
+    setIsLoadingModels(true);
+
+    try {
+      const status = await aiBackend.getSecretStatus(providerId);
+      setMaskedKey(status.masked ?? null);
+    } catch {
+      setMaskedKey(null);
+    }
+
+    try {
+      const modelList = await aiBackend.listModels(providerId);
+      setModels(modelList);
+      setModelError(null);
+      setIsLoadingModels(false);
+      const defaultMod = modelList.find((m: AIModel) => m.isDefault) || modelList[0];
+      if (defaultMod) {
+        setSelectedModel(defaultMod.id);
+      } else {
+        setSelectedModel('');
+      }
+    } catch (err: any) {
+      setModels([]);
+      setSelectedModel('');
+      setIsLoadingModels(false);
+      setModelError(err?.message || 'AI provider unavailable');
+    }
+  }, [aiBackend, providerId]);
 
   // Sync active provider and abort any in-flight stream (P8-1)
   useEffect(() => {
@@ -82,24 +151,8 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       setIsGenerating(false);
     }
 
-    aiManager.setActiveProviderId(providerId);
     localStorage.setItem('okw_ai_provider', providerId);
-
-    const refreshProviderData = async () => {
-      const masked = await secretStore.getMaskedSecret(providerId);
-      setMaskedKey(masked);
-
-      try {
-        const modelList = await aiManager.listModels();
-        setModels(modelList);
-        const defaultMod = modelList.find((m: AIModel) => m.isDefault) || modelList[0];
-        if (defaultMod) {
-          setSelectedModel(defaultMod.id);
-        }
-      } catch {
-        setModels([{ id: 'default', name: 'Default Model' }]);
-      }
-    };
+    setSecretError(null);
 
     void refreshProviderData();
 
@@ -109,25 +162,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         abortControllerRef.current = null;
       }
     };
-  }, [providerId, aiManager]);
-
-  // Load available documents for citation matching
-  useEffect(() => {
-    let isMounted = true;
-    const initDocs = async () => {
-      try {
-        const docs = await index.getAll();
-        if (isMounted) {
-          setAvailableDocs(docs.map((d) => ({ path: d.path, title: d.title })));
-        }
-      } catch {}
-    };
-
-    void initDocs();
-    return () => {
-      isMounted = false;
-    };
-  }, [index]);
+  }, [providerId, refreshProviderData]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -136,50 +171,44 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
   const handleSaveApiKey = async () => {
     if (!inputApiKey.trim()) return;
-    await secretStore.setSecret(providerId, inputApiKey.trim());
-    setInputApiKey('');
-    const masked = await secretStore.getMaskedSecret(providerId);
-    setMaskedKey(masked);
-    setKeySavedMessage(true);
-    setTimeout(() => setKeySavedMessage(false), 2000);
+    setSecretError(null);
+    try {
+      await aiBackend.setSecret(providerId, inputApiKey.trim());
+      setInputApiKey('');
+      const status = await aiBackend.getSecretStatus(providerId);
+      setMaskedKey(status.masked ?? null);
+      setKeySavedMessage(true);
+      setTimeout(() => setKeySavedMessage(false), 2000);
 
-    // Refresh models with new key
-    const modelList = await aiManager.listModels();
-    if (modelList.length > 0) {
-      setModels(modelList);
-      setSelectedModel(modelList[0].id);
+      // Refresh models with new key
+      const modelList = await aiBackend.listModels(providerId);
+      if (modelList.length > 0) {
+        setModels(modelList);
+        setSelectedModel(modelList[0].id);
+      }
+    } catch (err: any) {
+      setSecretError(err.message || 'Failed to save secret');
     }
   };
 
   const handleClearApiKey = async () => {
-    await secretStore.clearSecret(providerId);
-    setMaskedKey(null);
-    setInputApiKey('');
+    setSecretError(null);
+    try {
+      await aiBackend.clearSecret(providerId);
+      setMaskedKey(null);
+      setInputApiKey('');
+    } catch (err: any) {
+      setSecretError(err.message || 'Failed to clear secret');
+    }
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputPrompt.trim() || isGenerating) return;
+    if (!inputPrompt.trim() || isGenerating || !selectedModel || !!modelError) return;
 
     const userQuery = inputPrompt.trim();
     setInputPrompt('');
-
-    // 1. Build Scope & Retrieve Context
-    const scope: RetrievalScope = {
-      type: scopeType,
-      notePath: activeNotePath || undefined,
-      folderPrefix: activeNotePath ? activeNotePath.split('/')[0] : undefined,
-    };
-
-    const retrieved = await retrieveContext(storage, index, userQuery, scope);
-    const contextPrompt = formatContextPrompt(retrieved);
-
-    const systemMessage: ChatMessage = {
-      role: 'system',
-      content:
-        'You are an intelligent AI assistant integrated into Open Knowledge Workspace. You help the user summarize, connect, and edit their notes. Always ground your answers in the provided Vault Context.\n\n' +
-        contextPrompt,
-    };
+    setProposalConflictError(null);
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -196,17 +225,38 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     let assistantResponse = '';
 
     try {
-      const stream = aiManager.chat({
+      const stream = aiBackend.chat({
+        provider: providerId,
         model: selectedModel,
-        messages: [systemMessage, ...updatedMessages],
+        messages: updatedMessages,
+        retrievalScope: {
+          type: scopeType,
+          notePath: activeNotePath || undefined,
+          folderPrefix: activeNotePath ? activeNotePath.split('/')[0] : undefined,
+        },
+        activeNoteContext: activeNotePath
+          ? {
+              path: activeNotePath,
+              content: activeNoteContent || '',
+              expectedVersion: activeNoteVersion,
+            }
+          : undefined,
         signal: abortController.signal,
       });
 
       // Add placeholder assistant message
       setMessages([...updatedMessages, { role: 'assistant', content: '' }]);
 
-      for await (const chunk of stream) {
-        assistantResponse += chunk.content;
+      for await (const chunkResp of stream) {
+        assistantResponse += chunkResp.chunk.content;
+
+        if (chunkResp.metadata) {
+          setResponseMetadata(chunkResp.metadata);
+        }
+
+        if (chunkResp.proposal) {
+          setActiveProposal(chunkResp.proposal);
+        }
 
         setMessages((prev) => {
           const next = [...prev];
@@ -215,25 +265,13 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
             next[lastIdx] = {
               role: 'assistant',
               content: assistantResponse,
-              citations: extractCitations(assistantResponse, availableDocs),
+              citations: chunkResp.citations || next[lastIdx].citations,
             };
           }
           return next;
         });
 
-        if (chunk.isDone) break;
-      }
-
-      // Check if response contains a proposed edit
-      if (activeNotePath && activeNoteContent) {
-        const proposal = parseProposedEditFromResponse(
-          assistantResponse,
-          activeNotePath,
-          activeNoteContent
-        );
-        if (proposal) {
-          setActiveProposal(proposal);
-        }
+        if (chunkResp.chunk.isDone) break;
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -261,9 +299,40 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
   const handleAcceptProposal = async () => {
     if (!activeProposal) return;
-    await onApplyProposedEdit(activeProposal);
-    setActiveProposal(null);
+    setProposalConflictError(null);
+
+    try {
+      if (onApplyProposedEdit) {
+        const res = await onApplyProposedEdit(activeProposal);
+        if (!res.success) {
+          setProposalConflictError(
+            res.error || 'Conflict: Note changed since this proposal was generated.'
+          );
+          return;
+        }
+      } else {
+        await workspaceBackend.updateNote({
+          path: activeProposal.path,
+          content: activeProposal.proposedContent,
+          expectedVersion: activeProposal.expectedVersion
+            ? {
+                token: activeProposal.expectedVersion.token,
+                hash: activeProposal.expectedVersion.hash,
+                modifiedAt: activeProposal.expectedVersion.modifiedAt,
+                size: activeProposal.expectedVersion.size,
+              }
+            : { token: '' },
+        });
+      }
+      setActiveProposal(null);
+    } catch (err: any) {
+      setProposalConflictError(
+        err.message || 'Conflict: Note changed since this proposal was generated.'
+      );
+    }
   };
+
+  const currentProviderInfo = providers.find((p) => p.id === providerId);
 
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-slate-100 border-l border-slate-800 select-none">
@@ -275,6 +344,11 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono uppercase">
             {providerId}
           </span>
+          {aiBackend.isGatewayMode && (
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
+              Gateway
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -316,49 +390,62 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
               onChange={(e) => setProviderId(e.target.value as AIProviderId)}
               className="w-full mt-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
             >
-              <option value="ollama">Ollama (Local)</option>
-              <option value="lmstudio">LM Studio (Local)</option>
-              <option value="openai">OpenAI (BYOK)</option>
-              <option value="anthropic">Anthropic Claude (BYOK)</option>
-              <option value="gemini">Google Gemini (BYOK)</option>
-              <option value="openrouter">OpenRouter (BYOK)</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
             </select>
           </div>
 
-          {providerId !== 'ollama' && providerId !== 'lmstudio' && (
+          {currentProviderInfo?.type === 'cloud' && (
             <div className="space-y-1">
-              <label className="text-[11px] text-slate-400 flex items-center justify-between">
-                <span>API Key:</span>
-                {maskedKey && (
-                  <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>
-                )}
-              </label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="password"
-                  placeholder={maskedKey ? 'Enter new key to replace' : 'Paste API Key (sk-...)'}
-                  value={inputApiKey}
-                  onChange={(e) => setInputApiKey(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
-                />
-                <button
-                  onClick={handleSaveApiKey}
-                  disabled={!inputApiKey.trim()}
-                  className="px-2 py-1 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-white text-[11px]"
-                >
-                  Save
-                </button>
-                {maskedKey && (
-                  <button
-                    onClick={handleClearApiKey}
-                    className="px-2 py-1 bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 rounded text-[11px]"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              {keySavedMessage && (
-                <div className="text-[10px] text-emerald-400">✓ Key securely saved</div>
+              {!aiBackend.isGatewayMode ? (
+                <div className="p-2 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300 text-[11px] leading-snug">
+                  Cloud BYOK requires OpenOb Gateway so API keys remain outside browser application
+                  state.
+                </div>
+              ) : (
+                <>
+                  <label className="text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>API Key (Stored in Gateway memory):</span>
+                    {maskedKey && (
+                      <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>
+                    )}
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="password"
+                      placeholder={
+                        maskedKey ? 'Enter new key to replace' : 'Paste API Key (sk-...)'
+                      }
+                      value={inputApiKey}
+                      onChange={(e) => setInputApiKey(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
+                    />
+                    <button
+                      onClick={handleSaveApiKey}
+                      disabled={!inputApiKey.trim()}
+                      className="px-2 py-1 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-white text-[11px]"
+                    >
+                      Save
+                    </button>
+                    {maskedKey && (
+                      <button
+                        onClick={handleClearApiKey}
+                        className="px-2 py-1 bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 rounded text-[11px]"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {keySavedMessage && (
+                    <div className="text-[10px] text-emerald-400">
+                      ✓ Key securely configured in Gateway
+                    </div>
+                  )}
+                  {secretError && <div className="text-[10px] text-rose-400">⚠️ {secretError}</div>}
+                </>
               )}
             </div>
           )}
@@ -386,16 +473,41 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer max-w-[130px] truncate"
+            disabled={isLoadingModels || !!modelError || models.length === 0}
+            className="bg-slate-950 border border-slate-700 disabled:opacity-50 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer max-w-[130px] truncate"
           >
-            {models.map((m: AIModel) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
+            {isLoadingModels ? (
+              <option value="">Loading...</option>
+            ) : modelError ? (
+              <option value="">Unavailable</option>
+            ) : models.length === 0 ? (
+              <option value="">No models</option>
+            ) : (
+              models.map((m: AIModel) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))
+            )}
           </select>
         </div>
       </div>
+
+      {/* Provider Model Discovery Error Banner */}
+      {modelError && (
+        <div className="px-3 py-1.5 bg-rose-950/60 border-b border-rose-800/80 text-rose-300 text-[11px] flex items-center justify-between">
+          <span className="truncate flex items-center gap-1">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="truncate">{modelError}</span>
+          </span>
+          <button
+            onClick={() => void refreshProviderData()}
+            className="ml-2 px-1.5 py-0.5 rounded bg-rose-900/80 hover:bg-rose-800 text-[10px] text-white shrink-0 flex items-center gap-1"
+          >
+            <RefreshCw className="w-2.5 h-2.5" /> Retry
+          </button>
+        </div>
+      )}
 
       {/* Messages Feed */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -427,7 +539,11 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
               {msg.citations && msg.citations.length > 0 && (
                 <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex flex-wrap gap-1">
                   <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                    <Link className="w-2.5 h-2.5 text-sky-400" /> Citations:
+                    <Link className="w-2.5 h-2.5 text-sky-400" /> Citations
+                    {responseMetadata?.retrievedSources &&
+                    responseMetadata.retrievedSources.length > 0
+                      ? ` (${responseMetadata.retrievedSources.length} sources):`
+                      : ':'}
                   </span>
                   {msg.citations.map((cite: Citation, cIdx: number) => (
                     <button
@@ -456,22 +572,54 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
             <div className="text-slate-400 text-[11px]">{activeProposal.explanation}</div>
 
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={handleAcceptProposal}
-                className="flex-1 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 rounded text-white font-medium flex items-center justify-center gap-1 shadow-sm transition-colors"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Accept Edit</span>
-              </button>
-              <button
-                onClick={() => setActiveProposal(null)}
-                className="py-1 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 flex items-center justify-center gap-1 transition-colors"
-              >
-                <XCircle className="w-3.5 h-3.5" />
-                <span>Reject</span>
-              </button>
-            </div>
+            {/* OCC Conflict Notice */}
+            {proposalConflictError && (
+              <div className="p-2 rounded bg-rose-950/70 border border-rose-800/80 text-rose-300 text-[11px] space-y-1.5">
+                <div className="flex items-center gap-1 font-semibold">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Note changed since proposal was generated</span>
+                </div>
+                <div className="text-[10px] text-rose-200/80">{proposalConflictError}</div>
+                <div className="flex items-center gap-1.5 pt-1">
+                  <button
+                    onClick={() => {
+                      onNavigate(activeProposal.path);
+                    }}
+                    className="px-2 py-0.5 bg-rose-900/60 hover:bg-rose-800 rounded text-[10px] text-rose-200 flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" /> Reload Note
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveProposal(null);
+                      setProposalConflictError(null);
+                    }}
+                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] text-slate-300"
+                  >
+                    Discard Proposal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!proposalConflictError && (
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleAcceptProposal}
+                  className="flex-1 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 rounded text-white font-medium flex items-center justify-center gap-1 shadow-sm transition-colors"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Accept Edit</span>
+                </button>
+                <button
+                  onClick={() => setActiveProposal(null)}
+                  className="py-1 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 flex items-center justify-center gap-1 transition-colors"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Reject</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -506,7 +654,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           ) : (
             <button
               type="submit"
-              disabled={!inputPrompt.trim()}
+              disabled={!inputPrompt.trim() || !selectedModel || !!modelError}
               className="p-1 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white transition-colors"
               title="Send Prompt"
             >
