@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SecurityError } from '../errors.js';
 import {
+  RESERVED_WORKSPACE_PREFIX,
   basenameVaultPath,
   dirnameVaultPath,
   extnameVaultPath,
+  isReservedWorkspacePath,
   joinVaultPath,
   normalizeVaultPath,
 } from '../path.js';
@@ -72,5 +74,62 @@ describe('path helper functions', () => {
     expect(extnameVaultPath('note.tar.gz')).toBe('.gz');
     expect(extnameVaultPath('note')).toBe('');
     expect(extnameVaultPath('.hidden')).toBe('');
+  });
+});
+
+describe('isReservedWorkspacePath and RESERVED_WORKSPACE_PREFIX', () => {
+  it('exports RESERVED_WORKSPACE_PREFIX as .openob', () => {
+    expect(RESERVED_WORKSPACE_PREFIX).toBe('.openob');
+  });
+
+  it('correctly identifies exact and nested reserved .openob paths across all case variants', () => {
+    expect(isReservedWorkspacePath('.openob')).toBe(true);
+    expect(isReservedWorkspacePath('.openob/')).toBe(true);
+    expect(isReservedWorkspacePath('.openob/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('.openob/evil.md')).toBe(true);
+    expect(isReservedWorkspacePath('.openob/foo/bar')).toBe(true);
+
+    // Case-variant tests (P1)
+    expect(isReservedWorkspacePath('.OPENOB')).toBe(true);
+    expect(isReservedWorkspacePath('.OpenOb')).toBe(true);
+    expect(isReservedWorkspacePath('.oPeNoB')).toBe(true);
+    expect(isReservedWorkspacePath('.OPENOB/')).toBe(true);
+    expect(isReservedWorkspacePath('.OPENOB/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('.OpenOb/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('.oPeNoB/evil.md')).toBe(true);
+    expect(isReservedWorkspacePath('.OPENOB/foo/bar')).toBe(true);
+  });
+
+  it('correctly identifies normalized aliases resolving to .openob across case variants', () => {
+    expect(isReservedWorkspacePath('./.openob/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('foo/../.openob/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('.openob\\views\\x.json')).toBe(true);
+    expect(isReservedWorkspacePath('/.openob/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('/.openob')).toBe(true);
+    expect(isReservedWorkspacePath('./.openob')).toBe(true);
+
+    // Case-variant aliases
+    expect(isReservedWorkspacePath('./.OPENOB/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('foo/../.OPENOB/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('.OPENOB\\views\\x.json')).toBe(true);
+    expect(isReservedWorkspacePath('/.OPENOB/views/x.json')).toBe(true);
+    expect(isReservedWorkspacePath('/.OpenOb')).toBe(true);
+    expect(isReservedWorkspacePath('./.oPeNoB')).toBe(true);
+  });
+
+  it('does NOT incorrectly match near-miss or prefix-like note names across case variants', () => {
+    expect(isReservedWorkspacePath('.openobserver.md')).toBe(false);
+    expect(isReservedWorkspacePath('.OPENOBSERVER.md')).toBe(false);
+    expect(isReservedWorkspacePath('.OpenObserver.md')).toBe(false);
+    expect(isReservedWorkspacePath('.openob-notes/foo.md')).toBe(false);
+    expect(isReservedWorkspacePath('.OPENOB-NOTES/foo.md')).toBe(false);
+    expect(isReservedWorkspacePath('notes/.openobservation.md')).toBe(false);
+    expect(isReservedWorkspacePath('notes/.OPENOBservation.md')).toBe(false);
+    expect(isReservedWorkspacePath('foo.openob/bar.md')).toBe(false);
+    expect(isReservedWorkspacePath('foo.OPENOB/bar.md')).toBe(false);
+    expect(isReservedWorkspacePath('notes/ordinary.md')).toBe(false);
+    expect(isReservedWorkspacePath('ordinary.md')).toBe(false);
+    expect(isReservedWorkspacePath('')).toBe(false);
+    expect(isReservedWorkspacePath('.')).toBe(false);
   });
 });

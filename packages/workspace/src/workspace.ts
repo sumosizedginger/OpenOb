@@ -6,6 +6,7 @@ import {
   DocumentParser,
   FileSnapshot,
   FileVersion,
+  isReservedWorkspacePath,
   normalizeVaultPath,
   NotFoundError,
   ParsedDocument,
@@ -226,8 +227,7 @@ export class OpenObWorkspace {
       if (
         !entry.isDirectory &&
         entry.path.endsWith('.md') &&
-        !entry.path.startsWith('.openob/') &&
-        !entry.name.startsWith('.openob')
+        !isReservedWorkspacePath(entry.path)
       ) {
         const snapshot = await this.storage.read(entry.path);
         const text =
@@ -252,19 +252,19 @@ export class OpenObWorkspace {
 
   /**
    * Lists entries within a vault directory.
-   * Filters out reserved .openob metadata directory unless specifically requested.
+   * Filters out reserved .openob metadata directory.
    */
   async listEntries(subPath = '', context?: ClientContext): Promise<VaultEntry[]> {
     this.checkCapability('workspace.read', context);
     const normalized = subPath ? normalizeVaultPath(subPath) : '';
-    const entries = await this.storage.list(normalized, true);
-    if (!normalized.startsWith('.openob')) {
-      return entries.filter(
-        (e) =>
-          !e.path.startsWith('.openob/') && e.path !== '.openob' && !e.name.startsWith('.openob')
+    if (normalized && isReservedWorkspacePath(normalized)) {
+      throw new InvalidPathError(
+        subPath,
+        `Path "${subPath}" is inside the reserved OpenOb metadata namespace`
       );
     }
-    return entries;
+    const entries = await this.storage.list(normalized, true);
+    return entries.filter((e) => !isReservedWorkspacePath(e.path));
   }
 
   /**
@@ -1175,6 +1175,9 @@ export class OpenObWorkspace {
       throw new InvalidRequestError('Missing required field: "expectedVersion" with valid "token"');
     }
 
+    this.resolveNotePath(request.oldPath);
+    this.resolveNotePath(request.newPath);
+
     const rawOld = request.oldPath.endsWith('.md') ? request.oldPath : `${request.oldPath}.md`;
     const rawNew = request.newPath.endsWith('.md') ? request.newPath : `${request.newPath}.md`;
 
@@ -1659,6 +1662,7 @@ export class OpenObWorkspace {
       throw new InvalidRequestError('Missing required field: "expectedVersion" with valid "token"');
     }
 
+    this.resolveNotePath(request.path);
     const rawPath = request.path.endsWith('.md') ? request.path : `${request.path}.md`;
     const normalizedPath = this.resolveNotePath(rawPath);
 
@@ -1844,7 +1848,14 @@ export class OpenObWorkspace {
     if (!rawPath || typeof rawPath !== 'string') {
       throw new InvalidRequestError('A valid path string is required');
     }
-    return normalizeVaultPath(rawPath);
+    const normalized = normalizeVaultPath(rawPath);
+    if (isReservedWorkspacePath(normalized)) {
+      throw new InvalidPathError(
+        rawPath,
+        `Path "${rawPath}" is inside the reserved OpenOb metadata namespace`
+      );
+    }
+    return normalized;
   }
 
   private async getParsedDocument(path: VaultPath): Promise<ParsedDocument> {

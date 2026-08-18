@@ -259,3 +259,11 @@ Mitigation: Implement two-stage reconciliation: Stage A performs fast synchronou
 Scenario: Failures in writing or renaming the encrypted desktop secrets file are swallowed or logged to console without rejecting, leaving API secrets in ephemeral memory while failing to persist to disk.
 
 Mitigation: Force `persistToDisk()` to throw on filesystem errors, roll back memory cache on persistence failure, and ensure `setSecret()` and `clearSecret()` promises reject with durable error context.
+
+### F-039 Reserved `.openob/` Metadata Namespace Reachability via Note APIs
+
+Scenario: A client possessing standard note privileges (`workspace.read`, `workspace.write`) but lacking dedicated metadata capabilities (`workspace.views.write`) accesses, creates, modifies, or deletes internal metadata (such as `.openob/views/<id>.json` or `.openob/evil.md`) through public user-note endpoints (`/api/v1/notes` or `workspace.createNote`/`updateNote`/`deleteNote`/`renameNote`).
+
+Mitigation: Centralize namespace validation via `isReservedWorkspacePath()` in `@okw/core`, enforce the reserved-path boundary across all public `OpenObWorkspace` note methods by rejecting `.openob` targets with `InvalidPathError` (HTTP 400), omit `.openob/` from standard file listings, and isolate internal metadata services (`SavedViewStore`) to explicit subsystem capabilities.
+
+Test: `tests/integrity/reserved-metadata-boundary.test.ts`.

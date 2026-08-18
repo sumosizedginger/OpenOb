@@ -115,6 +115,15 @@ All operations through `OpenObWorkspace` and Gateway REST endpoints are governed
 | `workspace.delete`      | Delete notes and folders with OCC protection.                                                       |
 | `workspace.views.write` | Create, update, and delete persisted saved views in `.openob/views/` with OCC protection.           |
 
+### Reserved Metadata Namespace (`.openob/`)
+
+- **Strict Namespace Isolation**: `.openob/` is reserved exclusively for internal OpenOb application metadata (e.g. `.openob/views/<id>.json`).
+- **Capability Separation**:
+  - `workspace.write`, `properties.write`, `workspace.rename`, and `workspace.delete` authorize operations on **user notes only**. They do **NOT** confer access to `.openob/`.
+  - `workspace.views.write` authorizes dedicated Saved View operations (`createSavedView`, `updateSavedView`, `deleteSavedView`) through the Saved View service. It does **NOT** grant note-level CRUD access to arbitrary files inside `.openob/`.
+  - All public note APIs (`readNote`, `createNote`, `updateNote`, `deleteNote`, `renameNote`, `setProperty`, `getNoteMetadata`, `getBacklinks`, `getOutgoingLinks`, `getProperties`, `getGraphNeighbors`, and `listEntries`) strictly reject any path in `.openob/` with `InvalidPathError` (HTTP 400).
+  - Direct manual metadata mutation through note APIs is not supported.
+
 ### Gateway Defaults & Operations
 
 - **Default Posture (Read-Only)**: When started without explicit write scopes, `openob-gateway` runs in read-only mode with `[workspace.read, workspace.search]`.

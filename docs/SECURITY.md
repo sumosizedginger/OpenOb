@@ -155,6 +155,13 @@ The OpenOb service boundary enforces explicit capability scoping on all operatio
 - **`workspace.delete`**: Deleting notes and directories.
 - **`workspace.views.write`**: Creating, updating, and deleting persisted database views under `.openob/views/`.
 
+### Reserved Metadata Namespace Isolation (`.openob/`)
+
+- **Application Metadata Boundary**: `.openob/` is strictly reserved for internal OpenOb metadata. User note APIs (`readNote`, `createNote`, `updateNote`, `deleteNote`, `renameNote`, `setProperty`, etc.) strictly reject any path in `.openob/` with `InvalidPathError`.
+- **Capability Isolation**: `workspace.write` confers mutation rights exclusively over user notes. Dedicated metadata capabilities (such as `workspace.views.write`) govern their respective internal subsystems (such as `SavedViewStore`).
+- **No Note Backdoors**: A client with `workspace.write` cannot bypass `workspace.views.write` or corrupt saved view definitions via `/api/v1/notes` endpoints.
+- **No Direct Mutation**: Direct manual manipulation of `.openob/` files is neither supported nor permitted.
+
 ### Default Security Posture
 
 - **Read-Only by Default**: The standalone Gateway binary defaults to read-only mode (`[workspace.read, workspace.search]`).

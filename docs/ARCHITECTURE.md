@@ -234,6 +234,11 @@ Properties live in open Markdown metadata such as YAML frontmatter.
 
 Database-like views are query/render layers over those properties.
 
+Saved view definitions are stored as JSON files inside the reserved `.openob/views/` application metadata directory.
+
+- **Reserved Metadata Namespace (`.openob/`)**: Internal application metadata is strictly isolated from user Markdown notes. Ordinary note APIs (`readNote`, `createNote`, `updateNote`, `deleteNote`, `renameNote`, `setProperty`) cannot read or mutate `.openob/`.
+- **Capability Scopes**: Saved view operations require the dedicated `workspace.views.write` capability and are serviced through `SavedViewStore`. `workspace.write` alone does not confer access to `.openob/`.
+
 Do not create an opaque canonical block database.
 
 ## 10. AI Gateway

@@ -336,7 +336,7 @@ export async function executeProtocolPropertyQuery(
     };
   });
 
-  const availableProperties = await discoverVaultProperties(index);
+  const availableProperties = await discoverVaultProperties(allDocs);
 
   return {
     rows,
@@ -381,8 +381,10 @@ export function groupDocumentsByProperty(
 /**
  * Discovers all unique property keys used across the vault.
  */
-export async function discoverVaultProperties(index: DocumentIndex): Promise<string[]> {
-  const docs = await index.getAll();
+export async function discoverVaultProperties(
+  indexOrDocs: DocumentIndex | ParsedDocument[]
+): Promise<string[]> {
+  const docs = Array.isArray(indexOrDocs) ? indexOrDocs : await indexOrDocs.getAll();
   const keys = new Set<string>(['title', 'path', 'tags']);
 
   for (const doc of docs) {

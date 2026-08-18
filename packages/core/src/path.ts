@@ -98,3 +98,47 @@ export function extnameVaultPath(path: VaultPath): string {
   }
   return base.substring(lastDot);
 }
+
+/**
+ * Reserved metadata namespace prefix for internal OpenOb workspace state (.openob/).
+ */
+export const RESERVED_WORKSPACE_PREFIX = '.openob';
+
+/**
+ * Determines whether a given raw or normalized vault path falls strictly within
+ * the reserved OpenOb application metadata namespace.
+ *
+ * Exact boundary:
+ *   path === '.openob' OR path starts with '.openob/'
+ *
+ * Aliases that normalize to this prefix (e.g. './.openob', 'foo/../.openob/views/x.json')
+ * are correctly identified. Near-miss paths (e.g. '.openobserver.md', '.openob-notes/foo.md')
+ * are NOT identified as reserved.
+ */
+export function isReservedWorkspacePath(rawOrNormalizedPath: string): boolean {
+  if (!rawOrNormalizedPath || typeof rawOrNormalizedPath !== 'string') {
+    return false;
+  }
+  let normalized = rawOrNormalizedPath.replace(/\\/g, '/').trim();
+  while (normalized.startsWith('/')) {
+    normalized = normalized.slice(1);
+  }
+  while (normalized.endsWith('/') && normalized.length > 1) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (normalized === '' || normalized === '.') {
+    return false;
+  }
+  try {
+    const canonical = normalizeVaultPath(rawOrNormalizedPath);
+    const folded = canonical.toLowerCase();
+    return (
+      folded === RESERVED_WORKSPACE_PREFIX || folded.startsWith(`${RESERVED_WORKSPACE_PREFIX}/`)
+    );
+  } catch {
+    const folded = normalized.toLowerCase();
+    return (
+      folded === RESERVED_WORKSPACE_PREFIX || folded.startsWith(`${RESERVED_WORKSPACE_PREFIX}/`)
+    );
+  }
+}

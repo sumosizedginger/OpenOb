@@ -120,3 +120,9 @@ On Node.js environments, writes must write to an isolated temporary file (`.tmp.
 **Decision:** `@okw/desktop` provides a Node runtime library combining `NodeFsVaultStorage` for direct on-disk Markdown storage with `SqliteDocumentIndex` and `SafeWriter` in `DesktopVaultRuntime` (a packaged Electron desktop shell is planned for Phase 12, not delivered). External filesystem changes are monitored via `NativeVaultWatcher` with debounce filtering and ignore rules for internal SafeWriter swap files (`.okw.tmp.*`). BYOK cloud AI secrets are persisted in `DesktopSecretStore` using authenticated AES-256-GCM file encryption with explicit user-provided master passphrase key derivation (Constitution Law 17, `F-005`), not machine-bound. In-process IPC routing contracts are provided by `DesktopIpcBridge`.
 
 **Reason:** Enables high-performance native Node desktop execution with zero data-loss safe writing, live external file sync, and robust authenticated secret encryption.
+
+## D-023 Reserved Application Metadata Namespace & Note API Isolation (P3E-P4)
+
+**Decision:** `.openob/` is strictly reserved for internal OpenOb metadata (such as `.openob/views/<id>.json`). All user-facing note operations (`readNote`, `createNote`, `updateNote`, `deleteNote`, `renameNote`, `setProperty`, `getNoteMetadata`, `getBacklinks`, `getOutgoingLinks`, `getProperties`, `getGraphNeighbors`, and `listEntries`) reject `.openob` targets with `InvalidPathError` (HTTP 400). Dedicated application services (`SavedViewStore`) manage their subdirectories directly through underlying storage, governed by specific capabilities (`workspace.views.write`). `workspace.write` grants mutation authority exclusively over user notes and does not confer access to `.openob/`.
+
+**Reason:** Prevents capability leakage, eliminates backdoors into internal metadata storage, and preserves strict capability separation between user notes and application metadata.

@@ -1,4 +1,4 @@
-import { DocumentIndex, DocumentParser, VaultStorage } from '@okw/core';
+import { DocumentIndex, DocumentParser, isReservedWorkspacePath, VaultStorage } from '@okw/core';
 import { DefaultDocumentParser } from '@okw/markdown';
 
 export interface RebuildProgress {
@@ -22,7 +22,10 @@ export async function rebuildVaultIndex(
   const startTime = Date.now();
   const allEntries = await storage.list('', true);
   const markdownEntries = allEntries.filter(
-    (e) => !e.isDirectory && (e.path.endsWith('.md') || e.path.endsWith('.markdown'))
+    (e) =>
+      !e.isDirectory &&
+      (e.path.endsWith('.md') || e.path.endsWith('.markdown')) &&
+      !isReservedWorkspacePath(e.path)
   );
 
   const parsedDocs = [];
