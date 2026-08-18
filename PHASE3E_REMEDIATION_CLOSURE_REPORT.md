@@ -107,7 +107,8 @@ openob-gateway --vault ./notes --serve-web \
 
 ## 6. Remote CI & Final SHA
 
-- **Ending Commit SHA**: `46f35f186a81e6a749dbd22c1b3851a2ca9f248c`
+- **Phase 3E Remediation Implementation SHA**: `46f35f186a81e6a749dbd22c1b3851a2ca9f248c`
+- **Phase 3E Remediation Closure-Audit HEAD**: `54f950bdcfe567a2f4942d707beb4bcea6936229`
 - **Remote CI Status**: **REMOTE CI UNVERIFIED IN THIS ENVIRONMENT** (GitHub API/Actions not accessible without authentication token; local full verification suite is 100% green).
 
 ---
