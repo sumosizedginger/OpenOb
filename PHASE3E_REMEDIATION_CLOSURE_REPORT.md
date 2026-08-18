@@ -107,7 +107,7 @@ openob-gateway --vault ./notes --serve-web \
 
 ## 6. Remote CI & Final SHA
 
-- **Ending Commit SHA**: `ff6d18f` (or current HEAD after commit)
+- **Ending Commit SHA**: `46f35f186a81e6a749dbd22c1b3851a2ca9f248c`
 - **Remote CI Status**: **REMOTE CI UNVERIFIED IN THIS ENVIRONMENT** (GitHub API/Actions not accessible without authentication token; local full verification suite is 100% green).
 
 ---
