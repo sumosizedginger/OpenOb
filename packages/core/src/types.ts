@@ -150,6 +150,20 @@ export interface SavedView extends ViewConfig {
   readonly updatedAt: number;
 }
 
+export interface SavedViewEnvelope {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly name: string;
+  readonly type: ViewType;
+  readonly filters?: PropertyFilter[];
+  readonly sorts?: PropertySort[];
+  readonly groupBy?: string;
+  readonly visibleProperties?: string[];
+  readonly folderScope?: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
 export interface PropertyQuery {
   readonly folderScope?: string;
   readonly filters?: PropertyFilter[];

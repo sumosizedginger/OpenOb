@@ -1,4 +1,4 @@
-import { VaultPath } from '@okw/core';
+import { PropertyFilter, PropertySort, SavedView, VaultPath, ViewType } from '@okw/core';
 
 /**
  * Information summarizing the workspace and its runtime state.
@@ -382,4 +382,75 @@ export interface ClientContext {
   readonly scopes?: string[];
 }
 
+/**
+ * Protocol-neutral SavedView DTO including OCC version metadata.
+ */
+export interface SavedViewDTO {
+  readonly view: SavedView;
+  readonly version: ExpectedVersionDTO;
+}
+
+/**
+ * Request payload to create a new saved view.
+ */
+export interface CreateSavedViewRequest {
+  readonly name: string;
+  readonly type: ViewType;
+  readonly filters?: PropertyFilter[];
+  readonly sorts?: PropertySort[];
+  readonly groupBy?: string;
+  readonly visibleProperties?: string[];
+  readonly folderScope?: string;
+}
+
+/**
+ * Request payload to update an existing saved view.
+ */
+export interface UpdateSavedViewRequest {
+  readonly name?: string;
+  readonly type?: ViewType;
+  readonly filters?: PropertyFilter[];
+  readonly sorts?: PropertySort[];
+  readonly groupBy?: string;
+  readonly visibleProperties?: string[];
+  readonly folderScope?: string;
+  readonly expectedVersion: ExpectedVersionDTO;
+}
+
+/**
+ * Request payload to delete an existing saved view.
+ */
+export interface DeleteSavedViewRequest {
+  readonly expectedVersion: ExpectedVersionDTO;
+}
+
+/**
+ * Structured response for a saved view deletion operation.
+ */
+export interface DeleteSavedViewResultDTO {
+  readonly operation: 'delete_view';
+  readonly viewId: string;
+  readonly previousVersion: ExpectedVersionDTO;
+  readonly durableSuccess: boolean;
+  readonly requestId?: string;
+  readonly clientId?: string;
+}
+
+/**
+ * Options when executing a saved view query.
+ */
+export interface RunSavedViewOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export type {
+  FilterOperator,
+  PropertyFilter,
+  PropertySort,
+  SavedView,
+  SavedViewEnvelope,
+  ViewConfig,
+  ViewType,
+} from '@okw/core';
 export type { WorkspaceChangeEvent, WorkspaceChangeEventType } from './events.js';

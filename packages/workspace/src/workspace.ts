@@ -25,6 +25,7 @@ import { DefaultDocumentParser, parseFrontmatter, updateDocumentFrontmatter } fr
 import { NoteWriteCoordinator, SafeWriter } from '@okw/vault';
 import { InMemoryAuditSink } from './audit.js';
 import { WorkspaceEventPublisher } from './events.js';
+import { SavedViewStore } from './saved-views.js';
 import {
   ForbiddenError,
   IndexDegradedError,
@@ -37,8 +38,11 @@ import {
   BacklinkDTO,
   ClientContext,
   CreateNoteRequest,
+  CreateSavedViewRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DeleteSavedViewRequest,
+  DeleteSavedViewResultDTO,
   DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
@@ -49,12 +53,15 @@ import {
   PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
+  RunSavedViewOptions,
+  SavedViewDTO,
   SearchRequestDTO,
   SearchResultDTO,
   SearchResultMatch,
   SetPropertyRequest,
   SingleNoteMutationResultDTO,
   UpdateNoteRequest,
+  UpdateSavedViewRequest,
   WorkspaceInfo,
 } from './types.js';
 
@@ -130,6 +137,7 @@ export class OpenObWorkspace {
   private readonly parser: DocumentParser;
   private readonly safeWriter: SafeWriter;
   private readonly coordinator: NoteWriteCoordinator;
+  private readonly savedViewStore: SavedViewStore;
   private readonly auditSink: AuditSink;
   private readonly eventPublisher: WorkspaceEventPublisher;
   private readonly structuralGate = new StructuralGate();
@@ -146,6 +154,7 @@ export class OpenObWorkspace {
     this.safeWriter = options.safeWriter ?? new SafeWriter(this.storage);
     this.coordinator =
       options.coordinator ?? new NoteWriteCoordinator(this.storage, this.safeWriter);
+    this.savedViewStore = new SavedViewStore(this.storage, this.safeWriter);
     this.auditSink = options.auditSink ?? new InMemoryAuditSink();
     this.eventPublisher =
       options.eventPublisher ?? new WorkspaceEventPublisher(options.serverInstanceId);
@@ -159,6 +168,10 @@ export class OpenObWorkspace {
 
   public getEventPublisher(): WorkspaceEventPublisher {
     return this.eventPublisher;
+  }
+
+  public getSavedViewStore(): SavedViewStore {
+    return this.savedViewStore;
   }
 
   /**
@@ -184,7 +197,8 @@ export class OpenObWorkspace {
         'workspace.write',
         'properties.write',
         'workspace.rename',
-        'workspace.delete'
+        'workspace.delete',
+        'workspace.views.write'
       );
     }
 
@@ -209,7 +223,12 @@ export class OpenObWorkspace {
     const entries = await this.storage.list('', true);
     const docs: any[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory && entry.path.endsWith('.md')) {
+      if (
+        !entry.isDirectory &&
+        entry.path.endsWith('.md') &&
+        !entry.path.startsWith('.openob/') &&
+        !entry.name.startsWith('.openob')
+      ) {
         const snapshot = await this.storage.read(entry.path);
         const text =
           snapshot.textContent ??
@@ -233,11 +252,19 @@ export class OpenObWorkspace {
 
   /**
    * Lists entries within a vault directory.
+   * Filters out reserved .openob metadata directory unless specifically requested.
    */
   async listEntries(subPath = '', context?: ClientContext): Promise<VaultEntry[]> {
     this.checkCapability('workspace.read', context);
     const normalized = subPath ? normalizeVaultPath(subPath) : '';
-    return this.storage.list(normalized, true);
+    const entries = await this.storage.list(normalized, true);
+    if (!normalized.startsWith('.openob')) {
+      return entries.filter(
+        (e) =>
+          !e.path.startsWith('.openob/') && e.path !== '.openob' && !e.name.startsWith('.openob')
+      );
+    }
+    return entries;
   }
 
   /**
@@ -394,6 +421,110 @@ export class OpenObWorkspace {
       properties,
       indexStatus: this.indexHealth,
     };
+  }
+
+  /**
+   * Lists all saved view definitions persisted in .openob/views/.
+   */
+  async listSavedViews(context?: ClientContext): Promise<SavedViewDTO[]> {
+    this.checkCapability('workspace.read', context);
+    return this.savedViewStore.listSavedViews();
+  }
+
+  /**
+   * Retrieves a single saved view definition by its ID.
+   */
+  async getSavedView(id: string, context?: ClientContext): Promise<SavedViewDTO> {
+    this.checkCapability('workspace.read', context);
+    return this.savedViewStore.getSavedView(id);
+  }
+
+  /**
+   * Creates a new saved view definition in .openob/views/<generated-id>.json.
+   * Emits 'view.created' change event upon successful creation.
+   */
+  async createSavedView(
+    request: CreateSavedViewRequest,
+    context?: ClientContext
+  ): Promise<SavedViewDTO> {
+    this.checkCapability('workspace.views.write', context);
+    const result = await this.savedViewStore.createSavedView(request);
+    this.eventPublisher.publish({
+      type: 'view.created',
+      viewId: result.view.id,
+      operation: 'create',
+      version: result.version,
+      requestId: context?.requestId,
+      clientId: context?.clientId,
+    });
+    return result;
+  }
+
+  /**
+   * Updates an existing saved view definition with OCC version validation.
+   * Emits 'view.updated' change event upon successful update.
+   */
+  async updateSavedView(
+    id: string,
+    request: UpdateSavedViewRequest,
+    context?: ClientContext
+  ): Promise<SavedViewDTO> {
+    this.checkCapability('workspace.views.write', context);
+    const result = await this.savedViewStore.updateSavedView(id, request);
+    this.eventPublisher.publish({
+      type: 'view.updated',
+      viewId: id,
+      operation: 'update',
+      version: result.version,
+      requestId: context?.requestId,
+      clientId: context?.clientId,
+    });
+    return result;
+  }
+
+  /**
+   * Deletes an existing saved view definition with OCC version validation.
+   * Emits 'view.deleted' change event upon successful deletion.
+   */
+  async deleteSavedView(
+    id: string,
+    request: DeleteSavedViewRequest,
+    context?: ClientContext
+  ): Promise<DeleteSavedViewResultDTO> {
+    this.checkCapability('workspace.views.write', context);
+    const result = await this.savedViewStore.deleteSavedView(id, request.expectedVersion);
+    this.eventPublisher.publish({
+      type: 'view.deleted',
+      viewId: id,
+      operation: 'delete',
+      version: request.expectedVersion,
+      requestId: context?.requestId,
+      clientId: context?.clientId,
+    });
+    return result;
+  }
+
+  /**
+   * Executes the property query configured by a saved view.
+   */
+  async runSavedView(
+    id: string,
+    options?: RunSavedViewOptions,
+    context?: ClientContext
+  ): Promise<PropertyQueryResultDTO> {
+    this.checkCapability('workspace.read', context);
+    const saved = await this.savedViewStore.getSavedView(id);
+    const query: PropertyQueryDTO = {
+      folderScope: saved.view.folderScope,
+      filters: saved.view.filters,
+      sorts: saved.view.sorts,
+      columns: saved.view.visibleProperties,
+      limit: options?.limit ?? 100,
+      offset: options?.offset ?? 0,
+    };
+    return executeProtocolPropertyQuery(this.index, query, {
+      indexStatus: this.indexHealth,
+    });
   }
 
   /**

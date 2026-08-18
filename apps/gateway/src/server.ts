@@ -620,8 +620,129 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         return;
       }
 
+      // POST /api/v1/views (Create saved view)
+      if (pathname === '/api/v1/views' && method === 'POST') {
+        const body = await readJsonBody(req, maxBodyBytes);
+        const result = await workspace.createSavedView(body, clientContext);
+        res.statusCode = 201;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // POST /api/v1/views/:id/query (Run saved view query)
+      if (
+        pathname.startsWith('/api/v1/views/') &&
+        pathname.endsWith('/query') &&
+        method === 'POST'
+      ) {
+        const rawId = pathname.slice('/api/v1/views/'.length, pathname.length - '/query'.length);
+        const decodedId = decodeURIComponent(rawId);
+        const body = await readJsonBody(req, maxBodyBytes).catch(() => ({}));
+        const result = await workspace.runSavedView(
+          decodedId,
+          {
+            limit: body?.limit !== undefined ? Number(body.limit) : undefined,
+            offset: body?.offset !== undefined ? Number(body.offset) : undefined,
+          },
+          clientContext
+        );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // PUT /api/v1/views/:id (Update saved view)
+      if (
+        pathname.startsWith('/api/v1/views/') &&
+        !pathname.endsWith('/query') &&
+        method === 'PUT'
+      ) {
+        const rawId = pathname.slice('/api/v1/views/'.length);
+        const decodedId = decodeURIComponent(rawId);
+        const body = await readJsonBody(req, maxBodyBytes);
+        let expectedVersion = body.expectedVersion;
+        const ifMatch = req.headers['if-match'];
+        if (ifMatch && typeof ifMatch === 'string' && !expectedVersion) {
+          expectedVersion = { token: ifMatch.replace(/^"|"$/g, '').trim() };
+        }
+        const result = await workspace.updateSavedView(
+          decodedId,
+          {
+            ...body,
+            expectedVersion,
+          },
+          clientContext
+        );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // DELETE /api/v1/views/:id (Delete saved view)
+      if (pathname.startsWith('/api/v1/views/') && method === 'DELETE') {
+        const rawId = pathname.slice('/api/v1/views/'.length);
+        const decodedId = decodeURIComponent(rawId);
+        let expectedVersion: any;
+        const ifMatch = req.headers['if-match'];
+        if (ifMatch && typeof ifMatch === 'string') {
+          expectedVersion = { token: ifMatch.replace(/^"|"$/g, '').trim() };
+        } else {
+          const body = await readJsonBody(req, maxBodyBytes);
+          expectedVersion = body?.expectedVersion;
+        }
+        const result = await workspace.deleteSavedView(
+          decodedId,
+          {
+            expectedVersion,
+          },
+          clientContext
+        );
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+        return;
+      }
+
       // GET routes
       if (method === 'GET') {
+        // GET /api/v1/views (List saved views)
+        if (pathname === '/api/v1/views') {
+          const views = await workspace.listSavedViews(clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(views));
+          return;
+        }
+
+        // GET /api/v1/views/:id/query (Run saved view query via GET)
+        if (pathname.startsWith('/api/v1/views/') && pathname.endsWith('/query')) {
+          const rawId = pathname.slice('/api/v1/views/'.length, pathname.length - '/query'.length);
+          const decodedId = decodeURIComponent(rawId);
+          const limitParam = parsedUrl.searchParams.get('limit');
+          const offsetParam = parsedUrl.searchParams.get('offset');
+          const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
+          const result = await workspace.runSavedView(
+            decodedId,
+            {
+              limit: isNaN(limit!) ? undefined : limit,
+              offset: isNaN(offset!) ? undefined : offset,
+            },
+            clientContext
+          );
+          res.statusCode = 200;
+          res.end(JSON.stringify(result));
+          return;
+        }
+
+        // GET /api/v1/views/:id (Get saved view)
+        if (pathname.startsWith('/api/v1/views/') && !pathname.endsWith('/query')) {
+          const rawId = pathname.slice('/api/v1/views/'.length);
+          const decodedId = decodeURIComponent(rawId);
+          const view = await workspace.getSavedView(decodedId, clientContext);
+          res.statusCode = 200;
+          res.end(JSON.stringify(view));
+          return;
+        }
+
         // GET /api/v1/properties (Discover vault properties)
         if (pathname === '/api/v1/properties') {
           const props = await workspace.discoverProperties(clientContext);

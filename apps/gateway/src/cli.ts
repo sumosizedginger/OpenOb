@@ -36,6 +36,9 @@ Usage:
   openob set-property <path> <key> [value] --expected-version <token> [--json] [--url <url>] [--token <token>]
   openob rename <old> <new> --expected-version <token> [--json] [--url <url>] [--token <token>]
   openob delete <path> --expected-version <token> [--json] [--url <url>] [--token <token>]
+  openob views [list] [--json] [--url <url>] [--token <token>]
+  openob views get <id> [--json] [--url <url>] [--token <token>]
+  openob views run <id> [--limit <n>] [--offset <n>] [--json] [--url <url>] [--token <token>]
   openob help
 `;
 
@@ -388,6 +391,57 @@ async function runCliDirect(
         return { exitCode: 0, output };
       }
 
+      case 'views': {
+        const subCommand = args[1];
+        if (!subCommand || subCommand === 'list') {
+          const views = await workspace.listSavedViews();
+          const output = isJson
+            ? JSON.stringify(views, null, 2)
+            : views.length === 0
+              ? 'No saved views found.'
+              : `Saved views (${views.length}):\n` +
+                views
+                  .map((v) => `  - [${v.view.type}] ${v.view.name} (id: ${v.view.id})`)
+                  .join('\n');
+          return { exitCode: 0, output };
+        }
+        if (subCommand === 'get') {
+          const id = args[2];
+          if (!id) {
+            return { exitCode: 1, output: 'Error: Missing view id. Usage: openob views get <id>' };
+          }
+          const view = await workspace.getSavedView(id);
+          const output = isJson
+            ? JSON.stringify(view, null, 2)
+            : `View: ${view.view.name} (${view.view.type})\nID: ${view.view.id}\nConfig: ${JSON.stringify(view.view, null, 2)}`;
+          return { exitCode: 0, output };
+        }
+        if (subCommand === 'run') {
+          const id = args[2];
+          if (!id) {
+            return { exitCode: 1, output: 'Error: Missing view id. Usage: openob views run <id>' };
+          }
+          let limit: number | undefined;
+          let offset: number | undefined;
+          for (let i = 3; i < args.length; i++) {
+            if (args[i] === '--limit' && i + 1 < args.length) limit = parseInt(args[++i], 10);
+            if (args[i] === '--offset' && i + 1 < args.length) offset = parseInt(args[++i], 10);
+          }
+          const result = await workspace.runSavedView(id, { limit, offset });
+          const output = isJson
+            ? JSON.stringify(result, null, 2)
+            : `View query results (${result.total} total matching, showing ${result.rows.length}):\n` +
+              result.rows
+                .map((r) => `  - ${r.path}: ${r.title} ${JSON.stringify(r.properties)}`)
+                .join('\n');
+          return { exitCode: 0, output };
+        }
+        return {
+          exitCode: 1,
+          output: `Error: Unknown views subcommand "${subCommand}". Usage: openob views [list|get|run]`,
+        };
+      }
+
       case 'help':
       case '--help':
       case '-h':
@@ -430,6 +484,7 @@ async function runCliRemote(
     'set-property',
     'rename',
     'delete',
+    'views',
   ]);
   if (!validCommands.has(command)) {
     return handleHelpOrUnknown(command, isJson);
@@ -654,6 +709,57 @@ async function runCliRemote(
         });
         const output = isJson ? JSON.stringify(result, null, 2) : `Deleted note: ${result.path}`;
         return { exitCode: 0, output };
+      }
+
+      case 'views': {
+        const subCommand = args[1];
+        if (!subCommand || subCommand === 'list') {
+          const views = await client.listSavedViews();
+          const output = isJson
+            ? JSON.stringify(views, null, 2)
+            : views.length === 0
+              ? 'No saved views found.'
+              : `Saved views (${views.length}):\n` +
+                views
+                  .map((v) => `  - [${v.view.type}] ${v.view.name} (id: ${v.view.id})`)
+                  .join('\n');
+          return { exitCode: 0, output };
+        }
+        if (subCommand === 'get') {
+          const id = args[2];
+          if (!id) {
+            return { exitCode: 1, output: 'Error: Missing view id. Usage: openob views get <id>' };
+          }
+          const view = await client.getSavedView(id);
+          const output = isJson
+            ? JSON.stringify(view, null, 2)
+            : `View: ${view.view.name} (${view.view.type})\nID: ${view.view.id}\nConfig: ${JSON.stringify(view.view, null, 2)}`;
+          return { exitCode: 0, output };
+        }
+        if (subCommand === 'run') {
+          const id = args[2];
+          if (!id) {
+            return { exitCode: 1, output: 'Error: Missing view id. Usage: openob views run <id>' };
+          }
+          let limit: number | undefined;
+          let offset: number | undefined;
+          for (let i = 3; i < args.length; i++) {
+            if (args[i] === '--limit' && i + 1 < args.length) limit = parseInt(args[++i], 10);
+            if (args[i] === '--offset' && i + 1 < args.length) offset = parseInt(args[++i], 10);
+          }
+          const result = await client.runSavedView(id, { limit, offset });
+          const output = isJson
+            ? JSON.stringify(result, null, 2)
+            : `View query results (${result.total} total matching, showing ${result.rows.length}):\n` +
+              result.rows
+                .map((r) => `  - ${r.path}: ${r.title} ${JSON.stringify(r.properties)}`)
+                .join('\n');
+          return { exitCode: 0, output };
+        }
+        return {
+          exitCode: 1,
+          output: `Error: Unknown views subcommand "${subCommand}". Usage: openob views [list|get|run]`,
+        };
       }
 
       default: {

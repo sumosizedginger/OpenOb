@@ -3,8 +3,11 @@ import { OpenObGatewayClient } from './client.js';
 import {
   BacklinkDTO,
   CreateNoteRequest,
+  CreateSavedViewRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DeleteSavedViewRequest,
+  DeleteSavedViewResultDTO,
   DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
@@ -14,11 +17,14 @@ import {
   PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
+  RunSavedViewOptions,
+  SavedViewDTO,
   SearchRequestDTO,
   SearchResultDTO,
   SetPropertyRequest,
   SingleNoteMutationResultDTO,
   UpdateNoteRequest,
+  UpdateSavedViewRequest,
   WorkspaceInfo,
 } from './types.js';
 import { OpenObWorkspace } from './workspace.js';
@@ -46,6 +52,12 @@ export interface WorkspaceBackend {
   setProperty(req: SetPropertyRequest): Promise<SingleNoteMutationResultDTO>;
   renameNote(req: RenameNoteRequest): Promise<RenameResultDTO>;
   deleteNote(req: DeleteNoteRequest): Promise<DeleteResultDTO>;
+  listSavedViews(): Promise<SavedViewDTO[]>;
+  getSavedView(id: string): Promise<SavedViewDTO>;
+  createSavedView(req: CreateSavedViewRequest): Promise<SavedViewDTO>;
+  updateSavedView(id: string, req: UpdateSavedViewRequest): Promise<SavedViewDTO>;
+  deleteSavedView(id: string, req: DeleteSavedViewRequest): Promise<DeleteSavedViewResultDTO>;
+  runSavedView(id: string, options?: RunSavedViewOptions): Promise<PropertyQueryResultDTO>;
 }
 
 /**
@@ -122,6 +134,30 @@ export class LocalWorkspaceBackend implements WorkspaceBackend {
 
   deleteNote(req: DeleteNoteRequest): Promise<DeleteResultDTO> {
     return this.workspace.deleteNote(req);
+  }
+
+  listSavedViews(): Promise<SavedViewDTO[]> {
+    return this.workspace.listSavedViews();
+  }
+
+  getSavedView(id: string): Promise<SavedViewDTO> {
+    return this.workspace.getSavedView(id);
+  }
+
+  createSavedView(req: CreateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.workspace.createSavedView(req);
+  }
+
+  updateSavedView(id: string, req: UpdateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.workspace.updateSavedView(id, req);
+  }
+
+  deleteSavedView(id: string, req: DeleteSavedViewRequest): Promise<DeleteSavedViewResultDTO> {
+    return this.workspace.deleteSavedView(id, req);
+  }
+
+  runSavedView(id: string, options?: RunSavedViewOptions): Promise<PropertyQueryResultDTO> {
+    return this.workspace.runSavedView(id, options);
   }
 }
 
@@ -203,5 +239,29 @@ export class GatewayWorkspaceBackend implements WorkspaceBackend {
 
   deleteNote(req: DeleteNoteRequest): Promise<DeleteResultDTO> {
     return this.client.deleteNote(req);
+  }
+
+  listSavedViews(): Promise<SavedViewDTO[]> {
+    return this.client.listSavedViews();
+  }
+
+  getSavedView(id: string): Promise<SavedViewDTO> {
+    return this.client.getSavedView(id);
+  }
+
+  createSavedView(req: CreateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.client.createSavedView(req);
+  }
+
+  updateSavedView(id: string, req: UpdateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.client.updateSavedView(id, req);
+  }
+
+  deleteSavedView(id: string, req: DeleteSavedViewRequest): Promise<DeleteSavedViewResultDTO> {
+    return this.client.deleteSavedView(id, req);
+  }
+
+  runSavedView(id: string, options?: RunSavedViewOptions): Promise<PropertyQueryResultDTO> {
+    return this.client.runSavedView(id, options);
   }
 }

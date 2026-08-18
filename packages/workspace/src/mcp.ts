@@ -330,6 +330,50 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'openob_list_views',
+    description: 'List all saved view configurations in the OpenOb workspace.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'openob_get_view',
+    description: 'Retrieve a saved view definition by its ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Unique ID of the saved view.',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'openob_run_view',
+    description: 'Execute the property query configured in a saved view and return matching notes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Unique ID of the saved view to run.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of rows to return (default 100).',
+        },
+        offset: {
+          type: 'number',
+          description: 'Pagination row offset (default 0).',
+        },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 /**
@@ -589,6 +633,46 @@ export async function handleMcpToolCall(
           {
             path: args.path,
             expectedVersion: args.expectedVersion,
+          },
+          context
+        );
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'openob_list_views': {
+        const views = await workspace.listSavedViews(context);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(views, null, 2) }],
+        };
+      }
+
+      case 'openob_get_view': {
+        if (!args.id || typeof args.id !== 'string') {
+          return {
+            content: [{ type: 'text', text: 'Missing required argument: "id"' }],
+            isError: true,
+          };
+        }
+        const view = await workspace.getSavedView(args.id, context);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(view, null, 2) }],
+        };
+      }
+
+      case 'openob_run_view': {
+        if (!args.id || typeof args.id !== 'string') {
+          return {
+            content: [{ type: 'text', text: 'Missing required argument: "id"' }],
+            isError: true,
+          };
+        }
+        const res = await workspace.runSavedView(
+          args.id,
+          {
+            limit: typeof args.limit === 'number' ? args.limit : undefined,
+            offset: typeof args.offset === 'number' ? args.offset : undefined,
           },
           context
         );

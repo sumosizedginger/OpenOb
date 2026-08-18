@@ -7,6 +7,9 @@ export type WorkspaceChangeEventType =
   | 'note.property_changed'
   | 'note.renamed'
   | 'note.deleted'
+  | 'view.created'
+  | 'view.updated'
+  | 'view.deleted'
   | 'index.degraded'
   | 'index.recovered'
   | 'stream.reset';
@@ -21,6 +24,7 @@ export interface WorkspaceChangeEvent {
   readonly path?: VaultPath;
   readonly oldPath?: VaultPath;
   readonly newPath?: VaultPath;
+  readonly viewId?: string;
   readonly version?: ExpectedVersionDTO;
   readonly operation?: string;
   readonly requestId?: string;
@@ -133,6 +137,7 @@ export class WorkspaceEventPublisher {
       path: params.path,
       oldPath: params.oldPath,
       newPath: params.newPath,
+      viewId: params.viewId,
       version: params.version,
       operation: params.operation,
       requestId: params.requestId,

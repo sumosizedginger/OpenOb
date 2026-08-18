@@ -2,8 +2,11 @@ import { VaultEntry } from '@okw/core';
 import {
   BacklinkDTO,
   CreateNoteRequest,
+  CreateSavedViewRequest,
   DeleteNoteRequest,
   DeleteResultDTO,
+  DeleteSavedViewRequest,
+  DeleteSavedViewResultDTO,
   DiscoverPropertiesResultDTO,
   GraphNeighborDTO,
   NoteReadResult,
@@ -13,11 +16,14 @@ import {
   PropertyQueryResultDTO,
   RenameNoteRequest,
   RenameResultDTO,
+  RunSavedViewOptions,
+  SavedViewDTO,
   SearchRequestDTO,
   SearchResultDTO,
   SetPropertyRequest,
   SingleNoteMutationResultDTO,
   UpdateNoteRequest,
+  UpdateSavedViewRequest,
   WorkspaceChangeEvent,
   WorkspaceInfo,
 } from './types.js';
@@ -305,6 +311,49 @@ export class OpenObGatewayClient {
   async rebuildIndex(): Promise<{ count: number; status: 'verified' }> {
     return this.request<{ count: number; status: 'verified' }>('/api/v1/index/rebuild', {
       method: 'POST',
+    });
+  }
+
+  async listSavedViews(): Promise<SavedViewDTO[]> {
+    return this.request<SavedViewDTO[]>('/api/v1/views', {
+      method: 'GET',
+    });
+  }
+
+  async getSavedView(id: string): Promise<SavedViewDTO> {
+    return this.request<SavedViewDTO>(`/api/v1/views/${encodeURIComponent(id)}`, {
+      method: 'GET',
+    });
+  }
+
+  async createSavedView(req: CreateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.request<SavedViewDTO>('/api/v1/views', {
+      method: 'POST',
+      body: req,
+    });
+  }
+
+  async updateSavedView(id: string, req: UpdateSavedViewRequest): Promise<SavedViewDTO> {
+    return this.request<SavedViewDTO>(`/api/v1/views/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: req,
+    });
+  }
+
+  async deleteSavedView(
+    id: string,
+    req: DeleteSavedViewRequest
+  ): Promise<DeleteSavedViewResultDTO> {
+    return this.request<DeleteSavedViewResultDTO>(`/api/v1/views/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: req,
+    });
+  }
+
+  async runSavedView(id: string, options?: RunSavedViewOptions): Promise<PropertyQueryResultDTO> {
+    return this.request<PropertyQueryResultDTO>(`/api/v1/views/${encodeURIComponent(id)}/query`, {
+      method: 'POST',
+      body: options || {},
     });
   }
 

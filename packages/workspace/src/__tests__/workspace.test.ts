@@ -221,7 +221,7 @@ Tasks:
   it('13. MCP tool declarations and dispatcher execute properly', async () => {
     const { workspace } = await createFixtureWorkspace();
 
-    expect(MCP_TOOL_DEFINITIONS).toHaveLength(12);
+    expect(MCP_TOOL_DEFINITIONS).toHaveLength(15);
 
     const infoRes = await handleMcpToolCall(workspace, 'openob_workspace_info');
     expect(infoRes.isError).toBeFalsy();
