@@ -171,6 +171,29 @@ describe('OpenOb Guided Onboarding & Learn Center Integrity', () => {
         }
       }
     });
+
+    it('truthful copy: no F2 advertised, Ctrl+\\ is Split View, Ctrl+B is Sidebar, and no unconfirmed delete claims (B-2)', () => {
+      const allChapters = [QUICK_TOUR_CHAPTER, ...LEARN_CHAPTERS];
+      const allContent = allChapters
+        .flatMap((c) => c.steps.map((s) => `${s.title} ${s.content} ${s.shortcut || ''}`))
+        .join('\n');
+
+      // Assert F2 is NOT advertised as a shortcut
+      expect(allContent).not.toContain('F2');
+
+      // Assert Ctrl+\\ is not claimed to toggle the sidebar
+      expect(allContent).not.toMatch(/Ctrl\+\\\s*:\s*Toggle\s*Sidebar/i);
+      expect(allContent).not.toMatch(/Ctrl\+\\\s*:\s*Toggle\s*left\s*file\s*sidebar/i);
+
+      // Assert Ctrl+B is advertised for sidebar toggle
+      expect(allContent).toContain('Ctrl+B: Toggle Sidebar');
+
+      // Assert Ctrl+\\ is advertised for Split View toggle
+      expect(allContent).toContain('Ctrl+\\: Toggle Split View');
+
+      // Assert delete is not claimed to require confirmation
+      expect(allContent).not.toContain('delete with confirmation');
+    });
   });
 
   // -------------------------------------------------------------------------

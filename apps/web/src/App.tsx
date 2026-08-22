@@ -263,12 +263,19 @@ export const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isInsideEditor = (e.target as HTMLElement)?.closest?.('.cm-editor');
 
-      // Ctrl/Cmd+P: Quick Open / Command Palette
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      // Ctrl/Cmd+P or Ctrl/Cmd+Shift+P: Quick Open / Command Palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         if (!isInsideEditor) {
           e.preventDefault();
           setIsCommandPaletteOpen((prev) => !prev);
         }
+      }
+
+      // Ctrl/Cmd+N: Create New Note
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setMainMode('editor');
+        void createNote();
       }
 
       // Ctrl/Cmd+Shift+F: Global Vault Search
@@ -334,7 +341,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [saveActiveNote, activeTabPath, closeTab]);
+  }, [saveActiveNote, activeTabPath, closeTab, createNote]);
 
   const handleSelectHeading = (heading: ParsedHeading) => {
     if (viewMode === 'editor') {

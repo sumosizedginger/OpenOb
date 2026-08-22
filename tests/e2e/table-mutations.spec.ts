@@ -8,6 +8,7 @@ import { MemoryDocumentIndex, rebuildVaultIndex } from '@okw/index';
 import { NodeFsVaultStorage, SafeWriter } from '@okw/vault';
 import { OpenObGatewayClient, OpenObWorkspace } from '@okw/workspace';
 import { RunningGateway, startGateway } from '../../apps/gateway/src/server.js';
+import { seedOnboardingDismissed } from './helpers.js';
 
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -27,6 +28,10 @@ test.describe('Phase 3F: Table Inline Property Editing & OCC E2E', () => {
   let storage: NodeFsVaultStorage;
   let agentClient: OpenObGatewayClient;
   const TEST_TOKEN = 'phase3f-table-token-123';
+
+  test.beforeEach(async ({ page }) => {
+    await seedOnboardingDismissed(page);
+  });
 
   test.beforeAll(async () => {
     tempVaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'okw-table-e2e-'));

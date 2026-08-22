@@ -224,7 +224,80 @@ test.describe('Real Electron Guided Onboarding & Learn Center (Sections 44, 45, 
     await page.keyboard.press('Escape');
     await expect(shortcutsModal).not.toBeVisible();
 
+    // 8. Test Runtime Keyboard Shortcuts (B-2)
+    // Test Ctrl+B: Toggle Sidebar
+    await expect(page.locator('.workspace-sidebar')).toBeVisible();
+    await page.keyboard.press('Control+b');
+    await expect(page.locator('.workspace-sidebar')).not.toBeVisible();
+    await page.keyboard.press('Control+b');
+    await expect(page.locator('.workspace-sidebar')).toBeVisible();
+
+    // Test Ctrl+P / Ctrl+Shift+P: Command Palette / Quick Open
+    await page.keyboard.press('Control+Shift+P');
+    await expect(page.locator('.command-palette')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.command-palette')).not.toBeVisible();
+
+    await page.keyboard.press('Control+p');
+    await expect(page.locator('.command-palette')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.command-palette')).not.toBeVisible();
+
+    // Test Ctrl+N: Create Note
+    await page.keyboard.press('Control+n');
+    await page.waitForTimeout(500);
+    // Editor should be mounted/focused
+    await expect(page.locator('.cm-content')).toBeVisible({ timeout: 5000 });
+
+    // Test Ctrl+\: Toggle Split View
+    await page.keyboard.press('Control+\\');
+    await page.waitForTimeout(500);
+    await expect(page.locator('.cm-editor')).toBeVisible();
+
     await app.close();
     await fs.rm(tempUserDataDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  test('Modal Pointer Interception Regression: Welcome blocks interaction until dismissed', async () => {
+    const testUserDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openob-intercept-e2e-'));
+    const mainScript = path.resolve('apps/desktop/dist/main.cjs');
+
+    const app = await electron.launch({
+      args: [mainScript, `--user-data-dir=${testUserDataDir}`],
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+      },
+    });
+
+    const page = await app.firstWindow();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.app-container', { timeout: 15000 });
+
+    // Welcome overlay is active
+    const welcomeOverlay = page.locator('.welcome-modal-overlay');
+    await expect(welcomeOverlay).toBeVisible({ timeout: 10000 });
+
+    // Attempting to click underlying logo or button should be intercepted by the overlay
+    let clickIntercepted = false;
+    try {
+      await page.locator('.app-logo').click({ timeout: 1500 });
+    } catch (err: any) {
+      clickIntercepted =
+        err.message.includes('intercepts pointer events') || err.name === 'TimeoutError';
+    }
+    expect(clickIntercepted).toBe(true);
+
+    // Skip welcome
+    await page.locator('.welcome-skip-btn').click();
+    await expect(welcomeOverlay).not.toBeVisible();
+
+    // Workspace is now fully interactive
+    await page.locator('.app-logo').click();
+    expect(await page.locator('.app-logo').isVisible()).toBe(true);
+
+    await app.close();
+    await fs.rm(testUserDataDir, { recursive: true, force: true }).catch(() => {});
   });
 });

@@ -6,50 +6,12 @@
 import React from 'react';
 import { Keyboard, X } from 'lucide-react';
 
+import { KEYBOARD_SHORTCUTS } from '../../onboarding/keyboardShortcuts.js';
+
 interface KeyboardShortcutsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-interface ShortcutItem {
-  key: string;
-  description: string;
-}
-
-interface ShortcutGroup {
-  title: string;
-  items: ShortcutItem[];
-}
-
-const SHORTCUT_GROUPS: ShortcutGroup[] = [
-  {
-    title: 'Navigation & Search',
-    items: [
-      { key: 'Ctrl+P', description: 'Quick Open note finder' },
-      { key: 'Ctrl+Shift+P', description: 'Command Palette' },
-      { key: 'Ctrl+G', description: 'Global Graph View' },
-      { key: 'Ctrl+N', description: 'Create new note' },
-      { key: 'Ctrl+\\', description: 'Toggle left file sidebar' },
-    ],
-  },
-  {
-    title: 'Editor & Layout',
-    items: [
-      { key: 'Ctrl+S', description: 'Save current note immediately' },
-      { key: 'Ctrl+E', description: 'Cycle view mode (Editor / Split / Preview)' },
-      { key: 'Ctrl+W', description: 'Close active tab' },
-      { key: 'F2', description: 'Rename active or selected note' },
-    ],
-  },
-  {
-    title: 'General & Dialogs',
-    items: [
-      { key: 'Escape', description: 'Close modals, drawers, or active tour' },
-      { key: 'Arrow Keys', description: 'Navigate lists, file tree, and menus' },
-      { key: 'Enter', description: 'Confirm selection or next tour step' },
-    ],
-  },
-];
 
 export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   isOpen,
@@ -95,7 +57,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         </div>
 
         <div className="shortcuts-grid">
-          {SHORTCUT_GROUPS.map((group) => (
+          {KEYBOARD_SHORTCUTS.map((group) => (
             <div key={group.title} className="shortcuts-group">
               <h3 className="shortcuts-group-title">{group.title}</h3>
               <div className="shortcuts-list">

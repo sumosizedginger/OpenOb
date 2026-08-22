@@ -9,6 +9,7 @@ import { NodeFsVaultStorage, SafeWriter } from '@okw/vault';
 import { OpenObGatewayClient, OpenObWorkspace } from '@okw/workspace';
 import { RunningGateway, startGateway } from '../../apps/gateway/src/server.js';
 import { ServerSecretStore } from '@okw/ai';
+import { seedOnboardingDismissed } from './helpers.js';
 
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -28,6 +29,10 @@ test.describe('Phase 3G: AI Gateway Hardening & Grounded Retrieval E2E', () => {
   let storage: NodeFsVaultStorage;
   let secretStore: ServerSecretStore;
   const TEST_TOKEN = 'phase3g-e2e-token-abc-123';
+
+  test.beforeEach(async ({ page }) => {
+    await seedOnboardingDismissed(page);
+  });
 
   test.beforeAll(async () => {
     // 1. Create a real native temporary filesystem vault

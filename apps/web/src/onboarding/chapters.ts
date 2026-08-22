@@ -159,7 +159,7 @@ export const LEARN_CHAPTERS: readonly TourChapter[] = [
         target: TOUR_TARGETS.NEW_NOTE,
         title: 'Creating Files and Folders',
         content:
-          'Use the header buttons in the sidebar to create notes and nested folders. Double-click or press F2 to rename, and delete with confirmation.',
+          'Use the header buttons in the sidebar to create notes and nested folders. Rename or delete notes and folders directly from the File Tree.',
         placement: 'right',
       },
       {
@@ -449,7 +449,7 @@ export const LEARN_CHAPTERS: readonly TourChapter[] = [
         target: TOUR_TARGETS.SEARCH_BUTTON,
         title: 'Navigation Shortcuts',
         content:
-          'Ctrl+P: Quick Open notes\nCtrl+Shift+P: Command Palette\nCtrl+G: Global Graph View\nCtrl+N: Create Note',
+          'Ctrl+P / Ctrl+Shift+P: Quick Open / Command Palette\nCtrl+G: Global Graph View\nCtrl+N: Create Note\nCtrl+B: Toggle Sidebar',
         placement: 'bottom',
       },
       {
@@ -457,7 +457,7 @@ export const LEARN_CHAPTERS: readonly TourChapter[] = [
         target: TOUR_TARGETS.VIEW_MODE_MENU,
         title: 'Editor & Layout Shortcuts',
         content:
-          'Ctrl+S: Save Note\nCtrl+E: Toggle View Mode (Editor / Split / Preview)\nCtrl+W: Close Active Tab\nCtrl+\\: Toggle Sidebar',
+          'Ctrl+S: Save Note\nCtrl+E: Cycle View Mode\nCtrl+\\: Toggle Split View\nCtrl+W: Close Active Tab',
         placement: 'bottom',
       },
       {

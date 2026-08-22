@@ -38,7 +38,7 @@ When you open or create a vault in OpenOb:
 
 ### Sidebar Navigation & Tab Management
 
-- **File Explorer (`Ctrl+\`)**: Browse, create (`Ctrl+N`), rename (`F2`), and delete notes.
+- **File Explorer (`Ctrl+B`)**: Browse, create (`Ctrl+N`), rename, and delete notes.
 - **Multi-Tab Workspace**: Open multiple notes simultaneously. Close tabs with `Ctrl+W` or click the tab close icon.
 - **Auto-Reconnection**: The desktop shell automatically reconnects to your last opened vault upon launch.
 
@@ -177,18 +177,18 @@ OpenOb features a capability-based plugin system adhering to Constitution Law 20
 
 ## Chapter 9: Keyboard Shortcuts & Power Navigation
 
-| Shortcut       | Description                                  |
-| :------------- | :------------------------------------------- |
-| `Ctrl+P`       | Quick Open note finder                       |
-| `Ctrl+Shift+P` | Command Palette                              |
-| `Ctrl+N`       | Create new note                              |
-| `Ctrl+S`       | Save active note immediately                 |
-| `Ctrl+E`       | Cycle layout mode (Editor / Split / Preview) |
-| `Ctrl+W`       | Close active tab                             |
-| `Ctrl+\`       | Toggle left file sidebar                     |
-| `Ctrl+G`       | Open Global Graph View                       |
-| `F2`           | Rename active or selected note               |
-| `Escape`       | Close active modal, dialog, or guided tour   |
+| Shortcut                  | Description                                  |
+| :------------------------ | :------------------------------------------- |
+| `Ctrl+P` / `Ctrl+Shift+P` | Quick Open note finder / Command Palette     |
+| `Ctrl+Shift+F`            | Global Vault Search                          |
+| `Ctrl+N`                  | Create new note                              |
+| `Ctrl+S`                  | Save active note immediately                 |
+| `Ctrl+E`                  | Cycle layout mode (Editor / Split / Preview) |
+| `Ctrl+\`                  | Toggle Split View (side-by-side)             |
+| `Ctrl+W`                  | Close active tab                             |
+| `Ctrl+B`                  | Toggle left file sidebar                     |
+| `Ctrl+G`                  | Open Global Graph View                       |
+| `Escape`                  | Close active modal, dialog, or guided tour   |
 
 ---
 
