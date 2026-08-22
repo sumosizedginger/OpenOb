@@ -59,6 +59,7 @@ import {
   Server,
   MoreHorizontal,
   X,
+  ChevronDown,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -108,24 +109,29 @@ export const App: React.FC = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isGatewayModalOpen, setIsGatewayModalOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isViewModeMenuOpen, setIsViewModeMenuOpen] = useState(false);
   const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
 
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const viewModeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
         setIsMoreMenuOpen(false);
       }
+      if (viewModeMenuRef.current && !viewModeMenuRef.current.contains(e.target as Node)) {
+        setIsViewModeMenuOpen(false);
+      }
     };
-    if (isMoreMenuOpen) {
+    if (isMoreMenuOpen || isViewModeMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isMoreMenuOpen]);
+  }, [isMoreMenuOpen, isViewModeMenuOpen]);
 
   const aiBackend = React.useMemo(() => {
     if (vaultMode === 'gateway' && gatewayUrl) {
@@ -276,6 +282,7 @@ export const App: React.FC = () => {
         setIsPluginModalOpen(false);
         setIsGatewayModalOpen(false);
         setIsMoreMenuOpen(false);
+        setIsViewModeMenuOpen(false);
       }
     };
 
@@ -397,32 +404,72 @@ export const App: React.FC = () => {
             </button>
           </div>
 
+          {/* Compact View Mode Dropdown */}
           {mainMode === 'editor' && (
-            <div className="view-mode-group">
+            <div style={{ position: 'relative' }} ref={viewModeMenuRef}>
               <button
-                className={`view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
-                data-testid="view-mode-editor"
-                title="Editor View"
-                onClick={() => setViewMode('editor')}
+                className="view-mode-btn"
+                data-testid="view-mode-menu-trigger"
+                onClick={() => setIsViewModeMenuOpen((prev) => !prev)}
+                title={`View Layout: ${viewMode.toUpperCase()} (Ctrl+E to cycle)`}
+                style={{ padding: '0 8px', gap: '5px' }}
               >
-                <BookOpen size={13} />
+                {viewMode === 'editor' && <BookOpen size={13} />}
+                {viewMode === 'split' && <Columns size={13} />}
+                {viewMode === 'preview' && <Eye size={13} />}
+                <span style={{ fontSize: '12px', textTransform: 'capitalize' }}>{viewMode}</span>
+                <ChevronDown size={11} style={{ opacity: 0.6 }} />
               </button>
-              <button
-                className={`view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
-                data-testid="view-mode-split"
-                title="Split View"
-                onClick={() => setViewMode('split')}
-              >
-                <Columns size={13} />
-              </button>
-              <button
-                className={`view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
-                data-testid="view-mode-preview"
-                title="Preview View"
-                onClick={() => setViewMode('preview')}
-              >
-                <Eye size={13} />
-              </button>
+
+              {isViewModeMenuOpen && (
+                <div
+                  className="dropdown-menu"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    zIndex: 105,
+                    minWidth: '130px',
+                  }}
+                >
+                  <button
+                    className={`dropdown-item view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
+                    data-testid="view-mode-editor"
+                    title="Editor View"
+                    onClick={() => {
+                      setViewMode('editor');
+                      setIsViewModeMenuOpen(false);
+                    }}
+                  >
+                    <BookOpen size={13} />
+                    <span>Editor</span>
+                  </button>
+                  <button
+                    className={`dropdown-item view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
+                    data-testid="view-mode-split"
+                    title="Split View"
+                    onClick={() => {
+                      setViewMode('split');
+                      setIsViewModeMenuOpen(false);
+                    }}
+                  >
+                    <Columns size={13} />
+                    <span>Split</span>
+                  </button>
+                  <button
+                    className={`dropdown-item view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
+                    data-testid="view-mode-preview"
+                    title="Preview View"
+                    onClick={() => {
+                      setViewMode('preview');
+                      setIsViewModeMenuOpen(false);
+                    }}
+                  >
+                    <Eye size={13} />
+                    <span>Preview</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

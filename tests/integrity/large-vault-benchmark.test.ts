@@ -73,4 +73,88 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
 
     index.close();
   }, 25000);
+
+  it('Desktop 10,000-Note Initialization Benchmark: Cold boot, warm startup, and single watcher update', async () => {
+    const { MemoryDocumentIndex } = await import('@okw/index');
+    const { DefaultDocumentParser } = await import('@okw/markdown');
+    const { MemoryVaultStorage, SafeWriter } = await import('@okw/vault');
+    const { OpenObWorkspace } = await import('@okw/workspace');
+
+    const docCount = 10000;
+    const storage = new MemoryVaultStorage('Desktop10kVault');
+    const parser = new DefaultDocumentParser();
+    const index = new MemoryDocumentIndex();
+    const safeWriter = new SafeWriter(storage);
+
+    // Seed 10,000 files in memory storage
+    const seedDocs: ParsedDocument[] = [];
+    for (let i = 1; i <= docCount; i++) {
+      const content = `---\ntitle: Note ${i}\ntags: [benchmark, cat_${i % 25}]\nstatus: ${i % 2 === 0 ? 'active' : 'draft'}\n---\n# Note ${i}\nProse content linking to [[Note_${(i % 50) + 1}]] and [[Note_10]].`;
+      await storage.write(`vault/cat_${i % 25}/note_${i}.md`, undefined, content);
+
+      seedDocs.push({
+        id: `vault/cat_${i % 25}/note_${i}.md`,
+        path: `vault/cat_${i % 25}/note_${i}.md`,
+        title: `Note ${i}`,
+        sourceHash: `hash-${i}`,
+        lineCount: 8,
+        wordCount: 30,
+        properties: { status: i % 2 === 0 ? 'active' : 'draft' },
+        aliases: [],
+        tags: ['benchmark', `cat_${i % 25}`],
+        headings: [{ level: 1, text: `Note ${i}`, slug: `note-${i}`, line: 6 }],
+        links: [
+          {
+            raw: `[[Note_${(i % 50) + 1}]]`,
+            target: `Note_${(i % 50) + 1}`,
+            line: 7,
+            isEmbed: false,
+          },
+          { raw: `[[Note_10]]`, target: 'Note_10', line: 7, isEmbed: false },
+        ],
+        textContent: content,
+      });
+    }
+
+    // 1. Benchmark COLD Startup (full index rebuild across 10,000 notes)
+    const coldStart = performance.now();
+    const workspace = new OpenObWorkspace({
+      vaultName: 'Desktop10kVault',
+      storage,
+      index,
+      parser,
+      safeWriter,
+      readOnly: false,
+    });
+    await index.rebuild(seedDocs);
+    const coldDurationMs = performance.now() - coldStart;
+
+    // 2. Benchmark WARM Startup / Lookup (direct document and backlink retrieval)
+    const warmStart = performance.now();
+    const activeDoc = await workspace.readNote('vault/cat_10/note_10.md');
+    const docBacklinks = await index.getBacklinks('vault/cat_10/note_10.md');
+    const warmDurationMs = performance.now() - warmStart;
+
+    // 3. Benchmark Single External Watcher Update (incremental single file parse & upsert)
+    const watcherStart = performance.now();
+    const updatedContent = `---\ntitle: Note 1 Updated\ntags: [benchmark, updated]\n---\n# Note 1 Updated\nNew watcher text.`;
+    await storage.write('vault/cat_1/note_1.md', undefined, updatedContent);
+    const parsedUpdate = await parser.parse('vault/cat_1/note_1.md', updatedContent, 'hash-1-v2');
+    await index.upsert(parsedUpdate);
+    const watcherDurationMs = performance.now() - watcherStart;
+
+    console.log('[10K Desktop Benchmark Results]', {
+      docCount,
+      coldDurationMs: Math.round(coldDurationMs),
+      warmDurationMs: Number(warmDurationMs.toFixed(2)),
+      watcherDurationMs: Number(watcherDurationMs.toFixed(2)),
+    });
+
+    // Assert non-pathological performance boundaries
+    expect(coldDurationMs).toBeLessThan(8000); // 10k index build < 8s
+    expect(warmDurationMs).toBeLessThan(1000); // Warm note read + backlinks < 1s
+    expect(watcherDurationMs).toBeLessThan(200); // Incremental update < 200ms
+    expect(activeDoc.textContent).toContain('Note 10');
+    expect(docBacklinks.length).toBeGreaterThan(0);
+  }, 30000);
 });

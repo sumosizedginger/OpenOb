@@ -251,7 +251,13 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     page,
   }) => {
     // Switch to Preview mode
-    await page.locator('.view-mode-btn[title="Preview View"]').click();
+    const previewBtn = page.locator('.view-mode-btn[title="Preview View"]');
+    if (await previewBtn.isVisible()) {
+      await previewBtn.click();
+    } else {
+      await page.locator('[data-testid="view-mode-menu-trigger"]').click();
+      await page.locator('[data-testid="view-mode-preview"]').click();
+    }
 
     // Verify preview pane is visible
     await expect(page.locator('.preview-pane')).toBeVisible();

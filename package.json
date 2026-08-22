@@ -17,6 +17,7 @@
     "build:web": "npm run build --workspace=apps/web",
     "build:desktop": "npm run build --workspace=apps/desktop",
     "package:desktop": "npm run pack --workspace=apps/desktop",
+    "pack:desktop": "npm run pack --workspace=apps/desktop",
     "dist:desktop": "npm run dist --workspace=apps/desktop",
     "test:desktop": "vitest run tests/integrity/desktop-embedded-gateway.test.ts tests/integrity/desktop-wrapper.test.ts",
     "gateway": "node apps/gateway/dist/bin/gateway.js",

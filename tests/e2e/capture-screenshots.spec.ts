@@ -97,16 +97,19 @@ interface VaultSnapshot {
     await page.screenshot({ path: path.join(screenshotsDir, '01-flagship-editor-split.png') });
 
     // 2. Capture Single Editor View
+    await page.locator('[data-testid="view-mode-menu-trigger"]').click();
     await page.locator('[data-testid="view-mode-editor"]').click();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(screenshotsDir, '02-editor-single-pane.png') });
 
     // 3. Capture Single Preview View
+    await page.locator('[data-testid="view-mode-menu-trigger"]').click();
     await page.locator('[data-testid="view-mode-preview"]').click();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(screenshotsDir, '03-preview-single-pane.png') });
 
     // Return to split view
+    await page.locator('[data-testid="view-mode-menu-trigger"]').click();
     await page.locator('[data-testid="view-mode-split"]').click();
     await page.waitForTimeout(300);
 

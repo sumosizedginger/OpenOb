@@ -31,7 +31,7 @@
   /* 3. Typography & Text Hierarchy */
   --text-primary: #f0f2f5; /* Warm off-white primary text */
   --text-secondary: #949ba4; /* Cool muted silver secondary text */
-  --text-muted: #636b76; /* Subtle metadata / placeholder text */
+  --text-muted: #7d858f; /* Subtle metadata / placeholder text (≥4.5:1 contrast against canvas) */
   --text-inverse: #0d0f12;
 
   --font-sans:
@@ -1088,7 +1088,7 @@ html {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  background-color: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1162,6 +1162,14 @@ html {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  transition:
+    border-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.command-input-wrapper:focus-within {
+  border-bottom-color: var(--border-focus);
+  box-shadow: inset 0 -1px 0 var(--border-focus);
 }
 
 .command-input {
@@ -1172,6 +1180,10 @@ html {
   font-family: var(--font-sans);
   font-size: 15px;
   color: var(--text-primary);
+}
+
+.command-input:focus-visible {
+  outline: none;
 }
 
 .command-list {
