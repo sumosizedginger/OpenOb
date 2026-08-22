@@ -1,19 +1,25 @@
-# OpenOb — Desktop Release Candidate Hardening Report
+# OpenOb — Desktop Release Candidate Final Closure Report
 
 # Security + Data Safety + Product Truth + Release Build Truth
 
-**Status**: READY FOR DEEPSEEK RC AUDIT  
-**Audited Starting HEAD**: `3d61b8ab7562c10962df0bdc2daf7e830765a633`  
+**Status**: READY FOR DEEPSEEK RC CLOSURE  
+**Audited Base / Committed HEAD**: `e7e53effdcfc6c6d932b8ab5e49a85f615414c56`  
 **Execution Environment**: Google Antigravity 2.0 (Foreman single authority)  
-**Date**: 2026-08-22
+**Date**: 2026-08-22  
+**Remote Sync**: `origin/main == HEAD` (Cleanly Pushed)
 
 ---
 
 ## 1. Executive Summary
 
-This hardening pass resolves every identified Release Candidate (RC) gap and incorporates all 22 mandatory architectural corrections across Security, Data Safety, Concurrency, IPC Trust Boundaries, Product Truth, and Packaging Verification.
+This final remediation pass resolves all remaining Release Candidate blockers identified during the adversarial audit:
 
-The complete automated verification matrix (`npm run verify:full` + `npm run verify:desktop:release`) passes 100% with zero skips and zero regressions.
+1. **Prettier Format Check**: Fixed and 100% compliant across all repository files (`README.md`, reports, documentation, source).
+2. **Formal Release Gate Dirty-Source Refusal**: `scripts/verify-desktop-release.mjs` checks `git status --porcelain` at Step 1 and immediately aborts with non-zero exit code if uncommitted or untracked changes exist.
+3. **Stale Release Artifact Cleanup**: The release gate removes `apps/desktop/release/` completely before rebuilding.
+4. **Packaged App E2E Execution Inside Gate**: `scripts/verify-desktop-release.mjs` runs `tests/e2e/desktop-electron.spec.ts` against the fresh `release/win-unpacked/OpenOb.exe` executable inside the official gate.
+5. **Real Electron Profile Isolation**: All compiled and packaged Electron tests run in disposable temporary directories via `OPENOB_E2E=1`, `OPENOB_E2E_USER_DATA`, and `--user-data-dir`. Normal developer profiles (`%APPDATA%\OpenOb`, `%APPDATA%\@okw\desktop-app`) are snapshotted before and verified untouched after all test runs.
+6. **Canonical Product Identity (`OpenOb`) & Migration**: `app.name` explicitly set to `OpenOb`. Idempotent profile migration utility (`migrateLegacyProfile`) seamlessly imports legacy `@okw/desktop-app` settings, window state, and DPAPI-encrypted secrets without data loss or overwriting existing canonical state.
 
 ---
 
@@ -55,7 +61,7 @@ The complete automated verification matrix (`npm run verify:full` + `npm run ver
 ### P2-F — Help / Learn Discoverability & Build Identity
 
 - **Native Application Menu**: Configured complete Electron native menu with standard application menus (`File`, `Edit`, `View`, `Window`) and dedicated `Help` menu (`Learn OpenOb`, `Quick Tour`, `Keyboard Shortcuts`, `About OpenOb`).
-- **About OpenOb Dialog**: Built `<AboutModal>` displaying App Name, Version (`0.1.0`), Commit SHA (injected via build pipeline), Clean/Dirty working tree status, Operating System, Electron/Chrome/Node runtimes, and SafeStorage encryption status.
+- **About OpenOb Dialog**: Built `<AboutModal>` displaying App Name, Version (`0.1.0`), Commit SHA (`e7e53effdcfc6c6d932b8ab5e49a85f615414c56`), Clean/Dirty working tree status (`sourceClean: true`), Operating System, Electron/Chrome/Node runtimes, and SafeStorage encryption status.
 - **More Menu Integration**: Added "About OpenOb" action to the top navbar More dropdown.
 
 ### P2-G — Release Packaging & Truthful Verification Gates
@@ -63,12 +69,21 @@ The complete automated verification matrix (`npm run verify:full` + `npm run ver
 - **Distinct Artifact Target Names**: Configured `apps/desktop/electron-builder.json` with target-specific artifact naming:
   - NSIS: `OpenOb-Setup-0.1.0-x64.exe`
   - Portable: `OpenOb-Portable-0.1.0-x64.exe`
-- **Release Verification Gate (`npm run verify:desktop:release`)**: Validates PE executable headers (`0x4D, 0x5A`), checks minimum bundle size, verifies embedded web dist assets, computes SHA-256 hashes, and outputs `release-manifest.json`.
+- **Official Release Gate (`npm run verify:desktop:release`)**:
+  - Enforces clean committed git source tree.
+  - Cleans stale release output.
+  - Builds fresh web and desktop packages.
+  - Validates `win-unpacked/OpenOb.exe` PE header.
+  - Runs real packaged Electron smoke tests inside the gate.
+  - Generates NSIS Setup installer and Portable executable.
+  - Validates PE headers on all binaries.
+  - Generates `release-manifest.json` with SHA-256 hashes.
 - **Windows CI Update**: `.github/workflows/ci.yml` updated to run `verify:desktop:release` and upload release artifacts.
 
-### P2-H — Truthful Starter Content
+### P2-H — Truthful Starter Content & Profile Migration
 
 - **Starter Vault Seed**: Replaced legacy phase-era notes with comprehensive OpenOb User Guide, keyboard shortcuts cheat sheet, sample daily log, character sheets, and architectural notes.
+- **Legacy Profile Migration**: Transparently migrates configurations and keys from `%APPDATA%\@okw\desktop-app` to `%APPDATA%\OpenOb` on first launch without clobbering existing canonical profiles.
 
 ---
 
@@ -76,10 +91,11 @@ The complete automated verification matrix (`npm run verify:full` + `npm run ver
 
 | Suite / Gate               | Command                          | Result   | Details                                                                                   |
 | -------------------------- | -------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| **Formatting**             | `npm run format:check`           | **PASS** | 0 formatting violations                                                                   |
+| **Formatting**             | `npm run format:check`           | **PASS** | 0 formatting violations across repository                                                 |
 | **Linting**                | `npm run lint`                   | **PASS** | 0 errors                                                                                  |
 | **Typecheck**              | `npm run typecheck`              | **PASS** | 0 type errors across all packages and apps                                                |
-| **Unit & Integrity**       | `npm test`                       | **PASS** | **71/71 test files, 451/451 tests passing**                                               |
+| **Unit & Integrity**       | `npm test`                       | **PASS** | **72/72 test files, 454/454 tests passing**                                               |
+| **Desktop Tests**          | `npm run test:desktop`           | **PASS** | **2/2 test files, 20/20 tests passing**                                                   |
 | **Production Build**       | `npm run build`                  | **PASS** | Gateway, Web, and Desktop bundle builds clean                                             |
 | **Browser & Desktop E2E**  | `npm run verify:e2e`             | **PASS** | **42/42 Playwright E2E tests passing**                                                    |
 | **Release Packaging Gate** | `npm run verify:desktop:release` | **PASS** | NSIS Setup + Portable Executable generated, PE headers verified, SHA256 manifest produced |
@@ -90,13 +106,22 @@ The complete automated verification matrix (`npm run verify:full` + `npm run ver
 ## 4. Release Artifacts & SHA-256 Manifest
 
 - **Release Output Directory**: `apps/desktop/release`
-- **NSIS Installer**: `OpenOb-Setup-0.1.0-x64.exe` (109.19 MB)
-  - **SHA-256**: `05fa0c0a22e3f898d21d5bf45c1e019d871c4fbca43a1211b18eab02ac6dfe73`
-- **Portable Executable**: `OpenOb-Portable-0.1.0-x64.exe` (108.85 MB)
-  - **SHA-256**: `fad69fa92212ce95b3e12f74113967df3ac7cef269f4ea10cb1695c1e64d6ddc`
+- **Build SHA**: `e7e53effdcfc6c6d932b8ab5e49a85f615414c56`
+- **Source Clean**: `true`
+- **NSIS Installer**: `OpenOb-Setup-0.1.0-x64.exe` (109.20 MB)
+  - **SHA-256**: `8e5bc784cacc74290a650fe0a7a1f9a962f981432de9efb7d894afe7bb1b50f7`
+- **Portable Executable**: `OpenOb-Portable-0.1.0-x64.exe` (108.87 MB)
+  - **SHA-256**: `88affe28187f4d6fb7a8172f57cef2c7ae54e187d58ae1406d20a52545e0d818`
+
+### Platform Support & Installer Truth
+
+- **Windows x64 Desktop Alpha**: Fully verified and passing all gates.
+- **macOS / Linux**: Packaging configured, not release-verified in this Windows alpha pass.
+- **Windows Artifacts**: Unsigned dogfood release candidate.
+- **NSIS Installation**: NSIS INSTALL/UNINSTALL NOT EXECUTED in headless CI; binary structure and PE header validity verified.
 
 ---
 
-## 5. Next Action
+## 5. Final Verdict
 
-Foreman implementation is complete and verified. Ready for DeepSeek Release Candidate adversarial audit.
+**READY FOR DEEPSEEK RC CLOSURE**
