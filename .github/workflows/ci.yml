@@ -76,7 +76,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright Browser E2E Tests
-        run: npx playwright test --ignore-snapshots --grep-invert "Real Electron"
+        run: npm run test:e2e -- --ignore-snapshots
 
   desktop-electron:
     name: Electron Desktop Packaging & Windows E2E Smoke Tests
@@ -98,7 +98,7 @@ jobs:
         run: npm run verify:desktop:release
 
       - name: Run Electron Desktop E2E Tests
-        run: npx playwright test tests/e2e/desktop-electron.spec.ts
+        run: npm run test:e2e:electron
 
       - name: Upload Desktop Release Artifacts
         uses: actions/upload-artifact@v4

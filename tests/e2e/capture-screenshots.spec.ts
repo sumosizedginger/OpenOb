@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 
-test.describe('Visual Screenshot Capture Harness', () => {
+test.describe('Visual Screenshot Capture Harness', { tag: ['@electron', '@visual'] }, () => {
   let app: ElectronApplication;
   let page: Page;
   let tempUserDataDir: string;
