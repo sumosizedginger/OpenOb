@@ -32,10 +32,22 @@
 
 ## 3. Deterministic Asset Regeneration
 
+Brand asset generation is contributor tooling (not required for runtime execution or normal `npm ci` builds).
+
+### Prerequisites & Setup
+
+Install the pinned tooling dependencies:
+
+```bash
+python -m pip install -r scripts/requirements-brand.txt
+```
+
+### Regeneration Command
+
 To regenerate all derived brand assets deterministically from the canonical master:
 
 ```bash
 npm run brand:generate
 ```
 
-This executes `scripts/generate-brand-icons.mjs` (wrapping `scripts/generate_brand_icons.py`) using open-source tooling (Python Pillow with Lanczos downsampling and micro-sharpening for small resolutions).
+This executes `scripts/generate-brand-icons.mjs` (wrapping `scripts/generate_brand_icons.py`), which automatically locates the Python 3 runtime on Windows, macOS, and Linux, and derives all raster formats using Lanczos resampling and micro-sharpening for small resolutions.

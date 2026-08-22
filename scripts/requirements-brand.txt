@@ -1,0 +1,6 @@
+# OpenOb Brand Asset Generation Tooling Requirements
+# Used by `npm run brand:generate` for contributor icon generation.
+# Not required for application runtime or normal build.
+
+Pillow>=10.0.0,<=12.2.0
+numpy>=1.26.0,<=2.4.3
