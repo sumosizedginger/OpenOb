@@ -13,6 +13,25 @@ export default defineConfig({
     baseURL: 'http://localhost:3100',
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: 'http://localhost:3100',
+          localStorage: [
+            {
+              name: 'openob:onboarding:v1',
+              value: JSON.stringify({
+                version: 1,
+                dismissedFirstRun: true,
+                quickTourCompleted: true,
+                completedChapters: [],
+              }),
+            },
+          ],
+        },
+      ],
+    },
   },
   projects: [
     {

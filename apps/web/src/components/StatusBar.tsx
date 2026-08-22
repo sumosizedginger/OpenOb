@@ -42,7 +42,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     vaultMode === 'gateway' && (!gatewayReachable || saveStatus === 'disconnected');
 
   return (
-    <div className="status-bar">
+    <div className="status-bar" data-tour="status-bar">
       <div className="status-left">
         <button
           type="button"

@@ -37,6 +37,11 @@ import {
 } from '@okw/plugin';
 import { PluginManagerModal } from './components/plugins/PluginManagerModal.js';
 import { GatewayConnectModal } from './components/GatewayConnectModal.js';
+import { WelcomeModal } from './components/onboarding/WelcomeModal.js';
+import { TourOverlay } from './components/onboarding/TourOverlay.js';
+import { LearnCenterModal } from './components/onboarding/LearnCenterModal.js';
+import { KeyboardShortcutsModal } from './components/onboarding/KeyboardShortcutsModal.js';
+import { useOnboarding } from './onboarding/useOnboarding.js';
 import {
   FolderPlus,
   FilePlus,
@@ -59,6 +64,8 @@ import {
   MoreHorizontal,
   X,
   ChevronDown,
+  GraduationCap,
+  Keyboard,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -113,6 +120,46 @@ export const App: React.FC = () => {
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
+
+  const {
+    onboardingState,
+    isWelcomeOpen,
+    isLearnCenterOpen,
+    isShortcutsOpen,
+    activeChapter,
+    currentStepIndex,
+    startQuickTour,
+    skipFirstRun,
+    startChapter,
+    nextStep,
+    prevStep,
+    skipTour,
+    finishTour,
+    resetProgress,
+    openLearnCenter,
+    closeLearnCenter,
+    openShortcuts,
+    closeShortcuts,
+  } = useOnboarding({
+    isAppReady: true,
+    onPrepareAction: (actionId: string) => {
+      if (actionId === 'open-sidebar') {
+        setShowSidebar(true);
+      } else if (actionId === 'mode-editor') {
+        setMainMode('editor');
+      } else if (actionId === 'open-inspector') {
+        if (!showRightPanel) setShowRightPanel('outline');
+      } else if (actionId === 'tab-outline') {
+        setShowRightPanel('outline');
+      } else if (actionId === 'tab-backlinks') {
+        setShowRightPanel('backlinks');
+      } else if (actionId === 'tab-properties') {
+        setShowRightPanel('properties');
+      } else if (actionId === 'tab-ai') {
+        setShowRightPanel('ai');
+      }
+    },
+  });
 
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const viewModeMenuRef = useRef<HTMLDivElement>(null);
@@ -332,7 +379,7 @@ export const App: React.FC = () => {
           >
             {showSidebar ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
           </button>
-          <div className="app-logo">
+          <div className="app-logo" data-tour="app-logo">
             <img
               src="/brand/openob-mark.png"
               alt="OpenOb logo — jackass skull within a broken gold sigil"
@@ -374,6 +421,7 @@ export const App: React.FC = () => {
         <div className="header-center">
           <button
             className="search-trigger-btn"
+            data-tour="search-button"
             onClick={() => {
               setSelectedSearchTag(null);
               setIsCommandPaletteOpen(true);
@@ -388,7 +436,7 @@ export const App: React.FC = () => {
 
         <div className="header-right">
           {/* Mode Switcher: Notes Editor vs Database Views */}
-          <div className="view-mode-group">
+          <div className="view-mode-group" data-tour="views-switch">
             <button
               className={`view-mode-btn ${mainMode === 'editor' ? 'active' : ''}`}
               data-testid="main-mode-editor"
@@ -415,6 +463,7 @@ export const App: React.FC = () => {
               <button
                 className="view-mode-btn"
                 data-testid="view-mode-menu-trigger"
+                data-tour="view-mode-menu"
                 onClick={() => setIsViewModeMenuOpen((prev) => !prev)}
                 title={`View Layout: ${viewMode.toUpperCase()} (Ctrl+E to cycle)`}
                 style={{ padding: '0 8px', gap: '5px' }}
@@ -481,6 +530,7 @@ export const App: React.FC = () => {
           <button
             className={`btn-icon ${showRightPanel === 'ai' ? 'active' : ''}`}
             data-testid="toggle-ai"
+            data-tour="ai-tab"
             title="Toggle AI Assistant"
             onClick={() => setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))}
           >
@@ -490,6 +540,7 @@ export const App: React.FC = () => {
           <button
             className={`btn-icon ${showRightPanel && showRightPanel !== 'ai' ? 'active' : ''}`}
             data-testid="toggle-inspector"
+            data-tour="inspector"
             title="Toggle Inspector"
             onClick={() => setShowRightPanel((prev) => (prev && prev !== 'ai' ? null : 'outline'))}
           >
@@ -501,6 +552,7 @@ export const App: React.FC = () => {
             <button
               className={`btn-icon ${isMoreMenuOpen ? 'active' : ''}`}
               data-testid="more-menu"
+              data-tour="more-menu"
               title="More Actions"
               onClick={() => setIsMoreMenuOpen((prev) => !prev)}
             >
@@ -511,6 +563,7 @@ export const App: React.FC = () => {
               <div className="more-menu-popover">
                 <button
                   className="more-menu-item"
+                  data-tour="graph-button"
                   onClick={() => {
                     setIsGlobalGraphOpen(true);
                     setIsMoreMenuOpen(false);
@@ -519,6 +572,26 @@ export const App: React.FC = () => {
                   <Share2 size={14} />
                   <span>Global Graph View</span>
                   <kbd>Ctrl+G</kbd>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    openLearnCenter();
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <GraduationCap size={14} />
+                  <span>Learn OpenOb</span>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    openShortcuts();
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <Keyboard size={14} />
+                  <span>Keyboard Shortcuts</span>
                 </button>
                 <button
                   className="more-menu-item"
@@ -582,13 +655,14 @@ export const App: React.FC = () => {
       <div className="workspace-body">
         {/* Left Sidebar: File Tree */}
         {showSidebar && (
-          <aside className="workspace-sidebar">
+          <aside className="workspace-sidebar" data-tour="sidebar">
             <div className="sidebar-header">
               <span className="sidebar-title">Files</span>
               <div className="sidebar-header-actions">
                 <button
                   className="btn-icon"
                   style={{ width: '24px', height: '24px' }}
+                  data-tour="new-note"
                   title="New Note (Ctrl+N)"
                   onClick={() => void createNote()}
                 >
@@ -597,6 +671,7 @@ export const App: React.FC = () => {
                 <button
                   className="btn-icon"
                   style={{ width: '24px', height: '24px' }}
+                  data-tour="new-folder"
                   title="New Folder"
                   onClick={() => void createFolder()}
                 >
@@ -643,18 +718,20 @@ export const App: React.FC = () => {
             />
           ) : (
             <>
-              <TabBar
-                tabs={openTabs}
-                activePath={activeTabPath}
-                onSelect={(path) => void openNote(path)}
-                onClose={(path) => closeTab(path)}
-              />
+              <div data-tour="tab-bar">
+                <TabBar
+                  tabs={openTabs}
+                  activePath={activeTabPath}
+                  onSelect={(path) => void openNote(path)}
+                  onClose={(path) => closeTab(path)}
+                />
+              </div>
 
               <div className="content-split">
                 {activeTab ? (
                   <>
                     {(viewMode === 'editor' || viewMode === 'split') && (
-                      <div className="editor-container">
+                      <div className="editor-container" data-tour="editor">
                         <Editor
                           key={activeTab.path}
                           content={activeTab.content}
@@ -713,29 +790,33 @@ export const App: React.FC = () => {
 
         {/* Right Rail: Unified Inspector Shell */}
         {showRightPanel && (
-          <aside className="inspector-rail">
+          <aside className="inspector-rail" data-tour="inspector">
             <div className="inspector-header">
-              <div className="inspector-tabs">
+              <div className="inspector-tabs" data-tour="inspector-tabs">
                 <button
                   className={`inspector-tab ${showRightPanel === 'outline' ? 'active' : ''}`}
+                  data-tour="outline-tab"
                   onClick={() => setShowRightPanel('outline')}
                 >
                   Outline
                 </button>
                 <button
                   className={`inspector-tab ${showRightPanel === 'backlinks' ? 'active' : ''}`}
+                  data-tour="backlinks-tab"
                   onClick={() => setShowRightPanel('backlinks')}
                 >
                   Backlinks
                 </button>
                 <button
                   className={`inspector-tab ${showRightPanel === 'properties' ? 'active' : ''}`}
+                  data-tour="properties-tab"
                   onClick={() => setShowRightPanel('properties')}
                 >
                   Properties
                 </button>
                 <button
                   className={`inspector-tab ${showRightPanel === 'ai' ? 'active' : ''}`}
+                  data-tour="ai-tab"
                   onClick={() => setShowRightPanel('ai')}
                 >
                   AI
@@ -964,6 +1045,32 @@ export const App: React.FC = () => {
         onClose={() => setIsPluginModalOpen(false)}
         onRefresh={() => {}}
       />
+
+      {/* Onboarding Welcome Dialog (First Run) */}
+      <WelcomeModal isOpen={isWelcomeOpen} onStartTour={startQuickTour} onSkip={skipFirstRun} />
+
+      {/* Guided Tour Spotlight Overlay */}
+      <TourOverlay
+        chapter={activeChapter}
+        stepIndex={currentStepIndex}
+        onNext={nextStep}
+        onPrev={prevStep}
+        onSkip={skipTour}
+        onFinish={finishTour}
+      />
+
+      {/* Learn Center Modal (Help & Tutorials) */}
+      <LearnCenterModal
+        isOpen={isLearnCenterOpen}
+        completedChapters={onboardingState.completedChapters}
+        quickTourCompleted={onboardingState.quickTourCompleted}
+        onStartChapter={startChapter}
+        onResetProgress={resetProgress}
+        onClose={closeLearnCenter}
+      />
+
+      {/* Keyboard Shortcuts Cheat Sheet */}
+      <KeyboardShortcutsModal isOpen={isShortcutsOpen} onClose={closeShortcuts} />
     </div>
   );
 };

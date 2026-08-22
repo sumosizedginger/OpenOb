@@ -36,6 +36,13 @@ test.describe('Visual Screenshot Capture Harness', () => {
   });
 
   test('Capture Comprehensive Visual Suite', async () => {
+    // If welcome modal is visible on first run, dismiss it
+    const skipWelcome = page.locator('.welcome-skip-btn');
+    if (await skipWelcome.isVisible()) {
+      await skipWelcome.click();
+      await page.waitForTimeout(200);
+    }
+
     // Click "Create Note" button
     const createBtn = page.locator('.btn-primary:has-text("Create Note")');
     if (await createBtn.isVisible()) {

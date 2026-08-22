@@ -88,6 +88,15 @@ test.describe('Phase 3I: Electron Desktop Integration & Packaging E2E', () => {
         async getAppInfo() {
           return { name: 'OpenOb', version: '0.1.0', platform: 'win32' };
         },
+        async getOnboardingState() {
+          return {
+            version: 1,
+            dismissedFirstRun: true,
+            quickTourCompleted: true,
+            completedChapters: [],
+          };
+        },
+        async setOnboardingState(_state: any) {},
         onLifecycleEvent(_listener: any) {
           return () => {};
         },

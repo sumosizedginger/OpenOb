@@ -8,6 +8,7 @@ import {
   DesktopBootstrapConfig,
   DesktopAppInfo,
   DesktopConfig,
+  OnboardingState,
 } from '@okw/desktop';
 import { startGateway, RunningGateway } from '@okw/gateway';
 import { AIManager } from '@okw/ai';
@@ -436,6 +437,31 @@ function registerIpcHandlers(): void {
       storageStatus: currentSession?.storageStatus ?? 'unavailable',
     };
   });
+
+  ipcMain.handle('desktop:get-onboarding-state', async (): Promise<OnboardingState | null> => {
+    const config = loadDesktopConfig();
+    return config.onboardingState ?? null;
+  });
+
+  ipcMain.handle(
+    'desktop:set-onboarding-state',
+    async (_event, state: OnboardingState): Promise<void> => {
+      if (state && typeof state === 'object' && typeof state.version === 'number') {
+        const config = loadDesktopConfig();
+        saveDesktopConfig({
+          ...config,
+          onboardingState: {
+            version: state.version,
+            dismissedFirstRun: Boolean(state.dismissedFirstRun),
+            quickTourCompleted: Boolean(state.quickTourCompleted),
+            completedChapters: Array.isArray(state.completedChapters)
+              ? state.completedChapters.map(String)
+              : [],
+          },
+        });
+      }
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

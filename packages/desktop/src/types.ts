@@ -33,6 +33,13 @@ export interface DesktopAppInfo {
   readonly storageStatus?: 'ready' | 'unavailable' | 'corrupted';
 }
 
+export interface OnboardingState {
+  readonly version: number;
+  readonly dismissedFirstRun: boolean;
+  readonly quickTourCompleted: boolean;
+  readonly completedChapters: readonly string[];
+}
+
 export interface DesktopWindowBounds {
   readonly x: number;
   readonly y: number;
@@ -44,6 +51,7 @@ export interface DesktopWindowBounds {
 export interface DesktopConfig {
   readonly lastVaultPath?: string;
   readonly windowBounds?: DesktopWindowBounds;
+  readonly onboardingState?: OnboardingState;
 }
 
 export type DesktopLifecycleEventType = 'before-vault-switch' | 'vault-switched' | 'quitting';
