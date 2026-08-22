@@ -2,17 +2,19 @@
 
 **Repository:** `sumosizedginger/OpenOb`  
 **Audited Target:** DeepSeek Audit `OPENOB_GUIDED_TUTORIAL_AUDIT.md` (Blockers B-1 & B-2)  
-**Status:** **RESOLVED — ALL 40 E2E & 442 UNIT/INTEGRITY TESTS GREEN**  
+**Status:** **RESOLVED — ALL 40 E2E & 442 UNIT/INTEGRITY TESTS GREEN**
 
 ---
 
 ## 1. B-1 Root Cause & Resolution
 
 ### Root Cause
+
 The first-run Welcome modal intentionally intercepts pointer interaction on first-run until the user chooses to start the tour or skip it.
 In `tests/e2e/ai-gateway.spec.ts` (and other standalone/dynamic gateway test suites), the test runner booted fresh dynamic port URLs (e.g. `http://127.0.0.1:<random-port>`). Because `playwright.config.ts` default storageState was scoped to `http://localhost:3100`, the dynamic gateway sessions correctly initialized as first-run, prompting the Welcome modal and blocking background clicks.
 
 ### Resolution
+
 - Created a shared, clean Playwright helper in `tests/e2e/helpers.ts` (`seedOnboardingDismissed(page)`).
 - Applied `seedOnboardingDismissed` via `test.beforeEach` across all non-onboarding dynamic gateway test suites (`ai-gateway.spec.ts`, `board-mutations.spec.ts`, `table-mutations.spec.ts`, `saved-views-board.spec.ts`, `gateway-views.spec.ts`, `gateway-managed-web.spec.ts`, `gateway-change-stream.spec.ts`, `plugin-gateway.spec.ts`).
 - Added dedicated regression coverage in `tests/e2e/onboarding-tour.spec.ts` proving:
@@ -24,6 +26,7 @@ In `tests/e2e/ai-gateway.spec.ts` (and other standalone/dynamic gateway test sui
 ## 2. B-2 Keyboard Shortcut Truth & Runtime Alignments
 
 ### Implemented Bindings
+
 1. **`Ctrl+N` / `Cmd+N` (New Note)**:
    - Added global keydown listener in `apps/web/src/App.tsx` triggering `setMainMode('editor')` and `createNote()`.
    - Prevented default browser new-window action (`e.preventDefault()`).
@@ -31,6 +34,7 @@ In `tests/e2e/ai-gateway.spec.ts` (and other standalone/dynamic gateway test sui
    - Added conventional alias to `Ctrl+P` in `App.tsx` opening the Quick Open / Command Palette dialog.
 
 ### Corrected Display Copy & Single Source of Truth
+
 - Created `apps/web/src/onboarding/keyboardShortcuts.ts` as the canonical display registry for shortcuts.
 - Updated `apps/web/src/components/onboarding/KeyboardShortcutsModal.tsx` to consume `KEYBOARD_SHORTCUTS`.
 - Corrected `Ctrl+\`: Now accurately describes **Toggle Split View** (side-by-side editor and live preview).
@@ -42,18 +46,18 @@ In `tests/e2e/ai-gateway.spec.ts` (and other standalone/dynamic gateway test sui
 
 ## 3. Exact Supported Shortcut Table
 
-| Shortcut | Action | Description |
-| :--- | :--- | :--- |
-| `Ctrl+P` / `Ctrl+Shift+P` | Quick Open / Command Palette | Quick note finder and command palette |
-| `Ctrl+Shift+F` | Global Search | Search across vault notes and tags |
-| `Ctrl+G` | Global Graph View | Open 2D Knowledge Graph |
-| `Ctrl+N` | Create Note | Create a new Markdown note |
-| `Ctrl+B` | Toggle Sidebar | Toggle left file explorer sidebar |
-| `Ctrl+S` | Save Note | Save active note immediately |
-| `Ctrl+\` | Toggle Split View | Toggle side-by-side editor and preview |
-| `Ctrl+E` | Cycle View Mode | Cycle Editor $\rightarrow$ Split $\rightarrow$ Preview |
-| `Ctrl+W` | Close Active Tab | Close current document tab |
-| `Escape` | Dismiss / Close | Close active modal, dialog, or tour spotlight |
+| Shortcut                  | Action                       | Description                                            |
+| :------------------------ | :--------------------------- | :----------------------------------------------------- |
+| `Ctrl+P` / `Ctrl+Shift+P` | Quick Open / Command Palette | Quick note finder and command palette                  |
+| `Ctrl+Shift+F`            | Global Search                | Search across vault notes and tags                     |
+| `Ctrl+G`                  | Global Graph View            | Open 2D Knowledge Graph                                |
+| `Ctrl+N`                  | Create Note                  | Create a new Markdown note                             |
+| `Ctrl+B`                  | Toggle Sidebar               | Toggle left file explorer sidebar                      |
+| `Ctrl+S`                  | Save Note                    | Save active note immediately                           |
+| `Ctrl+\`                  | Toggle Split View            | Toggle side-by-side editor and preview                 |
+| `Ctrl+E`                  | Cycle View Mode              | Cycle Editor $\rightarrow$ Split $\rightarrow$ Preview |
+| `Ctrl+W`                  | Close Active Tab             | Close current document tab                             |
+| `Escape`                  | Dismiss / Close              | Close active modal, dialog, or tour spotlight          |
 
 ---
 

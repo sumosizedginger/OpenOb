@@ -157,6 +157,8 @@ export const App: React.FC = () => {
         setShowRightPanel('properties');
       } else if (actionId === 'tab-ai') {
         setShowRightPanel('ai');
+      } else if (actionId === 'open-more-menu') {
+        setIsMoreMenuOpen(true);
       }
     },
   });

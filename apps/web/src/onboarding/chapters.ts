@@ -98,6 +98,7 @@ export const QUICK_TOUR_CHAPTER: TourChapter = {
       content:
         'Visualize connections between your notes. [[Wikilinks]] automatically turn into an interactive 2D graph that shows how your ideas interlink.',
       shortcut: 'Ctrl+G',
+      prepareActionId: 'open-more-menu',
       placement: 'bottom',
     },
     {
