@@ -25,70 +25,90 @@ import {
   GatewayUnavailableError,
   WorkspaceChangeEvent,
 } from '@okw/workspace';
+import type { DesktopFlushResult } from '@okw/desktop';
+import type { ProposedEdit } from '@okw/ai';
 
 export interface OpenTab {
   path: VaultPath;
   title: string;
   isDirty: boolean;
   content: string;
+  revision?: number;
   initialSnapshot: FileSnapshot | null;
 }
 
 const DEFAULT_VAULT_SEED: Record<string, string> = {
   'Welcome.md': `---
-title: Welcome to Open Knowledge Workspace
+title: Welcome to OpenOb
 tags: [getting-started, welcome]
 aliases: [Home, Getting Started]
 ---
 
-# Welcome to Open Knowledge Workspace
+# Welcome to OpenOb
 
-An open-source, local-first knowledge workspace where **your Markdown files remain canonical truth**.
+OpenOb is a fast, local-first knowledge workspace where **your Markdown files remain canonical truth**.
 
-## Key Concepts
+## Core Capabilities
 
-- **Local Ownership**: Notes live as ordinary files on your disk.
-- **Wikilinks**: Connect notes seamlessly with \`[[Architecture]]\` or \`[[Daily/2026-08-15|Daily Log]]\`.
-- **Backlinks**: Automatically discover all incoming connections in the backlinks panel.
-- **Safe Save**: Built-in concurrency control prevents silent overwrites and protects against data loss.
-- **Disposable Derived State**: If the index or app database is ever wiped, 100% of your knowledge is reconstructed instantly from your files.
+- **Local Ownership**: Notes live as clean, durable Markdown files on your disk.
+- **Wikilinks**: Connect notes fluidly with \`[[Guide]]\` or \`[[Daily/2026-08-22|Daily Log]]\`.
+- **Database Views**: Explore frontmatter properties in interactive Tables, Kanban Boards, or Lists.
+- **Visual Knowledge Graph**: Press \`Ctrl+G\` to visualize how your ideas interlink in 2D space.
+- **Grounded AI**: Ask questions and draft notes with AI grounded strictly in your vault notes.
 
 Explore the sample notes:
-- [[Architecture]]
-- [[Daily/2026-08-15]]
-- [[Projects/Quantum Computing]]
+- [[Guide]]
+- [[Daily/2026-08-22]]
+- [[Projects/Alpha Roadmap]]
+`,
+  'Guide.md': `---
+title: OpenOb User Guide
+tags: [guide, shortcuts]
+aliases: [Manual, Shortcuts]
+---
+
+# OpenOb User Guide
+
+## Essential Keyboard Shortcuts
+
+- **\`Ctrl+P\` / \`Ctrl+Shift+P\`**: Quick Open & Command Palette
+- **\`Ctrl+N\`**: Create New Note
+- **\`Ctrl+B\`**: Toggle Sidebar
+- **\`Ctrl+\\\`**: Toggle Split View (side-by-side live preview)
+- **\`Ctrl+Shift+F\`**: Global Vault Search
+- **\`Ctrl+G\`**: Interactive Knowledge Graph
+- **\`Ctrl+S\`**: Save Active Note
+- **\`Ctrl+E\`**: Cycle View Mode (Editor / Split / Preview)
+
+## Organizing Your Knowledge
+
+You can organize notes into folders simply by including the path in your note title (e.g. \`Projects/NewFeature.md\`). OpenOb creates folders automatically and keeps your file tree neat and tidy.
 `,
   'Architecture.md': `---
 title: System Architecture
 tags: [architecture, core]
-aliases: [OKW Architecture, Design Doc]
 ---
 
 # System Architecture
 
-The application is structured as a modular monolith adhering to the laws of \`CONSTITUTION.md\`.
-
-## Architectural Layers
-
-1. **VaultStorage**: Abstract storage interface (\`MemoryVaultStorage\`, \`NodeFsVaultStorage\`, \`BrowserFSAVaultStorage\`).
-2. **SafeWriter**: Concurrency-checked atomic save engine using content hashes and version tokens.
-3. **DocumentParser**: High-performance Markdown, Frontmatter, Wikilink, and Tag parser.
-4. **Derived Index**: Disposable in-memory / SQLite full-text search and backlink index.
-
-Refer back to [[Welcome]] or see [[Projects/Quantum Computing]].
+OpenOb leverages a local-first, canonical Markdown architecture.
+- Core: \`@okw/core\`
+- Markdown: \`@okw/markdown\`
+- Index: \`@okw/index\`
+- Vault: \`@okw/vault\`
+- Workspace: \`@okw/workspace\`
 `,
-  'Daily/2026-08-15.md': `---
-title: Daily Log 2026-08-15
-tags: [daily, log, sprint]
+  'Daily/2026-08-22.md': `---
+title: Daily Log 2026-08-22
+tags: [daily, log]
 ---
 
-# Daily Log · August 15, 2026
+# Daily Log · August 22, 2026
 
 ## Focus Items
-- [x] Initialized Open Knowledge Workspace
-- [x] Established Phase 0 through Phase 10 architectural foundations
-- [x] Verified zero data-loss safe save pipeline
-- [ ] Review [[Characters/Kaelen]] and [[Manuscript/Chapter_01]]
+- [x] Initialized OpenOb workspace
+- [x] Explored [[Guide]] and [[Projects/Alpha Roadmap]]
+- [ ] Connect characters [[Characters/Kaelen]] and [[Characters/Seraphine]]
 `,
   'Characters/Kaelen.md': `---
 title: Kaelen
@@ -108,6 +128,21 @@ A skilled tactician navigating the fractured realms. Relies on instinct and deep
 ## Key Relationships
 - [[Characters/Seraphine]]: Trusted ally in [[Manuscript/Chapter_01]].
 - Connected to [[Projects/Alpha Roadmap]].
+`,
+  'Characters/Seraphine.md': `---
+title: Seraphine
+type: character
+role: ally
+status: active
+affiliations: [Aegis]
+aliases: [The Scholar]
+tags: [character, worldbuilding]
+---
+
+# Seraphine
+
+## Overview
+An archivist and master of ancient languages, preserving records of the Spire.
 `,
   'Manuscript/Chapter_01.md': `---
 title: Chapter 1: The First Step
@@ -139,46 +174,10 @@ tags: [project, roadmap]
 Tracking delivery milestones across the workspace engine.
 
 ## Milestones
-- [x] Storage & SafeWriter Core
-- [x] Disposable Relational Index & SQLite Engine
-- [x] 2D Graph Engine with Provenance Edges
-- [x] Notion-Like Views & Property Queries
-- [x] Local & BYOK Cloud AI
-- [x] Sandboxed Plugin SDK & First-Party Extensions
-`,
-  'Characters/Seraphine.md': `---
-title: Seraphine
-type: character
-role: ally
-status: active
-affiliations: [Aegis]
-aliases: [The Scholar]
-tags: [character, worldbuilding]
----
-
-# Seraphine
-
-## Overview
-A brilliant researcher deciphering ancient cartographic symbols. Close confidante of [[Characters/Kaelen]].
-
-## Research Topics
-- Connected to [[Projects/Quantum Computing]].
-`,
-  'Projects/Quantum Computing.md': `---
-title: Quantum Computing
-type: project
-status: research
-priority: medium
-tags: [project, science]
----
-
-# Quantum Computing
-
-Exploration of quantum state simulation and topological computing.
-
-## References
-- [[Welcome]]
-- [[Architecture]]
+- [x] Zero data-loss atomic saving
+- [x] Embedded Gateway authority & live change stream
+- [x] Database views (Table, Board, List)
+- [x] Keyboard shortcuts & interactive guide
 `,
   'Templates/Meeting.md': `---
 title: {{title}}
@@ -207,6 +206,14 @@ export function useVault() {
   const [gatewayToken, setGatewayToken] = useState<string | undefined>(undefined);
   const [gatewayConnected, setGatewayConnected] = useState<boolean>(false);
   const [eventRefreshCounter, setEventRefreshCounter] = useState<number>(0);
+  const [vaultInitStatus, setVaultInitStatus] = useState<
+    'initializing' | 'ready' | 'error' | 'disconnected'
+  >('initializing');
+
+  const autosaveTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const inFlightSavesRef = useRef<
+    Map<string, Promise<{ success: boolean; conflict?: boolean; error?: string }>>
+  >(new Map());
 
   // Local storage instances (used exclusively in local/standalone mode)
   const [storage, setStorage] = useState<VaultStorage>(
@@ -813,6 +820,7 @@ export function useVault() {
           if (bootstrap && bootstrap.gatewayUrl) {
             const res = await connectToGateway(bootstrap.gatewayUrl, bootstrap.token);
             if (res.success) {
+              setVaultInitStatus('ready');
               window.openobDesktop.onLifecycleEvent(async (event) => {
                 if (event.type === 'vault-switched' && event.payload) {
                   await connectToGateway(event.payload.gatewayUrl, event.payload.token);
@@ -828,6 +836,7 @@ export function useVault() {
         setGatewayConnected(false);
         setSaveStatus('disconnected');
         setGatewayReachable(false);
+        setVaultInitStatus('disconnected');
         return;
       }
 
@@ -840,6 +849,7 @@ export function useVault() {
           const res = await connectToGateway(savedUrl, savedToken);
           if (res.success) {
             restored = true;
+            setVaultInitStatus('ready');
           }
         }
       } catch {}
@@ -849,6 +859,7 @@ export function useVault() {
           await storage.seed(DEFAULT_VAULT_SEED);
           await refreshVault(storage, index, backendRef.current);
           await openNote('Welcome.md');
+          setVaultInitStatus('ready');
         }
       }
     })();
@@ -985,14 +996,256 @@ export function useVault() {
     });
   };
 
+  const saveNote = async (
+    targetPath: VaultPath,
+    force = false
+  ): Promise<{ success: boolean; conflict?: boolean; error?: string }> => {
+    const existingInFlight = inFlightSavesRef.current.get(targetPath);
+    if (existingInFlight) {
+      await existingInFlight;
+      const currentTab = openTabsRef.current.find((t) => t.path === targetPath);
+      if (!currentTab || (!currentTab.isDirty && !force)) {
+        return { success: true };
+      }
+    }
+
+    const saveExecution = (async () => {
+      const currentTab = openTabsRef.current.find((t) => t.path === targetPath);
+      if (!currentTab) return { success: false, error: 'Tab not found' };
+      if (!currentTab.isDirty && !force) return { success: true };
+
+      const capturedContent = currentTab.content;
+      const capturedRevision = currentTab.revision ?? 0;
+
+      if (vaultModeRef.current === 'gateway') {
+        if (activeTabPathRef.current === targetPath) {
+          setSaveStatus('saving');
+        }
+        try {
+          const expectedToken = currentTab.initialSnapshot?.version.token || '';
+          const res = await backendRef.current.updateNote({
+            path: targetPath,
+            content: capturedContent,
+            expectedVersion: {
+              token: expectedToken,
+              hash: currentTab.initialSnapshot?.version.hash,
+            },
+          });
+
+          // Update tab with new authoritative version
+          const newSnapshot: FileSnapshot = {
+            path: targetPath,
+            content: new TextEncoder().encode(capturedContent),
+            textContent: capturedContent,
+            size: res.currentVersion.size ?? capturedContent.length,
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            version: {
+              token: res.currentVersion.token,
+              hash: res.currentVersion.hash ?? '',
+              modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+              size: res.currentVersion.size ?? capturedContent.length,
+            },
+          };
+
+          setOpenTabs((prev) =>
+            prev.map((t) => {
+              if (t.path !== targetPath) return t;
+              const isStillSameRev =
+                (t.revision ?? 0) === capturedRevision || t.content === capturedContent;
+              return {
+                ...t,
+                isDirty: !isStillSameRev,
+                initialSnapshot: newSnapshot,
+              };
+            })
+          );
+
+          const parsed = await parser.parse(
+            targetPath,
+            capturedContent,
+            res.currentVersion.hash || ''
+          );
+          await index.upsert(parsed);
+          if (activeTabPathRef.current === targetPath) {
+            setParsedDoc(parsed);
+            const bl = await backendRef.current.getBacklinks(targetPath);
+            if (activeTabPathRef.current === targetPath) {
+              setBacklinks(bl);
+            }
+            const latestTab = openTabsRef.current.find((t) => t.path === targetPath);
+            const isStillDirty = latestTab
+              ? (latestTab.revision ?? 0) !== capturedRevision &&
+                latestTab.content !== capturedContent
+              : false;
+            setSaveStatus(isStillDirty ? 'modified' : 'saved');
+            setConflictData(null);
+          }
+          return { success: true };
+        } catch (err: any) {
+          if (err.status === 401 || err.code === 'UNAUTHORIZED') {
+            if (activeTabPathRef.current === targetPath) setSaveStatus('modified');
+            alert(
+              'Gateway authentication failed (HTTP 401). Please check your authorization token.'
+            );
+            return { success: false, error: 'Unauthorized' };
+          } else if (err.status === 403 || err.code === 'FORBIDDEN') {
+            if (activeTabPathRef.current === targetPath) setSaveStatus('modified');
+            alert('Read-only gateway: mutations are not permitted.');
+            return { success: false, error: 'Forbidden' };
+          } else if (err.status === 404 || err.code === 'NOT_FOUND') {
+            if (activeTabPathRef.current === targetPath) {
+              setSaveStatus('conflict');
+              setConflictData({ path: targetPath });
+            }
+            return { success: false, conflict: true, error: 'Not found' };
+          } else if (err.status === 413 || err.code === 'PAYLOAD_TOO_LARGE') {
+            if (activeTabPathRef.current === targetPath) setSaveStatus('modified');
+            alert('Payload too large (HTTP 413): note exceeds gateway maximum body size.');
+            return { success: false, error: 'Payload too large' };
+          } else if (err.status === 409 || err.code === 'CONFLICT') {
+            if (activeTabPathRef.current === targetPath) {
+              setSaveStatus('conflict');
+              try {
+                const latest = await backendRef.current.readNote(targetPath);
+                setConflictData({ path: targetPath, diskContent: latest.textContent });
+              } catch {
+                setConflictData({ path: targetPath });
+              }
+            }
+            return { success: false, conflict: true, error: 'Conflict' };
+          } else if (
+            err instanceof GatewayUnavailableError ||
+            err.status === 503 ||
+            err.code === 'GATEWAY_UNAVAILABLE' ||
+            err.name === 'TypeError'
+          ) {
+            setGatewayReachable(false);
+            if (activeTabPathRef.current === targetPath) setSaveStatus('disconnected');
+            return { success: false, error: 'Gateway unreachable' };
+          } else {
+            if (activeTabPathRef.current === targetPath) setSaveStatus('modified');
+            return { success: false, error: err?.message || 'Save failed' };
+          }
+        }
+      }
+
+      // Local / Standalone Mode
+      try {
+        const startEpoch = pathEpochMapRef.current.get(targetPath) ?? 0;
+        const startRebuildEpoch = vaultRebuildEpochRef.current;
+        const currentSeq = ++saveSequenceRef.current;
+
+        const snapshot = await coordinatorRef.current.save(targetPath, force);
+        if (snapshot) {
+          const savedText =
+            snapshot.textContent ??
+            new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
+          const parsed = await parser.parse(targetPath, savedText, snapshot.version.hash);
+
+          const currentPathEpoch = pathEpochMapRef.current.get(targetPath) ?? 0;
+          const lastIndexed = pathSeqMapRef.current.get(targetPath) ?? 0;
+
+          if (
+            startRebuildEpoch === vaultRebuildEpochRef.current &&
+            startEpoch === currentPathEpoch &&
+            currentSeq > lastIndexed
+          ) {
+            pathSeqMapRef.current.set(targetPath, currentSeq);
+            await index.upsert(parsed);
+            if (activeTabPathRef.current === targetPath) {
+              setParsedDoc(parsed);
+              const bl = await index.getBacklinks(targetPath);
+              if (activeTabPathRef.current === targetPath) {
+                setBacklinks(bl);
+              }
+              setSaveStatus('saved');
+            }
+          }
+          return { success: true };
+        }
+        return { success: false, error: 'Local save failed' };
+      } catch (err: any) {
+        if (activeTabPathRef.current === targetPath) setSaveStatus('modified');
+        return { success: false, error: err?.message || String(err) };
+      }
+    })();
+
+    inFlightSavesRef.current.set(targetPath, saveExecution);
+    try {
+      return await saveExecution;
+    } finally {
+      if (inFlightSavesRef.current.get(targetPath) === saveExecution) {
+        inFlightSavesRef.current.delete(targetPath);
+      }
+    }
+  };
+
+  const saveActiveNote = async (force = false) => {
+    const currentPath = activeTabPathRef.current;
+    if (!currentPath) return;
+    return saveNote(currentPath, force);
+  };
+
+  const flushDirtyNotes = async (): Promise<DesktopFlushResult> => {
+    // 1. Cancel pending debounce timers
+    for (const timer of autosaveTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    autosaveTimersRef.current.clear();
+
+    const conflicts: string[] = [];
+    const failures: string[] = [];
+
+    // 2. Bounded stabilization loop (max 3 passes)
+    for (let round = 0; round < 3; round++) {
+      const dirtyTabs = openTabsRef.current.filter((t) => t.isDirty);
+      if (dirtyTabs.length === 0) {
+        return { requestId: '', success: true, conflicts: [], failures: [] };
+      }
+
+      for (const tab of dirtyTabs) {
+        const res = await saveNote(tab.path);
+        if (!res.success) {
+          if (res.conflict) {
+            if (!conflicts.includes(tab.path)) conflicts.push(tab.path);
+          } else {
+            if (!failures.includes(tab.path)) {
+              failures.push(res.error || `Failed to save ${tab.path}`);
+            }
+          }
+        }
+      }
+
+      if (!openTabsRef.current.some((t) => t.isDirty)) {
+        return { requestId: '', success: true, conflicts: [], failures: [] };
+      }
+    }
+
+    const remainingDirty = openTabsRef.current.filter((t) => t.isDirty).map((t) => t.path);
+    return {
+      requestId: '',
+      success: remainingDirty.length === 0,
+      conflicts,
+      failures:
+        failures.length > 0 ? failures : remainingDirty.map((p) => `Unsaved dirty state on ${p}`),
+    };
+  };
+
   const updateContent = (targetPath: VaultPath, newContent: string) => {
+    // Cancel existing timer for targetPath
+    const existingTimer = autosaveTimersRef.current.get(targetPath);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
     if (vaultModeRef.current === 'gateway') {
       setOpenTabs((prev) =>
         prev.map((tab) => {
           if (tab.path === targetPath) {
             const diskText = tab.initialSnapshot?.textContent ?? '';
             const isDirty = diskText !== newContent;
-            return { ...tab, content: newContent, isDirty };
+            const nextRev = (tab.revision ?? 0) + 1;
+            return { ...tab, content: newContent, isDirty, revision: nextRev };
           }
           return tab;
         })
@@ -1001,6 +1254,16 @@ export function useVault() {
         const active = openTabsRef.current.find((t) => t.path === targetPath);
         const diskText = active?.initialSnapshot?.textContent ?? '';
         setSaveStatus(diskText !== newContent ? 'modified' : 'saved');
+      }
+
+      const activeTabNow = openTabsRef.current.find((t) => t.path === targetPath);
+      const diskTextNow = activeTabNow?.initialSnapshot?.textContent ?? '';
+      if (diskTextNow !== newContent) {
+        const timer = setTimeout(() => {
+          autosaveTimersRef.current.delete(targetPath);
+          void saveNote(targetPath);
+        }, 2000);
+        autosaveTimersRef.current.set(targetPath, timer);
       }
       return;
     }
@@ -1013,7 +1276,8 @@ export function useVault() {
           const isDirty = state
             ? (state.committedSnapshot?.textContent ?? '') !== newContent
             : true;
-          return { ...tab, content: newContent, isDirty };
+          const nextRev = (tab.revision ?? 0) + 1;
+          return { ...tab, content: newContent, isDirty, revision: nextRev };
         }
         return tab;
       })
@@ -1021,146 +1285,17 @@ export function useVault() {
     if (targetPath === activeTabPathRef.current) {
       setSaveStatus('modified');
     }
+    const timer = setTimeout(() => {
+      autosaveTimersRef.current.delete(targetPath);
+      void saveNote(targetPath);
+    }, 2000);
+    autosaveTimersRef.current.set(targetPath, timer);
   };
 
   const toggleTask = (lineNumber: number, targetText?: string) => {
     if (!activeTab || !activeTabPath) return;
     const newContent = toggleTaskAtLine(activeTab.content, lineNumber, targetText);
     updateContent(activeTabPath, newContent);
-  };
-
-  const saveActiveNote = async (force = false) => {
-    const currentPath = activeTabPathRef.current;
-    if (!currentPath) return;
-
-    const currentTab = openTabsRef.current.find((t) => t.path === currentPath);
-    if (!currentTab) return;
-    if (!currentTab.isDirty && !force) return;
-
-    if (vaultModeRef.current === 'gateway') {
-      setSaveStatus('saving');
-      try {
-        const expectedToken = currentTab.initialSnapshot?.version.token || '';
-        const res = await backendRef.current.updateNote({
-          path: currentPath,
-          content: currentTab.content,
-          expectedVersion: {
-            token: expectedToken,
-            hash: currentTab.initialSnapshot?.version.hash,
-          },
-        });
-
-        // Update tab with new authoritative version
-        const newSnapshot: FileSnapshot = {
-          path: currentPath,
-          content: new TextEncoder().encode(currentTab.content),
-          textContent: currentTab.content,
-          size: res.currentVersion.size ?? currentTab.content.length,
-          modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
-          version: {
-            token: res.currentVersion.token,
-            hash: res.currentVersion.hash ?? '',
-            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
-            size: res.currentVersion.size ?? currentTab.content.length,
-          },
-        };
-
-        setOpenTabs((prev) =>
-          prev.map((t) => {
-            if (t.path !== currentPath) return t;
-            return {
-              ...t,
-              isDirty: false,
-              initialSnapshot: newSnapshot,
-            };
-          })
-        );
-
-        const parsed = await parser.parse(
-          currentPath,
-          currentTab.content,
-          res.currentVersion.hash || ''
-        );
-        await index.upsert(parsed);
-        if (activeTabPathRef.current === currentPath) {
-          setParsedDoc(parsed);
-          const bl = await backendRef.current.getBacklinks(currentPath);
-          if (activeTabPathRef.current === currentPath) {
-            setBacklinks(bl);
-          }
-          setSaveStatus('saved');
-          setConflictData(null);
-        }
-      } catch (err: any) {
-        if (err.status === 401 || err.code === 'UNAUTHORIZED') {
-          setSaveStatus('modified');
-          alert('Gateway authentication failed (HTTP 401). Please check your authorization token.');
-        } else if (err.status === 403 || err.code === 'FORBIDDEN') {
-          setSaveStatus('modified');
-          alert('Read-only gateway: mutations are not permitted.');
-        } else if (err.status === 404 || err.code === 'NOT_FOUND') {
-          setSaveStatus('conflict');
-          setConflictData({ path: currentPath });
-        } else if (err.status === 413 || err.code === 'PAYLOAD_TOO_LARGE') {
-          setSaveStatus('modified');
-          alert('Payload too large (HTTP 413): note exceeds gateway maximum body size.');
-        } else if (err.status === 409 || err.code === 'CONFLICT') {
-          setSaveStatus('conflict');
-          try {
-            const latest = await backendRef.current.readNote(currentPath);
-            setConflictData({ path: currentPath, diskContent: latest.textContent });
-          } catch {
-            setConflictData({ path: currentPath });
-          }
-        } else if (
-          err instanceof GatewayUnavailableError ||
-          err.status === 503 ||
-          err.code === 'GATEWAY_UNAVAILABLE' ||
-          err.name === 'TypeError'
-        ) {
-          setGatewayReachable(false);
-          setSaveStatus('disconnected');
-          console.error('Gateway unreachable:', err);
-        } else {
-          setSaveStatus('modified');
-          console.error('Gateway save failed:', err);
-        }
-      }
-      return;
-    }
-
-    try {
-      const startEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
-      const startRebuildEpoch = vaultRebuildEpochRef.current;
-      const currentSeq = ++saveSequenceRef.current;
-
-      const snapshot = await coordinatorRef.current.save(currentPath, force);
-      if (snapshot) {
-        const savedText =
-          snapshot.textContent ??
-          new TextDecoder('utf-8', { ignoreBOM: true }).decode(snapshot.content);
-        const parsed = await parser.parse(currentPath, savedText, snapshot.version.hash);
-
-        const currentPathEpoch = pathEpochMapRef.current.get(currentPath) ?? 0;
-        const lastIndexed = pathSeqMapRef.current.get(currentPath) ?? 0;
-
-        if (
-          startRebuildEpoch === vaultRebuildEpochRef.current &&
-          startEpoch === currentPathEpoch &&
-          currentSeq > lastIndexed
-        ) {
-          pathSeqMapRef.current.set(currentPath, currentSeq);
-          await index.upsert(parsed);
-          if (activeTabPathRef.current === currentPath) {
-            setParsedDoc(parsed);
-            const bl = await index.getBacklinks(currentPath);
-            if (activeTabPathRef.current === currentPath) {
-              setBacklinks(bl);
-            }
-          }
-        }
-      }
-    } catch (err: any) {}
   };
 
   const createNote = async (nameOrFolder: string = '') => {
@@ -1200,7 +1335,7 @@ export function useVault() {
       counter++;
     }
 
-    const initialContent = `# ${candidate.replace(/\.md$/, '').split('/').pop()}\n\n`;
+    const initialContent = `# ${candidate.replace(/\.md$/, '').split('/').pop() || 'Untitled'}\n\n`;
 
     if (vaultModeRef.current === 'gateway') {
       try {
@@ -1229,6 +1364,7 @@ export function useVault() {
           title: parsed.title,
           isDirty: false,
           content: initialContent,
+          revision: 0,
           initialSnapshot: snapshot,
         };
 
@@ -1261,6 +1397,7 @@ export function useVault() {
         title: parsed.title,
         isDirty: false,
         content: initialContent,
+        revision: 0,
         initialSnapshot: res.snapshot,
       };
 
@@ -1299,7 +1436,7 @@ export function useVault() {
     if (!targetPath) return;
 
     if (vaultModeRef.current === 'gateway') {
-      // In Gateway Mode, folder creation is implicit through note creation or subpaths
+      // In Gateway Mode, folder creation is implicit when notes are created in subpaths
       await refreshVault();
       return;
     }
@@ -1324,43 +1461,54 @@ export function useVault() {
       );
       if (normalizedOld === normalizedNew) return;
 
+      const oldTimer = autosaveTimersRef.current.get(normalizedOld);
+      if (oldTimer) {
+        clearTimeout(oldTimer);
+        autosaveTimersRef.current.delete(normalizedOld);
+      }
+
       if (vaultModeRef.current === 'gateway') {
         const tab = openTabsRef.current.find((t) => t.path === normalizedOld || t.path === oldPath);
-        const expectedToken = tab?.initialSnapshot?.version.token || '';
+        let expectedToken = tab?.initialSnapshot?.version.token;
+        let expectedHash = tab?.initialSnapshot?.version.hash;
+
+        if (!expectedToken) {
+          const readResult = await backendRef.current.readNote(normalizedOld);
+          expectedToken = readResult.version.token;
+          expectedHash = readResult.version.hash;
+        }
 
         const res = await backendRef.current.renameNote({
           oldPath: normalizedOld,
           newPath: normalizedNew,
           expectedVersion: {
-            token: expectedToken,
-            hash: tab?.initialSnapshot?.version.hash,
+            token: expectedToken || '',
+            hash: expectedHash,
           },
           updateLinks: true,
         });
 
         setOpenTabs((prev) =>
           prev.map((t) => {
-            if (t.path === normalizedOld || t.path === oldPath) {
-              const updatedSnapshot: FileSnapshot | null = t.initialSnapshot
-                ? {
-                    ...t.initialSnapshot,
-                    path: normalizedNew,
-                    version: {
-                      token: res.currentVersion.token,
-                      hash: res.currentVersion.hash ?? '',
-                      modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
-                      size: res.currentVersion.size ?? t.initialSnapshot.size,
-                    },
-                  }
-                : null;
-              return {
-                ...t,
-                path: normalizedNew,
-                title: normalizedNew.replace(/\.md$/, '').split('/').pop() || normalizedNew,
-                initialSnapshot: updatedSnapshot,
-              };
-            }
-            return t;
+            if (t.path !== normalizedOld && t.path !== oldPath) return t;
+            const updatedSnapshot: FileSnapshot | null = t.initialSnapshot
+              ? {
+                  ...t.initialSnapshot,
+                  path: normalizedNew,
+                  version: {
+                    token: res.currentVersion.token,
+                    hash: res.currentVersion.hash ?? '',
+                    modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+                    size: res.currentVersion.size ?? t.initialSnapshot.size,
+                  },
+                }
+              : null;
+            return {
+              ...t,
+              path: normalizedNew,
+              title: normalizedNew.replace(/\.md$/, '').split('/').pop() || normalizedNew,
+              initialSnapshot: updatedSnapshot,
+            };
           })
         );
 
@@ -1415,16 +1563,37 @@ export function useVault() {
   };
 
   const deletePath = async (path: VaultPath) => {
+    const tab = openTabsRef.current.find((t) => t.path === path);
+    const confirmMessage = tab?.isDirty
+      ? `Note "${path}" has unsaved changes. Are you sure you want to permanently delete it? This cannot be undone.`
+      : `Are you sure you want to permanently delete "${path}"? This cannot be undone.`;
+
+    if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
+      return;
+    }
+
+    const pendingTimer = autosaveTimersRef.current.get(path);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      autosaveTimersRef.current.delete(path);
+    }
+
     try {
       if (vaultModeRef.current === 'gateway') {
-        const tab = openTabsRef.current.find((t) => t.path === path);
-        const expectedToken = tab?.initialSnapshot?.version.token || '';
+        let expectedToken = tab?.initialSnapshot?.version.token;
+        let expectedHash = tab?.initialSnapshot?.version.hash;
+
+        if (!expectedToken) {
+          const readResult = await backendRef.current.readNote(path);
+          expectedToken = readResult.version.token;
+          expectedHash = readResult.version.hash;
+        }
 
         await backendRef.current.deleteNote({
           path,
           expectedVersion: {
-            token: expectedToken,
-            hash: tab?.initialSnapshot?.version.hash,
+            token: expectedToken || '',
+            hash: expectedHash,
           },
         });
 
@@ -1443,10 +1612,35 @@ export function useVault() {
       await index.remove(path);
       closeTab(path, true);
       await refreshVault();
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to delete "${path}":`, err);
+      alert(`Delete failed: ${err.message || String(err)}`);
     }
   };
+
+  // Wire flush request IPC listener for desktop
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.openobDesktop?.onFlushRequest) {
+      const unsubscribe = window.openobDesktop.onFlushRequest(async (req) => {
+        const res = await flushDirtyNotes();
+        return {
+          ...res,
+          requestId: req.requestId,
+        };
+      });
+      return unsubscribe;
+    }
+  }, []);
+
+  // Cleanup all timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const timer of autosaveTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      autosaveTimersRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeTab || !activeTabPath) {
@@ -1491,16 +1685,6 @@ export function useVault() {
       }
     };
   }, [activeTabPath, activeTab?.content]);
-
-  useEffect(() => {
-    if (!activeTab || !activeTab.isDirty) return;
-
-    const autosaveTimer = setTimeout(() => {
-      void saveActiveNote();
-    }, 2000);
-
-    return () => clearTimeout(autosaveTimer);
-  }, [activeTabPath, activeTab?.content, activeTab?.isDirty]);
 
   const updateNoteProperty = async (path: VaultPath, key: string, value: any) => {
     try {
@@ -1602,32 +1786,84 @@ export function useVault() {
 
     if (vaultModeRef.current === 'gateway') {
       try {
-        await backendRef.current.createNote({
+        const res = await backendRef.current.createNote({
           path: targetPath,
           content: fullContent,
-          properties: initialProps,
         });
+
+        const snapshot: FileSnapshot = {
+          path: targetPath,
+          content: new TextEncoder().encode(fullContent),
+          textContent: fullContent,
+          size: res.currentVersion.size ?? fullContent.length,
+          modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+          version: {
+            token: res.currentVersion.token,
+            hash: res.currentVersion.hash ?? '',
+            modifiedAt: res.currentVersion.modifiedAt ?? Date.now(),
+            size: res.currentVersion.size ?? fullContent.length,
+          },
+        };
+
+        const parsed = await parser.parse(targetPath, fullContent, res.currentVersion.hash || '');
+        const newTab: OpenTab = {
+          path: targetPath,
+          title: parsed.title,
+          isDirty: false,
+          content: fullContent,
+          revision: 0,
+          initialSnapshot: snapshot,
+        };
+
+        setOpenTabs((prev) => [...prev, newTab]);
+        setActiveTabPath(targetPath);
+        activeTabPathRef.current = targetPath;
+        setParsedDoc(parsed);
+        setBacklinks([]);
+        setSaveStatus('saved');
         await refreshVault();
-        await openNote(targetPath);
       } catch (err: any) {
-        console.error('Failed to create note with properties in gateway:', err);
+        console.error(`Failed to create gateway note with properties "${targetPath}":`, err);
+        alert(`Create note failed: ${err.message || String(err)}`);
       }
       return;
     }
 
-    await storage.write(targetPath, null, fullContent);
-    pathEpochMapRef.current.set(targetPath, (pathEpochMapRef.current.get(targetPath) ?? 0) + 1);
-    pathSeqMapRef.current.set(targetPath, 0);
+    try {
+      const res = await safeWriter.safeSave(targetPath, fullContent, { expectedVersion: null });
+      const parsed = await parser.parse(targetPath, fullContent, res.snapshot.version.hash);
+      await index.upsert(parsed);
 
-    await refreshVault();
-    await openNote(targetPath);
+      coordinatorRef.current.initNote(targetPath, res.snapshot, fullContent);
+
+      pathEpochMapRef.current.set(targetPath, (pathEpochMapRef.current.get(targetPath) ?? 0) + 1);
+      pathSeqMapRef.current.set(targetPath, 0);
+
+      const newTab: OpenTab = {
+        path: targetPath,
+        title: parsed.title,
+        isDirty: false,
+        content: fullContent,
+        revision: 0,
+        initialSnapshot: res.snapshot,
+      };
+
+      setOpenTabs((prev) => [...prev, newTab]);
+      setActiveTabPath(targetPath);
+      setParsedDoc(parsed);
+      setBacklinks([]);
+      setSaveStatus('saved');
+      await refreshVault();
+    } catch (err) {
+      console.error(`Failed to create note with properties "${targetPath}":`, err);
+    }
   };
 
   const applyAIProposedEdit = async (
-    proposal: any
+    proposal: ProposedEdit
   ): Promise<{ success: boolean; error?: string }> => {
     const targetPath = proposal.path;
-    const nextContent = proposal.proposedContent ?? proposal.newContent;
+    const nextContent = proposal.proposedContent ?? (proposal as any).newContent ?? '';
 
     if (vaultModeRef.current === 'gateway') {
       try {
@@ -1646,7 +1882,7 @@ export function useVault() {
         const res = await backendRef.current.updateNote({
           path: targetPath,
           content: nextContent,
-          expectedVersion,
+          expectedVersion: expectedVersion || { token: '' },
         });
 
         const snapshot: FileSnapshot = {
@@ -1689,10 +1925,7 @@ export function useVault() {
     const startRebuildEpoch = vaultRebuildEpochRef.current;
     const currentSeq = ++saveSequenceRef.current;
 
-    const res = await coordinatorRef.current.applyAI({
-      ...proposal,
-      newContent: nextContent,
-    });
+    const res = await coordinatorRef.current.applyAI(proposal);
     if (res.success) {
       const state = coordinatorRef.current.getNoteState(targetPath);
       if (state && state.committedSnapshot) {
@@ -1733,6 +1966,8 @@ export function useVault() {
     gatewayToken,
     gatewayConnected,
     gatewayReachable,
+    vaultInitStatus,
+    isAppReady: vaultInitStatus === 'ready',
     eventRefreshCounter,
     backend,
     storage,
@@ -1749,7 +1984,9 @@ export function useVault() {
     closeTab,
     updateContent,
     toggleTask,
+    saveNote,
     saveActiveNote,
+    flushDirtyNotes,
     createNote,
     createFolder,
     renameNote,

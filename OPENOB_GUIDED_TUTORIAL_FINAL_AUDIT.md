@@ -1,95 +1,102 @@
 # OPENOB_GUIDED_TUTORIAL_FINAL_AUDIT
 
-**Guided Tutorial FINAL Closure Re-Audit (committed main `4549c89`)**
+**Guided Tutorial FINAL Closure Audit (committed main `3d61b8a`)**
 
-- **Audited HEAD:** `4549c896e6a637a869679500a7379c13d4bfae4f` — "fix(onboarding): close tutorial integration and shortcut accuracy gaps"
-- **Prior blockers:** B-1 (Welcome overlay broke 3 AI e2e tests), B-2 (5 tutorial/shortcut accuracy errors)
+- **Audited HEAD:** `3d61b8ab7562c10962df0bdc2daf7e830765a633` — "fix(onboarding): format remediation report and close final gate"
+- **Prior verdict:** STOP (P2-2) — B-1 Welcome overlay broke 3 AI e2e; B-2 five inaccurate tutorial/shortcut claims; B-3 committed remediation report broke `format:check`/`verify:full`
 - **Auditor:** DeepSeek (adversarial second model) — AUDIT ONLY, no production code modified
-- **Method:** real packaged `win-unpacked/OpenOb.exe` runtime probes (fresh profiles, keyboard-only, modal interception, persistence across restart), targeted e2e runs, full gate
+- **Method:** real packaged `win-unpacked/OpenOb.exe` + real production bundle runtime probes, targeted e2e runs, full release gate from clean install
 
 ---
 
 ## 0. VERDICT
 
-# ⛔ STOP — one exact blocker remains (release gate, not product behavior)
+# ✅ GUIDED TUTORIAL READY FOR DOGFOOD
 
-**B-1 and B-2 are fully closed and verified by execution.** The product-side tutorial is ready. **But the full release gate is red on the committed tree because Gemini's own committed remediation report fails `format:check`, and the report's "verify:full PASSED" claim is therefore false as committed.**
-
----
-
-## 1. B-1 — AI TESTS (CLOSED ✅)
-
-The exact three previously-failing AI e2e tests, run in isolation: **3/3 PASSED** (5.5s).
-
-**Why it's correct:** the fix is `tests/e2e/helpers.ts` → `seedOnboardingDismissed(page)` applied via `test.beforeEach` across all **non-onboarding** dynamic-gateway suites (`ai-gateway`, `board-mutations`, `table-mutations`, `saved-views-board`, `gateway-views`, `gateway-managed-web`, `gateway-change-stream`, `plugin-gateway`). Tests **intentionally establish dismissed onboarding state** — the Welcome modal itself is untouched and remains modal. Regression coverage added in `onboarding-tour.spec.ts` ("Modal Pointer Interception Regression: Welcome blocks interaction until dismissed"), 2/2 passing.
-
-## 2. WELCOME STILL MODAL (CLOSED ✅) — real packaged exe, fresh profile
-
-- `BLOCKED_CLICK_NO_NEW_TAB=true` — with the Welcome open, a click at background coordinates on an underlying sidebar control is **not activated**.
-- `AFTER_SKIP_USABLE={welcomeGone:true, editorShowsSecond:true}` — clicking **Skip** dismisses the modal and the workspace is immediately interactive.
-
-## 3. ONBOARDING PERSISTENCE (CLOSED ✅)
-
-Skip → `onboardingState:{dismissedFirstRun:true}` written to `userData/desktop-config.json` → restart of packaged Electron with a **new ephemeral gateway port** → `welcomeAfterRestart=false`; More → **Learn OpenOb** available (`learnAvailable=true`).
-
-## 4. SHORTCUTS — match runtime exactly (CLOSED ✅)
-
-| Shortcut                                                              | Runtime probe (packaged exe)                                 | Advertised (modal/chapters/docs)                   |
-| --------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------- |
-| `Ctrl+N`                                                              | new tab created via `createNote()` (`CTRLN_NEW_TAB=true`)    | "Create Note" ✅                                   |
-| `Ctrl+Shift+P`                                                        | palette opens (`ctrlShiftP=true`)                            | "Quick Open / Command Palette" ✅                  |
-| `Ctrl+P`                                                              | still opens (`ctrlP=true`)                                   | ✅                                                 |
-| `Ctrl+\`                                                              | **toggles Split View** (split ↔ editor; sidebar untouched)   | "Toggle Split View" ✅ (was "Sidebar" — corrected) |
-| `Ctrl+B`                                                              | sidebar hides then restores                                  | "Toggle Sidebar" ✅                                |
-| `F2`                                                                  | **inert** (`F2_NO_RENAME=true`), and **no UI advertises it** | removed from modal/chapters/docs ✅                |
-| `Ctrl+Shift+F` / `Ctrl+G` / `Ctrl+S` / `Ctrl+E` / `Ctrl+W` / `Escape` | bound in `App.tsx` (verified in code)                        | match ✅                                           |
-
-Implementation quality: new `apps/web/src/onboarding/keyboardShortcuts.ts` is the single display registry consumed by `KeyboardShortcutsModal.tsx`; `Ctrl+N` binding does `preventDefault()` + `setMainMode('editor')` + `createNote()` (same single `createNote` path as the New Note control — no second mutation path); `Ctrl+Shift+P` is a true alias of the `Ctrl+P` handler.
-
-## 5. DELETE WORDING (CLOSED ✅)
-
-"Delete with confirmation" removed from `chapters.ts` + `docs/LEARN_OPENOB.md` (now "Rename or delete notes and folders directly from the File Tree"); grep confirms no remaining "with confirmation" claim. Reality: `deletePath` has no confirmation dialog — wording now matches.
-
-## 6. SHORTCUT ACCURACY SWEEP (§11) — no new mismatches
-
-Full sweep of `keyboardShortcuts.ts` (12 entries) + `chapters.ts` + `KeyboardShortcutsModal.tsx` + `docs/LEARN_OPENOB.md` against `App.tsx` bindings: all claims match. No stale `Ctrl+\ = Sidebar`, no F2, no confirmation claim anywhere.
-
-## 7. TUTORIAL SAFETY REGRESSION (CLOSED ✅)
-
-- Engine integrity suite: **13/13** (new test added by remediation) — vault byte-identical after passive tour, dirty buffer survives, read-only works, AI chapter runs without configured provider.
-- (Prior packaged-run evidence: sha256 before == after the full keyboard tour, `VAULT_CHANGED=[]`.)
-- No onboarding-engine logic changed by the remediation (only copy + modal-scope + shortcut registry).
-
-## 8. PACKAGED ELECTRON (CLOSED ✅)
-
-All of §2–§4 probes ran inside the real `win-unpacked/OpenOb.exe` (not browser). Brand assets, tooltips, welcome, tour, shortcuts, persistence all functional.
-
-## 9. FULL GATE (§14)
-
-| Step                   | Result                                                                    |
-| ---------------------- | ------------------------------------------------------------------------- |
-| `npm ci`               | ✅ 639 packages                                                           |
-| `npm run format:check` | ❌ **`OPENOB_GUIDED_TUTORIAL_REMEDIATION.md` (committed) fails Prettier** |
-| `npm run lint`         | ✅ 0 errors                                                               |
-| `npm run typecheck`    | ✅                                                                        |
-| `npm test`             | ✅ **442/442** (69 files) — matches report                                |
-| `npm run build`        | ✅                                                                        |
-| `npm run test:desktop` | ✅ 20/20                                                                  |
-| `npm run test:e2e`     | ✅ **40/40** — matches report                                             |
-| `npm run verify:full`  | ❌ **fails at format:check** (same file)                                  |
-| `npm run pack:desktop` | ✅                                                                        |
-| `git status`           | ✅ clean (0)                                                              |
-
-**Blocker B-3 (P2, gate):** commit `4549c89` includes `OPENOB_GUIDED_TUTORIAL_REMEDIATION.md`, which is not Prettier-formatted, so `format:check` and `verify:full` are **red on the committed tree** — directly contradicting the report's own "verify:full -> PASSED (Full pipeline clean)" claim (false as committed; it presumably passed in Gemini's working copy before/after formatting). Fix: `npx prettier --write OPENOB_GUIDED_TUTORIAL_REMEDIATION.md && git add/commit/push`.
-
-## 10. PUSH STATUS
-
-`origin/main` == local HEAD == `4549c89` — **already pushed**; `git push` up-to-date. Nothing to push (the unformatted file is on GitHub).
+All prior blockers (B-1, B-2, B-3) are closed and verified by execution. Every verdict condition in the audit is met; the full release gate is green on the committed tree; tree is clean.
 
 ---
 
-## 11. CONCLUSION
+## 1. BASELINE (§1)
 
-**Product verdict:** the tutorial is behaviorally ready — B-1 (AI tests, intentional onboarding-state seeding, Welcome stays modal) and B-2 (shortcuts taught exactly match runtime; F2 gone; delete wording truthful) are verified closed in the real packaged app, and all safety/persistence properties hold.
+- HEAD = `3d61b8a` (new commit: formatted remediation report + graph-step prepare action)
+- `origin/main` == `3d61b8a` == HEAD
+- `git status` = **clean (0 entries)**
 
-**Release gate:** one trivial blocker remains — run Prettier on the committed `OPENOB_GUIDED_TUTORIAL_REMEDIATION.md`, commit, and push. After that, re-run `verify:full` → verdict flips to **GUIDED TUTORIAL READY FOR DOGFOOD**. Do not begin another feature.
+## 2. PREVIOUSLY FAILING AI TESTS (§2) — CLOSED
+
+Run exactly, in isolation: **3/3 PASSED** (5.5s).
+**Fix inspected — correct kind:** `tests/e2e/helpers.ts` → `seedOnboardingDismissed(page)` applied via `test.beforeEach` in non-onboarding dynamic-gateway suites (`ai-gateway`, `board-mutations`, `table-mutations`, `saved-views-board`, `gateway-views`, `gateway-managed-web`, `gateway-change-stream`, `plugin-gateway`). Tests **explicitly establish an already-onboarded state**. **No production change was made to make the Welcome click-through** — the modal code is untouched; the Welcome remains intentionally modal (see §3).
+
+## 3. WELCOME REMAINS MODAL (§3) — PASS (packaged exe, fresh profile)
+
+- Welcome appears on fresh profile; a click at background coordinates on an underlying control is **blocked** (`BLOCKED_CLICK_NO_NEW_TAB=true`).
+- Clicking **Skip** → workspace immediately interactive (editor opens the clicked note).
+- **Restart** (new ephemeral gateway port) → **Welcome does not return** (`welcomeAfterRestart=false`); **Learn OpenOb** still manually available.
+- Regression coverage: `onboarding-tour.spec.ts` "Modal Pointer Interception Regression" — 2/2 passing.
+
+## 4. SHORTCUTS — taught exactly match runtime (§4–§10) — PASS
+
+| Shortcut                                                         | Runtime (real Electron/packaged)                                                                                     | Advertised (modal/chapters/docs)  |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `Ctrl+N`                                                         | same `createNote()` flow as the New Note button (`CTRLN_NEW_TAB=true`); `preventDefault()`; **no second write path** | "Create Note" ✅                  |
+| `Ctrl+Shift+P`                                                   | Command Palette / Quick Open opens (`ctrlShiftP=true`)                                                               | "Quick Open / Command Palette" ✅ |
+| `Ctrl+P`                                                         | still works (`ctrlP=true`)                                                                                           | ✅                                |
+| `Ctrl+\`                                                         | **Split View toggles** (split ↔ editor; sidebar untouched)                                                           | "Toggle Split View" everywhere ✅ |
+| `Ctrl+B`                                                         | left sidebar toggles (hidden → restored)                                                                             | "Toggle Sidebar" ✅               |
+| `F2`                                                             | **not implemented and not advertised** anywhere (modal/chapters/docs/tooltips)                                       | — ✅                              |
+| `Ctrl+Shift+F`, `Ctrl+G`, `Ctrl+S`, `Ctrl+E`, `Ctrl+W`, `Escape` | bound in `App.tsx` (verified)                                                                                        | match ✅                          |
+
+- **Complete sweep (§10):** every shortcut displayed in `KeyboardShortcutsModal` (from the new single-source `keyboardShortcuts.ts` registry, 12 entries), `chapters.ts`, and `docs/LEARN_OPENOB.md` compared against `App.tsx` runtime handlers — **zero stale or invented shortcuts**.
+- **Delete truth (§9):** "Delete with confirmation" removed; current copy ("Rename or delete notes and folders directly from the File Tree") matches actual behavior (no confirmation dialog exists).
+
+## 5. DATA SAFETY REGRESSION (§11) — PASS
+
+- Passive Quick Tour leaves vault **byte-identical** (sha256 before == after; engine suite + prior packaged hash runs).
+- Dirty unsaved editor buffer **survives** a chapter run.
+- Read-only tutorial **works** (no write-scope dependency).
+- AI chapter **works with no provider configured** (no model calls, no crash).
+- Engine integrity suite: **13/13**.
+
+## 6. OPTIONAL GRAPH P3 (§12) — FIXED AND VERIFIED
+
+New `prepareActionId: 'open-more-menu'` on the graph step (`chapters.ts`) + `setIsMoreMenuOpen(true)` handler (`App.tsx`). Runtime probe at the "Interactive Knowledge Graph" step: `moreMenuOpen=true, spotlightExists=true, spotlightOnGraphItem=true` — the More menu opens and the Graph target is **spotlighted** (no longer a bare fallback card). Graceful fallback still exists as a safety net.
+
+## 7. REAL PACKAGED ELECTRON (§13) — PASS
+
+All of §3/§4 flows re-verified in the actual `win-unpacked/OpenOb.exe` (fresh profiles, keyboard-only, restarts). The gate's real-Electron suites (desktop-electron bundle + packaged-exe, onboarding-tour lifecycle) are green within the 40/40 run.
+
+## 8. FULL RELEASE GATE (§14) — GREEN
+
+| Step                   | Result                                        |
+| ---------------------- | --------------------------------------------- |
+| `npm ci`               | ✅ 639 packages                               |
+| `npm run format:check` | ✅ (B-3 fixed — remediation report formatted) |
+| `npm run lint`         | ✅ 0 errors                                   |
+| `npm run typecheck`    | ✅                                            |
+| `npm test`             | ✅ **442/442** (69 files)                     |
+| `npm run build`        | ✅                                            |
+| `npm run test:desktop` | ✅ 20/20                                      |
+| `npm run test:e2e`     | ✅ **40/40**                                  |
+| `npm run verify:full`  | ✅ **exit 0**                                 |
+| `npm run pack:desktop` | ✅                                            |
+| `git status`           | ✅ clean (0)                                  |
+
+## 9. PUSH STATUS
+
+`origin/main` == `3d61b8a` == local HEAD — **already pushed**; `git push` up-to-date. Nothing to push.
+
+---
+
+## 10. VERDICT GATE CHECKLIST
+
+- all 3 prior AI failures closed ✅
+- Welcome remains intentionally modal ✅
+- Skip persistence correct ✅ · replay available ✅
+- displayed shortcuts exactly match runtime ✅
+- unsupported F2 gone ✅ · delete wording truthful ✅
+- passive tour does not mutate vault ✅ · dirty buffers survive ✅
+- packaged Electron works ✅
+- full release gate green ✅ · final tree clean ✅
+
+**GUIDED TUTORIAL READY FOR DOGFOOD.** Do not begin another feature.

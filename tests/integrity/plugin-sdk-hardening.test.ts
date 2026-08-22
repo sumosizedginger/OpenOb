@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryVaultStorage } from '@okw/vault';
 import { MemoryDocumentIndex } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
@@ -797,12 +797,16 @@ describe('Phase 3H: Plugin SDK Authority & Capability Hardening', () => {
       host.registerPlugin(manifest, () => new ExplodingViewPlugin());
       await host.enablePlugin(manifest.id);
 
-      const container = { innerHTML: '' } as HTMLElement;
+      const container = {
+        textContent: '',
+        replaceChildren: vi.fn(),
+        appendChild: vi.fn(),
+      } as any;
       const res = host.renderView('exploding.view', container);
 
       expect(res.success).toBe(false);
       expect(res.error).toContain('Explosive DOM render failure');
-      expect(container.innerHTML).toContain('Plugin View Error');
+      expect(container.textContent).toContain('Plugin View Error: Explosive DOM render failure');
     });
 
     it('contains onunload exceptions without preventing plugin disablement', async () => {

@@ -13,6 +13,22 @@ for (let i = 2; i < process.argv.length; i++) {
   }
 }
 
+import child_process from 'node:child_process';
+
+let buildSha = process.env.OPENOB_BUILD_SHA || '';
+let sourceClean = process.env.OPENOB_SOURCE_CLEAN !== 'false';
+
+if (!buildSha) {
+  try {
+    buildSha = child_process.execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    const status = child_process.execSync('git status --porcelain', { encoding: 'utf8' }).trim();
+    sourceClean = status.length === 0;
+  } catch {
+    buildSha = 'dev';
+    sourceClean = true;
+  }
+}
+
 async function build() {
   await fs.rm(outdir, { recursive: true, force: true });
   await fs.mkdir(outdir, { recursive: true });
@@ -29,6 +45,10 @@ async function build() {
     outdir,
     outExtension: { '.js': '.cjs' },
     external: ['electron', 'sql.js'],
+    define: {
+      'process.env.OPENOB_BUILD_SHA': JSON.stringify(buildSha),
+      'process.env.OPENOB_SOURCE_CLEAN': JSON.stringify(sourceClean ? 'true' : 'false'),
+    },
     sourcemap: true,
   });
 

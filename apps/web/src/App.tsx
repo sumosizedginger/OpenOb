@@ -41,6 +41,7 @@ import { WelcomeModal } from './components/onboarding/WelcomeModal.js';
 import { TourOverlay } from './components/onboarding/TourOverlay.js';
 import { LearnCenterModal } from './components/onboarding/LearnCenterModal.js';
 import { KeyboardShortcutsModal } from './components/onboarding/KeyboardShortcutsModal.js';
+import { AboutModal } from './components/AboutModal.js';
 import { useOnboarding } from './onboarding/useOnboarding.js';
 import {
   FolderPlus,
@@ -66,6 +67,7 @@ import {
   ChevronDown,
   GraduationCap,
   Keyboard,
+  Info,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -75,6 +77,7 @@ export const App: React.FC = () => {
     isReadOnly,
     gatewayUrl,
     gatewayReachable,
+    isAppReady,
     eventRefreshCounter,
     backend,
     entries,
@@ -119,6 +122,7 @@ export const App: React.FC = () => {
   const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
 
   const {
@@ -141,7 +145,7 @@ export const App: React.FC = () => {
     openShortcuts,
     closeShortcuts,
   } = useOnboarding({
-    isAppReady: true,
+    isAppReady: isAppReady ?? true,
     onPrepareAction: (actionId: string) => {
       if (actionId === 'open-sidebar') {
         setShowSidebar(true);
@@ -162,6 +166,24 @@ export const App: React.FC = () => {
       }
     },
   });
+
+  // Handle native Electron application menu events
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.openobDesktop?.onMenuAction) {
+      const unsubscribe = window.openobDesktop.onMenuAction((action) => {
+        if (action === 'learn') {
+          openLearnCenter();
+        } else if (action === 'quick-tour') {
+          void startQuickTour();
+        } else if (action === 'shortcuts') {
+          openShortcuts();
+        } else if (action === 'about') {
+          setIsAboutOpen(true);
+        }
+      });
+      return unsubscribe;
+    }
+  }, [openLearnCenter, startQuickTour, openShortcuts]);
 
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const viewModeMenuRef = useRef<HTMLDivElement>(null);
@@ -213,14 +235,43 @@ export const App: React.FC = () => {
     host.registerPlugin(characterBibleManifest, () => new CharacterBiblePlugin());
     host.registerPlugin(manuscriptToolsManifest, () => new ManuscriptToolsPlugin());
 
-    void host.enablePlugin(wordCountManifest.id);
-    void host.enablePlugin(dailyNotesManifest.id);
-    void host.enablePlugin(templatesManifest.id);
-    void host.enablePlugin(characterBibleManifest.id);
-    void host.enablePlugin(manuscriptToolsManifest.id);
-
     return host;
   });
+
+  // Pre-load plugin states before enabling
+  useEffect(() => {
+    const isMounted = true;
+    void (async () => {
+      let savedStates: Record<string, boolean> = {};
+      if (typeof window !== 'undefined' && window.openobDesktop?.getPluginStates) {
+        try {
+          savedStates = await window.openobDesktop.getPluginStates();
+        } catch (err) {
+          console.warn('Failed to load desktop plugin states:', err);
+        }
+      } else {
+        try {
+          const raw = localStorage.getItem('openob_plugin_states');
+          if (raw) savedStates = JSON.parse(raw);
+        } catch {}
+      }
+
+      const defaultPlugins = [
+        wordCountManifest.id,
+        dailyNotesManifest.id,
+        templatesManifest.id,
+        characterBibleManifest.id,
+        manuscriptToolsManifest.id,
+      ];
+
+      for (const pluginId of defaultPlugins) {
+        const isExplicitlyDisabled = savedStates[pluginId] === false;
+        if (!isExplicitlyDisabled && isMounted) {
+          await pluginHost.enablePlugin(pluginId);
+        }
+      }
+    })();
+  }, [pluginHost]);
 
   // Keep plugin host context updated with live backend authority (Gateway vs Standalone)
   useEffect(() => {
@@ -236,7 +287,10 @@ export const App: React.FC = () => {
         },
       }),
     });
-    (window as any).__pluginHost = pluginHost;
+
+    if (import.meta.env.DEV || (import.meta.env as any).MODE === 'test') {
+      (window as any).__pluginHost = pluginHost;
+    }
   }, [pluginHost, backend, aiBackend, activeTabPath, openNote]);
 
   // Aggregate vault tags for Properties & Tags Explorer
@@ -631,6 +685,16 @@ export const App: React.FC = () => {
                 >
                   <FolderOpen size={14} />
                   <span>Open Folder from Disk</span>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    setIsAboutOpen(true);
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <Info size={14} />
+                  <span>About OpenOb</span>
                 </button>
               </div>
             )}
@@ -1080,6 +1144,9 @@ export const App: React.FC = () => {
 
       {/* Keyboard Shortcuts Cheat Sheet */}
       <KeyboardShortcutsModal isOpen={isShortcutsOpen} onClose={closeShortcuts} />
+
+      {/* About OpenOb Modal */}
+      <AboutModal isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
     </div>
   );
 };

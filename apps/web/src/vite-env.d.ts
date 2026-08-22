@@ -1,32 +1,31 @@
 /// <reference types="vite/client" />
 
-interface Window {
-  openobDesktop?: {
-    getBootstrapConfig(): Promise<{
-      gatewayUrl: string;
-      token: string;
-      vaultName: string;
-      vaultPath?: string;
-    }>;
-    chooseVault(): Promise<{
-      gatewayUrl: string;
-      token: string;
-      vaultName: string;
-      vaultPath?: string;
-    } | null>;
-    getAppInfo(): Promise<{ name: string; version: string; platform: string }>;
-    getOnboardingState(): Promise<{
-      version: number;
-      dismissedFirstRun: boolean;
-      quickTourCompleted: boolean;
-      completedChapters: string[];
-    } | null>;
-    setOnboardingState(state: {
-      version: number;
-      dismissedFirstRun: boolean;
-      quickTourCompleted: boolean;
-      completedChapters: string[];
-    }): Promise<void>;
-    onLifecycleEvent(listener: (event: { type: string; payload?: any }) => void): () => void;
-  };
+import type {
+  DesktopBootstrapConfig,
+  DesktopAppInfo,
+  DesktopLifecycleEvent,
+  DesktopFlushRequest,
+  DesktopFlushResult,
+  DesktopMenuAction,
+  OnboardingState,
+} from '@okw/desktop';
+
+declare global {
+  interface Window {
+    openobDesktop?: {
+      getBootstrapConfig(): Promise<DesktopBootstrapConfig>;
+      chooseVault(): Promise<DesktopBootstrapConfig | null>;
+      getAppInfo(): Promise<DesktopAppInfo>;
+      getOnboardingState(): Promise<OnboardingState | null>;
+      setOnboardingState(state: OnboardingState): Promise<void>;
+      getPluginStates(): Promise<Record<string, boolean>>;
+      setPluginStates(states: Record<string, boolean>): Promise<void>;
+      onLifecycleEvent(listener: (event: DesktopLifecycleEvent) => void): () => void;
+      onFlushRequest(
+        listener: (req: DesktopFlushRequest) => Promise<DesktopFlushResult> | DesktopFlushResult
+      ): () => void;
+      onMenuAction(listener: (action: DesktopMenuAction) => void): () => void;
+    };
+  }
 }
+export {};

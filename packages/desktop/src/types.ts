@@ -29,6 +29,8 @@ export interface DesktopBootstrapConfig {
 export interface DesktopAppInfo {
   readonly name: string;
   readonly version: string;
+  readonly buildSha?: string;
+  readonly sourceClean?: boolean;
   readonly platform: string;
   readonly storageStatus?: 'ready' | 'unavailable' | 'corrupted';
 }
@@ -52,9 +54,25 @@ export interface DesktopConfig {
   readonly lastVaultPath?: string;
   readonly windowBounds?: DesktopWindowBounds;
   readonly onboardingState?: OnboardingState;
+  readonly pluginStates?: Record<string, boolean>;
 }
 
-export type DesktopLifecycleEventType = 'before-vault-switch' | 'vault-switched' | 'quitting';
+export interface DesktopFlushRequest {
+  readonly requestId: string;
+  readonly reason: 'close' | 'quit' | 'vault-switch';
+}
+
+export interface DesktopFlushResult {
+  readonly requestId: string;
+  readonly success: boolean;
+  readonly conflicts: string[];
+  readonly failures: string[];
+}
+
+export type DesktopMenuAction = 'learn' | 'quick-tour' | 'shortcuts' | 'about';
+
+export type DesktopLifecycleEventType =
+  'before-vault-switch' | 'vault-switched' | 'quitting' | 'flush-request' | 'menu-action';
 
 export interface DesktopLifecycleEvent {
   readonly type: DesktopLifecycleEventType;

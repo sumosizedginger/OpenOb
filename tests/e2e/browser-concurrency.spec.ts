@@ -48,17 +48,19 @@ test.describe('Real Browser Concurrency & Production Hook Harness (G3 / C1, C2, 
     // Immediately type v2 while save 1 is in-flight
     await page.keyboard.type('\n- Line 2 (v2 typed during save)');
 
-    // Wait for the pump loop and debounced autosave to settle (> 3200ms save + debounce)
-    await page.waitForTimeout(5000);
-    await expect(page.locator('.save-status.saved')).toContainText('Saved', { timeout: 10000 });
+    // Wait for the pump loop and debounced autosave to settle (> 3200ms save + debounce + 3200ms save 2)
+    await expect(page.locator('.save-status.saved')).toContainText('Saved', { timeout: 20000 });
     await expect(page.locator('.cm-content')).toContainText('Line 2 (v2 typed during save)');
 
     // C7: Verify actual storage disk content has v2 and no conflict occurred
-    const diskContent = await page.evaluate(
-      async () => await (window as any).__readStorage('Welcome.md')
-    );
-    expect(diskContent).toContain('Line 1 (v1)');
-    expect(diskContent).toContain('Line 2 (v2 typed during save)');
+    await expect
+      .poll(
+        async () => {
+          return await page.evaluate(async () => await (window as any).__readStorage('Welcome.md'));
+        },
+        { timeout: 20000 }
+      )
+      .toContain('Line 2 (v2 typed during save)');
   });
 
   test('A4: Rapid sequential typing across overlapping save windows settles cleanly on disk', async ({

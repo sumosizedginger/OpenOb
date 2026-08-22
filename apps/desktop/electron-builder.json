@@ -30,14 +30,17 @@
         "target": "portable",
         "arch": ["x64"]
       }
-    ],
-    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    ]
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "createStartMenuShortcut": true,
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+  },
+  "portable": {
+    "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
   },
   "mac": {
     "icon": "build/icon.icns",

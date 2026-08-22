@@ -32,6 +32,7 @@ function buildTree(entries: VaultEntry[]): TreeNode[] {
   const root: TreeNode[] = [];
   const map = new Map<string, TreeNode>();
 
+  // Pass 1: register all nodes
   for (const entry of entries) {
     const node: TreeNode = {
       name: entry.name,
@@ -40,8 +41,27 @@ function buildTree(entries: VaultEntry[]): TreeNode[] {
       children: [],
     };
     map.set(entry.path, node);
+  }
 
+  // Ensure all parent directories exist even if implicit
+  for (const entry of entries) {
     const parts = entry.path.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const dirPath = parts.slice(0, i).join('/');
+      if (!map.has(dirPath)) {
+        map.set(dirPath, {
+          name: parts[i - 1],
+          path: dirPath,
+          isDirectory: true,
+          children: [],
+        });
+      }
+    }
+  }
+
+  // Pass 2: attach to parent or root
+  for (const [path, node] of map.entries()) {
+    const parts = path.split('/');
     if (parts.length === 1) {
       root.push(node);
     } else {
@@ -56,6 +76,21 @@ function buildTree(entries: VaultEntry[]): TreeNode[] {
     }
   }
 
+  // Deterministic sort: directories first (A-Z), then files (A-Z)
+  const sortNodes = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    for (const n of nodes) {
+      if (n.children.length > 0) {
+        sortNodes(n.children);
+      }
+    }
+  };
+
+  sortNodes(root);
   return root;
 }
 
@@ -121,14 +156,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 onClick={() => onCreateNote(node.path)}
               >
                 <Plus size={12} />
-              </button>
-              <button
-                className="btn-icon"
-                style={{ width: '22px', height: '22px' }}
-                title="Delete Folder"
-                onClick={() => onDelete(node.path)}
-              >
-                <Trash2 size={12} />
               </button>
             </div>
           </div>

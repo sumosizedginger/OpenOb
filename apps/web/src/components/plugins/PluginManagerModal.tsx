@@ -24,17 +24,38 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
     onRefresh();
   };
 
+  const persistStates = async () => {
+    const currentPlugins = pluginHost.getPlugins();
+    const states: Record<string, boolean> = {};
+    for (const p of currentPlugins) {
+      states[p.manifest.id] = p.status === 'enabled';
+    }
+    if (typeof window !== 'undefined' && window.openobDesktop?.setPluginStates) {
+      try {
+        await window.openobDesktop.setPluginStates(states);
+      } catch (err) {
+        console.warn('Failed to persist desktop plugin states:', err);
+      }
+    } else {
+      try {
+        localStorage.setItem('openob_plugin_states', JSON.stringify(states));
+      } catch {}
+    }
+  };
+
   const handleToggle = async (inst: PluginInstance) => {
     if (inst.status === 'enabled') {
       await pluginHost.disablePlugin(inst.manifest.id);
     } else {
       await pluginHost.enablePlugin(inst.manifest.id);
     }
+    await persistStates();
     refreshList();
   };
 
   const handleRestart = async (pluginId: string) => {
     await pluginHost.restartPlugin(pluginId);
+    await persistStates();
     refreshList();
   };
 

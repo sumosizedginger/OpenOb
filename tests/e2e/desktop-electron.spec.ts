@@ -1,16 +1,79 @@
 import { test, expect, _electron as electron } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as crypto from 'node:crypto';
+
+function getNormalProfileDirs(): string[] {
+  const appData =
+    process.env.APPDATA ||
+    (process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : path.join(os.homedir(), '.config'));
+
+  return [path.join(appData, 'OpenOb'), path.join(appData, '@okw', 'desktop-app')];
+}
+
+function snapshotProfileDirs(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const dir of getNormalProfileDirs()) {
+    if (fs.existsSync(dir)) {
+      const walk = (d: string) => {
+        const entries = fs.readdirSync(d, { withFileTypes: true });
+        for (const e of entries) {
+          const fullPath = path.join(d, e.name);
+          if (e.isDirectory()) {
+            walk(fullPath);
+          } else {
+            const stats = fs.statSync(fullPath);
+            map.set(fullPath, `${stats.size}:${stats.mtimeMs}`);
+          }
+        }
+      };
+      try {
+        walk(dir);
+      } catch {}
+    }
+  }
+  return map;
+}
 
 test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1, P1-1, P2-1)', () => {
+  let beforeSnapshot: Map<string, string>;
+
+  test.beforeAll(() => {
+    beforeSnapshot = snapshotProfileDirs();
+  });
+
+  test.afterAll(() => {
+    // Prove that normal user profile directories were NOT mutated by tests (Item 10)
+    const afterSnapshot = snapshotProfileDirs();
+    for (const [filePath, state] of afterSnapshot.entries()) {
+      if (!beforeSnapshot.has(filePath)) {
+        throw new Error(
+          `Test profile pollution detected! New file created in normal profile: ${filePath}`
+        );
+      }
+      if (beforeSnapshot.get(filePath) !== state) {
+        throw new Error(
+          `Test profile pollution detected! Existing file mutated in normal profile: ${filePath}`
+        );
+      }
+    }
+  });
+
   test('Electron launches compiled bundle, serves web UI, initializes safeStorage, and authorizes AI endpoints', async () => {
     const mainScript = path.resolve('apps/desktop/dist/main.cjs');
     expect(fs.existsSync(mainScript)).toBe(true);
 
+    const tempUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'okw-e2e-profile-'));
+
     const electronApp = await electron.launch({
-      args: [mainScript],
+      args: [mainScript, `--user-data-dir=${tempUserData}`],
       env: {
         ...process.env,
+        OPENOB_E2E: '1',
+        OPENOB_E2E_USER_DATA: tempUserData,
         NODE_ENV: 'production',
       },
     });
@@ -72,19 +135,28 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       const aiProvidersJson = await aiProvidersRes.json();
       expect(Array.isArray(aiProvidersJson.providers)).toBe(true);
 
-      // 7. Verify App Info IPC
+      // 7. Verify App Info IPC and canonical product identity (OpenOb)
       const appInfo = await window.evaluate(async () => {
         return await (window as any).openobDesktop.getAppInfo();
       });
       expect(appInfo.name).toBe('OpenOb');
+
+      // 8. Prove test isolation: tempUserData contains written config/state files
+      expect(fs.existsSync(tempUserData)).toBe(true);
     } finally {
       await electronApp.close();
+      try {
+        fs.rmSync(tempUserData, { recursive: true, force: true });
+      } catch {}
     }
   });
 
   test('Packaged Windows executable (win-unpacked/OpenOb.exe) launches and serves UI', async () => {
     const exePath = path.resolve('apps/desktop/release/win-unpacked/OpenOb.exe');
     if (!fs.existsSync(exePath)) {
+      if (process.env.OPENOB_REQUIRE_PACKAGED === '1') {
+        throw new Error(`Required packaged executable not found at: ${exePath}`);
+      }
       test.skip();
       return;
     }
@@ -116,8 +188,16 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       'Production CSS bundle must exist in resources/web/assets'
     ).toBe(true);
 
+    const tempUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'okw-e2e-profile-'));
+
     const electronApp = await electron.launch({
       executablePath: exePath,
+      args: [`--user-data-dir=${tempUserData}`],
+      env: {
+        ...process.env,
+        OPENOB_E2E: '1',
+        OPENOB_E2E_USER_DATA: tempUserData,
+      },
     });
 
     try {
@@ -150,7 +230,6 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       expect(bootstrap.token).toMatch(/^OPENOB_DESKTOP_/);
 
       // 5. HTTP Probes against running loopback Gateway
-      // A. GET / without Authorization -> 200 text/html OpenOb index
       const rootRes = await fetch(bootstrap.gatewayUrl);
       expect(rootRes.status).toBe(200);
       expect(rootRes.headers.get('content-type')).toContain('text/html');
@@ -158,29 +237,24 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       expect(rootHtml).toContain('<div id="root"></div>');
       expect(rootHtml).toContain('<title>OpenOb</title>');
 
-      // B. GET /assets/<production-js> without Authorization -> 200 javascript
       const jsAsset = assetFiles.find((f) => f.endsWith('.js'));
       expect(jsAsset).toBeDefined();
       const jsRes = await fetch(`${bootstrap.gatewayUrl}/assets/${jsAsset}`);
       expect(jsRes.status).toBe(200);
       expect(jsRes.headers.get('content-type')).toMatch(/javascript/);
 
-      // C. GET /favicon.ico without Authorization -> 200 image/x-icon
       const favRes = await fetch(`${bootstrap.gatewayUrl}/favicon.ico`);
       expect(favRes.status).toBe(200);
 
-      // D. GET /brand/openob-mark.png without Authorization -> 200 image/png
       const brandRes = await fetch(`${bootstrap.gatewayUrl}/brand/openob-mark.png`);
       expect(brandRes.status).toBe(200);
       expect(brandRes.headers.get('content-type')).toContain('image/png');
 
-      // E. GET /api/v1/workspace without Authorization -> 401 UNAUTHORIZED
       const unauthApiRes = await fetch(`${bootstrap.gatewayUrl}/api/v1/workspace`);
       expect(unauthApiRes.status).toBe(401);
       const unauthJson = await unauthApiRes.json();
       expect(unauthJson.code).toBe('UNAUTHORIZED');
 
-      // F. GET /api/v1/workspace with desktop session token -> 200 JSON
       const authApiRes = await fetch(`${bootstrap.gatewayUrl}/api/v1/workspace`, {
         headers: {
           authorization: `Bearer ${bootstrap.token}`,
@@ -191,6 +265,9 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       expect(authJson.apiVersion).toBe('v1');
     } finally {
       await electronApp.close();
+      try {
+        fs.rmSync(tempUserData, { recursive: true, force: true });
+      } catch {}
     }
   });
 });

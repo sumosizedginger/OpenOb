@@ -1,4 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  safeStorage,
+  Menu,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
@@ -9,11 +18,63 @@ import {
   DesktopAppInfo,
   DesktopConfig,
   OnboardingState,
+  DesktopFlushResult,
+  migrateLegacyProfile,
 } from '@okw/desktop';
 import { startGateway, RunningGateway } from '@okw/gateway';
 import { AIManager } from '@okw/ai';
 
 declare const __dirname: string;
+
+// Normalize canonical product identity before any userData path is queried
+app.name = 'OpenOb';
+
+// ---------------------------------------------------------------------------
+// 0. E2E & Test Isolation / UserData Path Override
+// ---------------------------------------------------------------------------
+const isE2EMode = process.env.OPENOB_E2E === '1';
+const e2eUserDataEnv = process.env.OPENOB_E2E_USER_DATA;
+const userDataArg = process.argv.find((arg) => arg.startsWith('--user-data-dir='));
+
+if (isE2EMode && e2eUserDataEnv) {
+  const resolvedE2EPath = path.resolve(e2eUserDataEnv);
+  if (!fs.existsSync(resolvedE2EPath)) {
+    fs.mkdirSync(resolvedE2EPath, { recursive: true });
+  }
+  app.setPath('userData', resolvedE2EPath);
+} else if (userDataArg) {
+  const customUserData = path.resolve(userDataArg.split('=')[1]);
+  if (!fs.existsSync(customUserData)) {
+    fs.mkdirSync(customUserData, { recursive: true });
+  }
+  app.setPath('userData', customUserData);
+} else {
+  // Production / normal launch: perform safe one-time migration from legacy profile if present
+  try {
+    const canonicalDir = app.getPath('userData');
+    const appData = app.getPath('appData');
+    const legacyDir = path.join(appData, '@okw', 'desktop-app');
+    const legacyDirAlt = path.join(appData, '@okw/desktop-app');
+
+    const sourceLegacy = fs.existsSync(legacyDir)
+      ? legacyDir
+      : fs.existsSync(legacyDirAlt)
+        ? legacyDirAlt
+        : null;
+
+    if (sourceLegacy) {
+      const res = migrateLegacyProfile(sourceLegacy, canonicalDir);
+      if (res.migrated) {
+        console.log(
+          `[DesktopMain] Migrated legacy profile from ${sourceLegacy} to ${canonicalDir}:`,
+          res.filesMigrated
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[DesktopMain] Legacy profile migration check failed:', err);
+  }
+}
 
 interface DesktopSession {
   runtime: DesktopVaultRuntime;
@@ -26,7 +87,8 @@ interface DesktopSession {
 
 let mainWindow: BrowserWindow | null = null;
 let currentSession: DesktopSession | null = null;
-let isQuitting = false;
+let shutdownInProgress = false;
+let shutdownApproved = false;
 
 // ---------------------------------------------------------------------------
 // 1. Single Instance Lock (Section 25)
@@ -98,33 +160,48 @@ function getSecretsPath(): string {
 }
 
 function getWebDistPath(): string {
-  if (app.isPackaged) {
-    const packagedWeb = path.join(process.resourcesPath, 'web');
-    if (!fs.existsSync(path.join(packagedWeb, 'index.html'))) {
-      throw new Error(
-        `OpenOb web application assets are missing from the desktop package (checked "${packagedWeb}").`
-      );
-    }
-    return packagedWeb;
-  }
-
-  // Development mode: resolve monorepo apps/web/dist
-  const devPaths = [
-    path.resolve(__dirname, '../../../apps/web/dist'),
-    path.resolve(__dirname, '../../apps/web/dist'),
-    path.resolve(process.cwd(), 'apps/web/dist'),
-    path.join(process.resourcesPath || '', 'web'),
+  const candidates = [
+    path.join(process.resourcesPath, 'web'),
+    path.join(__dirname, '../web/dist'),
+    path.join(__dirname, '../../web/dist'),
+    path.join(__dirname, '../../../apps/web/dist'),
   ];
-
-  for (const devPath of devPaths) {
-    if (fs.existsSync(path.join(devPath, 'index.html'))) {
-      return devPath;
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'index.html'))) {
+      return c;
     }
   }
+  return path.join(__dirname, '../web/dist');
+}
 
-  throw new Error(
-    `OpenOb web application assets not found in development paths. Please run 'npm run build:web'.`
-  );
+// ---------------------------------------------------------------------------
+// 3. Exact Origin Security & IPC Validation (P1-A)
+// ---------------------------------------------------------------------------
+function isAllowedNavigation(navUrl: string): boolean {
+  try {
+    const parsed = new URL(navUrl);
+    if (currentSession?.gateway?.url) {
+      const gatewayOrigin = new URL(currentSession.gateway.url).origin;
+      if (parsed.origin === gatewayOrigin) return true;
+    }
+    const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+    if (isDev && process.env.VITE_DEV_SERVER_URL) {
+      const viteOrigin = new URL(process.env.VITE_DEV_SERVER_URL).origin;
+      if (parsed.origin === viteOrigin) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function validateIpcSender(event: IpcMainInvokeEvent): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (event.sender !== mainWindow.webContents) return false;
+  if (event.senderFrame !== mainWindow.webContents.mainFrame) return false;
+  const senderUrl = event.senderFrame?.url || event.sender.getURL();
+  if (!senderUrl) return false;
+  return isAllowedNavigation(senderUrl);
 }
 
 /**
@@ -184,7 +261,7 @@ function getMasterSecret(): {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Gateway & Runtime Lifecycle (Sections 1, 2, 6, 7, 8)
+// 4. Session & Runtime Management
 // ---------------------------------------------------------------------------
 async function startSessionForVault(targetVaultPath: string): Promise<DesktopSession> {
   const resolvedVaultPath = path.resolve(targetVaultPath);
@@ -192,7 +269,7 @@ async function startSessionForVault(targetVaultPath: string): Promise<DesktopSes
     fs.mkdirSync(resolvedVaultPath, { recursive: true });
   }
 
-  const vaultName = path.basename(resolvedVaultPath);
+  const vaultName = path.basename(resolvedVaultPath) || 'OpenOb Vault';
   const databasePath = getVaultCacheDbPath(resolvedVaultPath);
   const secretsPath = getSecretsPath();
 
@@ -205,7 +282,7 @@ async function startSessionForVault(targetVaultPath: string): Promise<DesktopSes
 
   const effectiveStorageStatus = secretStore.getLoadError() ? 'corrupted' : storageStatus;
 
-  // 2. Initialize DesktopVaultRuntime (One canonical workspace + watcher)
+  // 2. Initialize DesktopVaultRuntime
   const runtime = await DesktopVaultRuntime.create({
     vaultPath: resolvedVaultPath,
     databasePath,
@@ -220,7 +297,7 @@ async function startSessionForVault(targetVaultPath: string): Promise<DesktopSes
   // 4. Generate high-entropy ephemeral session token
   const sessionToken = `OPENOB_DESKTOP_${crypto.randomUUID()}`;
 
-  // 5. Start embedded OpenOb Gateway on ephemeral loopback port (127.0.0.1:0) with full desktop scopes
+  // 5. Start embedded OpenOb Gateway on ephemeral loopback port (127.0.0.1:0)
   const gateway = await startGateway({
     workspace: runtime.workspace,
     host: '127.0.0.1',
@@ -290,7 +367,130 @@ function getWindowIconPath(): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Main Window Creation & Hardened Browser Settings (Sections 4, 29, 30)
+// 5. Safe Flush Protocol & Central Shutdown Coordinator (P1-B)
+// ---------------------------------------------------------------------------
+interface PendingFlush {
+  resolve: (result: DesktopFlushResult) => void;
+  timeoutId: NodeJS.Timeout;
+}
+const pendingFlushes = new Map<string, PendingFlush>();
+
+async function requestRendererFlush(
+  reason: 'close' | 'quit' | 'vault-switch'
+): Promise<DesktopFlushResult> {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { requestId: 'none', success: true, conflicts: [], failures: [] };
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise<DesktopFlushResult>((resolve) => {
+    const timeoutId = setTimeout(() => {
+      pendingFlushes.delete(requestId);
+      resolve({
+        requestId,
+        success: false,
+        conflicts: [],
+        failures: ['Flush request timed out after 5000ms'],
+      });
+    }, 5000);
+
+    pendingFlushes.set(requestId, { resolve, timeoutId });
+
+    mainWindow!.webContents.send('desktop:flush-request', { requestId, reason });
+  });
+}
+
+async function handleApplicationQuit(sourceWin?: BrowserWindow): Promise<void> {
+  if (shutdownApproved) {
+    app.quit();
+    return;
+  }
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+
+  try {
+    const flushRes = await requestRendererFlush('quit');
+    if (flushRes.success) {
+      shutdownApproved = true;
+      await stopCurrentSession();
+      app.quit();
+      return;
+    }
+
+    const win = sourceWin || mainWindow;
+    const choice =
+      win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, {
+            type: 'warning',
+            buttons: ['Cancel', 'Quit Without Saving'],
+            defaultId: 0,
+            cancelId: 0,
+            title: 'Unsaved Changes',
+            message: 'Some changes in your notes could not be saved.',
+            detail: 'Do you want to return to OpenOb to resolve them, or quit without saving?',
+          })
+        : { response: 0 };
+
+    if (choice.response === 1) {
+      shutdownApproved = true;
+      await stopCurrentSession();
+      app.quit();
+    } else {
+      shutdownInProgress = false;
+    }
+  } catch (err) {
+    console.error('[DesktopMain] Error during shutdown handshake:', err);
+    shutdownInProgress = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Application Menu (P2-F)
+// ---------------------------------------------------------------------------
+function setupApplicationMenu(): void {
+  const isMac = process.platform === 'darwin';
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    { role: 'fileMenu' as const },
+    { role: 'editMenu' as const },
+    { role: 'viewMenu' as const },
+    { role: 'windowMenu' as const },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'Learn OpenOb',
+          click: () => {
+            mainWindow?.webContents.send('desktop:menu-action', { action: 'learn' });
+          },
+        },
+        {
+          label: 'Quick Tour',
+          click: () => {
+            mainWindow?.webContents.send('desktop:menu-action', { action: 'quick-tour' });
+          },
+        },
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => {
+            mainWindow?.webContents.send('desktop:menu-action', { action: 'shortcuts' });
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'About OpenOb',
+          click: () => {
+            mainWindow?.webContents.send('desktop:menu-action', { action: 'about' });
+          },
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// ---------------------------------------------------------------------------
+// 7. Main Window Creation & Hardened Browser Settings (P1-A, P1-B)
 // ---------------------------------------------------------------------------
 async function createMainWindow(): Promise<BrowserWindow> {
   const config = loadDesktopConfig();
@@ -318,7 +518,6 @@ async function createMainWindow(): Promise<BrowserWindow> {
     win.maximize();
   }
 
-  // Security: Harden window.open and navigation
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) {
       void shell.openExternal(url);
@@ -327,10 +526,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
   });
 
   win.webContents.on('will-navigate', (event, navUrl) => {
-    const isGatewayOrigin = currentSession && navUrl.startsWith(currentSession.gateway.url);
-    const isDevVite =
-      navUrl.startsWith('http://localhost:5173') || navUrl.startsWith('http://127.0.0.1:5173');
-    if (!isGatewayOrigin && !isDevVite) {
+    if (!isAllowedNavigation(navUrl)) {
       event.preventDefault();
       if (navUrl.startsWith('https://') || navUrl.startsWith('http://')) {
         void shell.openExternal(navUrl);
@@ -338,8 +534,13 @@ async function createMainWindow(): Promise<BrowserWindow> {
     }
   });
 
-  // Window bounds persistence
-  win.on('close', () => {
+  win.on('close', (event) => {
+    if (!shutdownApproved) {
+      event.preventDefault();
+      void handleApplicationQuit(win);
+      return;
+    }
+
     if (!win.isDestroyed()) {
       const isMaximized = win.isMaximized();
       const currentBounds = win.getNormalBounds();
@@ -360,10 +561,11 @@ async function createMainWindow(): Promise<BrowserWindow> {
 }
 
 // ---------------------------------------------------------------------------
-// 5. IPC Registration (Sections 5, 10, 31, 32)
+// 8. IPC Registration (P1-A, P1-B, P2-F, P2-H)
 // ---------------------------------------------------------------------------
 function registerIpcHandlers(): void {
-  ipcMain.handle('desktop:get-bootstrap', async (): Promise<DesktopBootstrapConfig> => {
+  ipcMain.handle('desktop:get-bootstrap', async (event): Promise<DesktopBootstrapConfig> => {
+    if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
     if (!currentSession) {
       throw new Error('No active desktop session');
     }
@@ -376,7 +578,8 @@ function registerIpcHandlers(): void {
     };
   });
 
-  ipcMain.handle('desktop:choose-vault', async (): Promise<DesktopBootstrapConfig | null> => {
+  ipcMain.handle('desktop:choose-vault', async (event): Promise<DesktopBootstrapConfig | null> => {
+    if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
     if (!mainWindow) return null;
 
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -390,27 +593,30 @@ function registerIpcHandlers(): void {
 
     const selectedPath = result.filePaths[0];
 
-    // 1. Notify renderer before switching
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('desktop:lifecycle-event', {
-        type: 'before-vault-switch',
-        payload: { nextVaultPath: selectedPath },
+    const flushRes = await requestRendererFlush('vault-switch');
+    if (!flushRes.success) {
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Cancel Switch', 'Discard & Switch'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Unsaved Changes',
+        message: 'Some changes in the current vault could not be saved.',
+        detail: 'Switching vaults will discard unsaved edits. Do you want to cancel the switch?',
       });
+      if (choice.response === 0) {
+        return null;
+      }
     }
 
-    // 2. Stop existing gateway & runtime
     await stopCurrentSession();
-
-    // 3. Start new session on selected vault
     currentSession = await startSessionForVault(selectedPath);
 
-    // 4. Save last opened vault
     saveDesktopConfig({
       ...loadDesktopConfig(),
       lastVaultPath: selectedPath,
     });
 
-    // 5. Notify renderer of switch
     const newBootstrap: DesktopBootstrapConfig = {
       gatewayUrl: currentSession.gateway.url,
       token: currentSession.token,
@@ -429,23 +635,31 @@ function registerIpcHandlers(): void {
     return newBootstrap;
   });
 
-  ipcMain.handle('desktop:get-info', async (): Promise<DesktopAppInfo> => {
+  ipcMain.handle('desktop:get-info', async (event): Promise<DesktopAppInfo> => {
+    if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
+    const buildSha = process.env.OPENOB_BUILD_SHA || 'dev';
+    const sourceClean =
+      process.env.OPENOB_SOURCE_CLEAN === 'true' || process.env.OPENOB_SOURCE_CLEAN === undefined;
     return {
       name: 'OpenOb',
       version: app.getVersion(),
+      buildSha,
+      sourceClean,
       platform: process.platform,
       storageStatus: currentSession?.storageStatus ?? 'unavailable',
     };
   });
 
-  ipcMain.handle('desktop:get-onboarding-state', async (): Promise<OnboardingState | null> => {
+  ipcMain.handle('desktop:get-onboarding-state', async (event): Promise<OnboardingState | null> => {
+    if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
     const config = loadDesktopConfig();
     return config.onboardingState ?? null;
   });
 
   ipcMain.handle(
     'desktop:set-onboarding-state',
-    async (_event, state: OnboardingState): Promise<void> => {
+    async (event, state: OnboardingState): Promise<void> => {
+      if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
       if (state && typeof state === 'object' && typeof state.version === 'number') {
         const config = loadDesktopConfig();
         saveDesktopConfig({
@@ -462,27 +676,69 @@ function registerIpcHandlers(): void {
       }
     }
   );
+
+  ipcMain.handle('desktop:get-plugin-states', async (event): Promise<Record<string, boolean>> => {
+    if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
+    const config = loadDesktopConfig();
+    return config.pluginStates || {};
+  });
+
+  ipcMain.handle(
+    'desktop:set-plugin-states',
+    async (event, states: Record<string, boolean>): Promise<void> => {
+      if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
+      if (!states || typeof states !== 'object' || Array.isArray(states)) {
+        throw new Error('Invalid plugin states payload');
+      }
+      const keys = Object.keys(states);
+      if (keys.length > 100) {
+        throw new Error('Plugin states payload exceeds limit');
+      }
+      const cleanStates: Record<string, boolean> = {};
+      for (const key of keys) {
+        if (typeof key === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(key)) {
+          cleanStates[key] = Boolean(states[key]);
+        }
+      }
+      const config = loadDesktopConfig();
+      saveDesktopConfig({
+        ...config,
+        pluginStates: cleanStates,
+      });
+    }
+  );
+
+  ipcMain.handle(
+    'desktop:flush-result',
+    async (event, result: DesktopFlushResult): Promise<void> => {
+      if (!validateIpcSender(event)) throw new Error('Unauthorized IPC sender');
+      if (result?.requestId && pendingFlushes.has(result.requestId)) {
+        const pending = pendingFlushes.get(result.requestId)!;
+        clearTimeout(pending.timeoutId);
+        pendingFlushes.delete(result.requestId);
+        pending.resolve(result);
+      }
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
-// 6. Application Startup & Shutdown (Sections 35, 36)
+// 9. Application Startup & Shutdown (Sections 35, 36)
 // ---------------------------------------------------------------------------
 void app.whenReady().then(async () => {
-  // Set explicit Windows Application User Model ID for taskbar grouping & icon
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.openob.app');
   }
 
+  setupApplicationMenu();
   registerIpcHandlers();
 
-  // 1. Determine initial vault directory
   const config = loadDesktopConfig();
   let initialVault = config.lastVaultPath;
   if (!initialVault || !fs.existsSync(initialVault)) {
     initialVault = path.join(app.getPath('documents'), 'OpenOb Vault');
   }
 
-  // 2. Start initial gateway session
   try {
     currentSession = await startSessionForVault(initialVault);
   } catch (err) {
@@ -495,14 +751,12 @@ void app.whenReady().then(async () => {
     return;
   }
 
-  // 3. Create browser window and load application
   mainWindow = await createMainWindow();
 
   const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    // Load through the embedded Gateway HTTP server
     await mainWindow.loadURL(currentSession.gateway.url);
   }
 
@@ -516,12 +770,10 @@ void app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', async (event) => {
-  if (!isQuitting) {
-    isQuitting = true;
+app.on('before-quit', (event) => {
+  if (!shutdownApproved) {
     event.preventDefault();
-    await stopCurrentSession();
-    app.quit();
+    void handleApplicationQuit();
   }
 });
 

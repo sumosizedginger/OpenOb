@@ -20,6 +20,7 @@
     "package:desktop": "npm run build:web && npm run build:desktop && npm run pack --workspace=apps/desktop",
     "pack:desktop": "npm run build:web && npm run build:desktop && npm run pack --workspace=apps/desktop",
     "dist:desktop": "npm run build:web && npm run build:desktop && npm run dist --workspace=apps/desktop",
+    "verify:desktop:release": "node scripts/verify-desktop-release.mjs",
     "test:desktop": "vitest run tests/integrity/desktop-embedded-gateway.test.ts tests/integrity/desktop-wrapper.test.ts",
     "gateway": "node apps/gateway/dist/bin/gateway.js",
     "openob": "node apps/gateway/dist/bin/cli.js",

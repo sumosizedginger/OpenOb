@@ -285,7 +285,22 @@ export class PluginHost {
             view.render(container);
             return { success: true };
           } catch (err: any) {
-            container.innerHTML = `<div class="plugin-view-error" style="color: #f87171; padding: 8px; font-size: 12px;">Plugin View Error: ${err?.message || 'Failed to render'}</div>`;
+            if (typeof document !== 'undefined') {
+              const errEl = document.createElement('div');
+              errEl.className = 'plugin-view-error';
+              errEl.style.color = '#f87171';
+              errEl.style.padding = '8px';
+              errEl.style.fontSize = '12px';
+              errEl.textContent = `Plugin View Error: ${err?.message || 'Failed to render'}`;
+              if (typeof container.replaceChildren === 'function') {
+                container.replaceChildren(errEl);
+              } else if (typeof container.appendChild === 'function') {
+                container.textContent = '';
+                container.appendChild(errEl);
+              }
+            } else if (container) {
+              container.textContent = `Plugin View Error: ${err?.message || 'Failed to render'}`;
+            }
             return { success: false, error: err?.message || 'Failed to render view' };
           }
         }
