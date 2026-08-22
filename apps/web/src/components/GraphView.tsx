@@ -29,14 +29,14 @@ interface SimEdge {
 
 // Harmonious palette for node groups
 const GROUP_COLORS = [
-  '#3b82f6', // blue
+  '#7c6dfa', // periwinkle
   '#10b981', // emerald
-  '#8b5cf6', // violet
+  '#38bdf8', // sky
   '#f59e0b', // amber
   '#ec4899', // pink
   '#06b6d4', // cyan
   '#f97316', // orange
-  '#6366f1', // indigo
+  '#8b5cf6', // violet
 ];
 
 export const GraphView: React.FC<GraphViewProps> = ({
@@ -88,7 +88,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return map;
   }, [graphData]);
 
-  // Load graph data when filters, active note, or refreshKey changes (P5-6)
+  // Load graph data
   useEffect(() => {
     let isMounted = true;
     const fetchGraph = async () => {
@@ -120,7 +120,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     maxDepth,
   ]);
 
-  // Handle ResizeObserver for crisp Retina / dynamic DPR canvas rendering (P5-5)
+  // Handle ResizeObserver for dynamic DPR canvas
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -160,7 +160,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const simNodes: SimNode[] = graphData.nodes.map((node) => {
       const existing = existingMap.get(node.id);
       const radius = node.isTagNode ? 5 : Math.min(18, Math.max(6, 4 + Math.sqrt(node.val) * 3));
-      const color = node.isTagNode ? '#a855f7' : groupColorMap.get(node.group) || '#3b82f6';
+      const color = node.isTagNode ? '#a855f7' : groupColorMap.get(node.group) || '#7c6dfa';
 
       return {
         ...node,
@@ -188,7 +188,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     simEdgesRef.current = simEdges;
   }, [graphData, groupColorMap]);
 
-  // Persistent Physics animation loop (P5-4: does NOT restart on hover!)
+  // Persistent Physics animation loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -297,15 +297,27 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
         if (edge.kind === 'embed') {
           ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = isHovered ? '#60a5fa' : isDimmed ? '#33415540' : '#475569';
+          ctx.strokeStyle = isHovered
+            ? '#7c6dfa'
+            : isDimmed
+              ? 'rgba(255,255,255,0.04)'
+              : 'rgba(255,255,255,0.12)';
           ctx.lineWidth = isHovered ? 2 : 1;
         } else if (edge.kind === 'tag') {
           ctx.setLineDash([2, 3]);
-          ctx.strokeStyle = isHovered ? '#c084fc' : isDimmed ? '#33415530' : '#64748b60';
+          ctx.strokeStyle = isHovered
+            ? '#a855f7'
+            : isDimmed
+              ? 'rgba(255,255,255,0.03)'
+              : 'rgba(255,255,255,0.08)';
           ctx.lineWidth = isHovered ? 1.5 : 0.8;
         } else {
           ctx.setLineDash([]);
-          ctx.strokeStyle = isHovered ? '#93c5fd' : isDimmed ? '#33415540' : '#47556980';
+          ctx.strokeStyle = isHovered
+            ? '#7c6dfa'
+            : isDimmed
+              ? 'rgba(255,255,255,0.04)'
+              : 'rgba(255,255,255,0.14)';
           ctx.lineWidth = isHovered ? 2 : 1.2;
         }
 
@@ -324,14 +336,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 
         if (isActive) {
-          ctx.fillStyle = '#38bdf8';
-          ctx.shadowColor = '#38bdf8';
+          ctx.fillStyle = '#7c6dfa';
+          ctx.shadowColor = '#7c6dfa';
           ctx.shadowBlur = 12;
         } else if (node.isTagNode) {
-          ctx.fillStyle = isDimmed ? '#a855f740' : '#a855f7';
+          ctx.fillStyle = isDimmed ? 'rgba(168, 85, 247, 0.2)' : '#a855f7';
           ctx.shadowBlur = 0;
         } else {
-          ctx.fillStyle = isDimmed ? `${node.color}40` : node.color;
+          ctx.fillStyle = isDimmed ? `${node.color}30` : node.color;
           ctx.shadowBlur = isHovered ? 10 : 0;
           ctx.shadowColor = node.color;
         }
@@ -349,8 +361,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
         const showLabel = scale > 0.8 || isHovered || isActive || node.val > 3;
         if (showLabel) {
           ctx.font =
-            isHovered || isActive ? 'bold 12px Inter, sans-serif' : '11px Inter, sans-serif';
-          ctx.fillStyle = isDimmed ? '#94a3b850' : '#f1f5f9';
+            isHovered || isActive
+              ? 'bold 12px var(--font-sans, sans-serif)'
+              : '11px var(--font-sans, sans-serif)';
+          ctx.fillStyle = isDimmed ? 'rgba(255,255,255,0.2)' : '#f0f2f5';
           ctx.textAlign = 'center';
           ctx.fillText(node.title, node.x, node.y + node.radius + 14);
         }
@@ -367,7 +381,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     };
   }, [activeNotePath, isLocal]);
 
-  // Coordinate helper: Canvas screen coords -> graph world coords (P5-5)
+  // Coordinate helper
   const screenToWorld = (screenX: number, screenY: number) => {
     const { x: panX, y: panY, scale } = transformRef.current;
     return {
@@ -376,7 +390,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     };
   };
 
-  // Canvas Mouse Interactions (Pan, Zoom, Drag, Hover, Click)
+  // Mouse Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -428,7 +442,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
       return;
     }
 
-    // Hover detection without restarting simulation loop (P5-4)
     const hitNode = simNodesRef.current.find((n) => {
       const dx = n.x - world.x;
       const dy = n.y - world.y;
@@ -447,7 +460,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
   };
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Suppress click navigation if user was dragging (P5-7)
     if (dragDistanceRef.current > 5) {
       return;
     }
@@ -496,61 +508,99 @@ export const GraphView: React.FC<GraphViewProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden select-none border border-slate-800/80 rounded-lg"
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: 'var(--surface-canvas)',
+        color: 'var(--text-primary)',
+        overflow: 'hidden',
+        userSelect: 'none',
+      }}
     >
       {/* Top Controls Bar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-10">
-        <div className="flex items-center gap-2">
-          <Share2 className="w-4 h-4 text-sky-400" />
-          <span className="text-xs font-semibold tracking-wide text-slate-200">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          backgroundColor: 'var(--surface-sidebar)',
+          borderBottom: '1px solid var(--border-subtle)',
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Share2 size={14} style={{ color: 'var(--accent-primary)' }} />
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
             {localMode ? 'Local Graph' : 'Interactive Graph'}
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+          <span
+            style={{
+              fontSize: '10px',
+              padding: '1px 6px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--surface-canvas)',
+              color: 'var(--text-muted)',
+            }}
+          >
             {graphData.nodes.length} nodes · {graphData.edges.length} edges
           </span>
         </div>
 
         {/* Filter & Options */}
-        <div className="flex items-center gap-1.5">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-slate-500" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ position: 'relative' }}>
+            <Search
+              size={12}
+              style={{ position: 'absolute', left: '8px', top: '7px', color: 'var(--text-muted)' }}
+            />
             <input
               type="text"
               placeholder="Search graph..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-7 pr-2 py-1 text-xs bg-slate-950 border border-slate-800 rounded text-slate-200 focus:outline-none focus:border-sky-500 w-32 focus:w-44 transition-all"
+              style={{
+                paddingLeft: '24px',
+                paddingRight: '8px',
+                paddingTop: '3px',
+                paddingBottom: '3px',
+                fontSize: '11px',
+                backgroundColor: 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+                outline: 'none',
+                width: '110px',
+              }}
             />
           </div>
 
           <button
             onClick={() => setIncludeTags(!includeTags)}
-            className={`p-1.5 rounded text-xs flex items-center gap-1 border transition-colors ${
-              includeTags
-                ? 'bg-purple-950/60 border-purple-600/60 text-purple-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
+            className={`btn-icon ${includeTags ? 'active' : ''}`}
+            style={{ width: '24px', height: '24px' }}
             title="Toggle Tag Nodes"
           >
-            <Tag className="w-3.5 h-3.5" />
+            <Tag size={12} />
           </button>
 
           <button
             onClick={() => setHideOrphans(!hideOrphans)}
-            className={`p-1.5 rounded text-xs flex items-center gap-1 border transition-colors ${
-              hideOrphans
-                ? 'bg-sky-950/60 border-sky-600/60 text-sky-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
+            className={`btn-icon ${hideOrphans ? 'active' : ''}`}
+            style={{ width: '24px', height: '24px' }}
             title="Hide Unconnected Notes"
           >
-            <Filter className="w-3.5 h-3.5" />
+            <Filter size={12} />
           </button>
 
           {isLocal && (
             <button
               onClick={() => setMaxDepth(maxDepth === 1 ? 2 : 1)}
-              className="px-2 py-1 rounded text-xs bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
+              className="btn btn-ghost"
+              style={{ padding: '2px 6px', fontSize: '11px' }}
               title="Graph Depth Radius"
             >
               Depth {maxDepth}
@@ -560,16 +610,17 @@ export const GraphView: React.FC<GraphViewProps> = ({
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              className="btn-icon"
+              style={{ width: '24px', height: '24px' }}
             >
-              <X className="w-4 h-4" />
+              <X size={13} />
             </button>
           )}
         </div>
       </div>
 
       {/* Main Canvas Area */}
-      <div className="relative flex-1 w-full h-full">
+      <div style={{ position: 'relative', flex: 1, width: '100%', height: '100%' }}>
         <canvas
           ref={canvasRef}
           onMouseDown={handleMouseDown}
@@ -577,61 +628,133 @@ export const GraphView: React.FC<GraphViewProps> = ({
           onMouseUp={handleMouseUp}
           onClick={handleClick}
           onWheel={handleWheel}
-          className="w-full h-full cursor-grab active:cursor-grabbing block"
+          style={{ width: '100%', height: '100%', cursor: 'grab', display: 'block' }}
         />
 
         {/* Zoom Controls Overlay */}
-        <div className="absolute bottom-3 right-3 flex flex-col gap-1 bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded p-1 shadow-lg z-10">
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            right: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            backgroundColor: 'var(--surface-elevated)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            padding: '2px',
+            boxShadow: 'var(--shadow-md)',
+            zIndex: 10,
+          }}
+        >
           <button
             onClick={() => {
               transformRef.current.scale = Math.min(3, transformRef.current.scale * 1.2);
             }}
-            className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded"
+            className="btn-icon"
+            style={{ width: '24px', height: '24px' }}
             title="Zoom In"
           >
-            <ZoomIn className="w-4 h-4" />
+            <ZoomIn size={13} />
           </button>
           <button
             onClick={() => {
               transformRef.current.scale = Math.max(0.2, transformRef.current.scale * 0.8);
             }}
-            className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded"
+            className="btn-icon"
+            style={{ width: '24px', height: '24px' }}
             title="Zoom Out"
           >
-            <ZoomOut className="w-4 h-4" />
+            <ZoomOut size={13} />
           </button>
           <button
             onClick={resetView}
-            className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded"
+            className="btn-icon"
+            style={{ width: '24px', height: '24px' }}
             title="Reset View"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Maximize2 size={13} />
           </button>
         </div>
 
         {/* Tooltip Overlay */}
         {tooltipNode && (
-          <div className="absolute top-3 left-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg p-2.5 shadow-xl text-xs z-10 max-w-xs animate-in fade-in duration-150">
-            <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+          <div
+            style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              backgroundColor: 'var(--surface-elevated)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '8px 12px',
+              boxShadow: 'var(--shadow-lg)',
+              fontSize: '12px',
+              zIndex: 10,
+              maxWidth: '260px',
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
               {tooltipNode.isTagNode ? (
-                <Tag className="w-3.5 h-3.5 text-purple-400" />
+                <Tag size={13} style={{ color: '#a855f7' }} />
               ) : (
-                <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                <Sparkles size={13} style={{ color: 'var(--accent-primary)' }} />
               )}
-              {tooltipNode.title}
+              <span>{tooltipNode.title}</span>
             </div>
             {!tooltipNode.isTagNode && (
-              <div className="text-[11px] text-slate-400 truncate mt-0.5">{tooltipNode.path}</div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-mono)',
+                  marginTop: '2px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tooltipNode.path}
+              </div>
             )}
-            <div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-slate-800 text-[10px] text-slate-400">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginTop: '6px',
+                paddingTop: '6px',
+                borderTop: '1px solid var(--border-subtle)',
+                fontSize: '10px',
+                color: 'var(--text-muted)',
+              }}
+            >
               <span>{tooltipNode.val} connections</span>
               {!tooltipNode.isTagNode && tooltipNode.group !== 'root' && (
-                <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                <span
+                  style={{
+                    padding: '1px 5px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--surface-sidebar)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
                   {tooltipNode.group}
                 </span>
               )}
               {tooltipNode.tags.length > 0 && !tooltipNode.isTagNode && (
-                <span className="text-purple-400">#{tooltipNode.tags.join(' #')}</span>
+                <span style={{ color: 'var(--accent-primary)' }}>
+                  #{tooltipNode.tags.join(' #')}
+                </span>
               )}
             </div>
           </div>

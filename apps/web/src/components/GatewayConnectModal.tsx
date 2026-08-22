@@ -62,194 +62,160 @@ export const GatewayConnectModal: React.FC<GatewayConnectModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content gateway-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-dialog gateway-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div
-            className="modal-title"
-            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-          >
-            <Server size={18} color="var(--accent-primary)" />
+          <div className="modal-title">
+            <Server size={16} style={{ color: 'var(--accent-primary)' }} />
             <span>Connect to OpenOb Gateway</span>
           </div>
           <button className="btn-icon" onClick={onClose}>
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="modal-body">
-          <p
-            className="modal-description"
-            style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}
-          >
-            Connect to a running local OpenOb Gateway. In Gateway Mode, the browser acts as a pure
-            REST client with zero direct disk writes, sharing authoritative concurrency control with
-            external agents and tools.
-          </p>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body">
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+              Connect to a running local OpenOb Gateway. In Gateway Mode, the app acts as a pure
+              REST client with zero direct disk writes, sharing authoritative concurrency control
+              with external agents and tools.
+            </p>
 
-          {errorMsg && (
-            <div
-              className="error-alert"
-              style={{
-                background: 'rgba(239, 68, 68, 0.12)',
-                color: '#ef4444',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginBottom: '16px',
-              }}
-            >
-              <AlertCircle size={16} />
-              <span>{errorMsg}</span>
+            {errorMsg && (
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: 'var(--status-danger)',
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '14px',
+                }}
+              >
+                <AlertCircle size={15} />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {isConnected && (
+              <div
+                style={{
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  color: 'var(--status-success)',
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '14px',
+                }}
+              >
+                <CheckCircle2 size={15} />
+                <span>Currently connected to {currentUrl}</span>
+              </div>
+            )}
+
+            <div style={{ marginBottom: '12px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
+                Gateway URL
+              </label>
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="http://127.0.0.1:4200"
+                style={{
+                  width: '100%',
+                  padding: '7px 10px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-sans)',
+                  fontSize: '13px',
+                  outline: 'none',
+                }}
+                required
+              />
             </div>
-          )}
 
-          {isConnected && (
-            <div
-              className="success-alert"
-              style={{
-                background: 'rgba(16, 185, 129, 0.12)',
-                color: '#10b981',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginBottom: '16px',
-              }}
-            >
-              <CheckCircle2 size={16} />
-              <span>Currently connected to {currentUrl}</span>
+            <div style={{ marginBottom: '16px' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
+                <Key size={12} />
+                Gateway Token (Optional)
+              </label>
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Enter authorization token"
+                style={{
+                  width: '100%',
+                  padding: '7px 10px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-sans)',
+                  fontSize: '13px',
+                  outline: 'none',
+                }}
+              />
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  marginTop: '4px',
+                  display: 'block',
+                }}
+              >
+                Tokens are kept only in session memory and never leaked into file storage or URLs.
+              </span>
             </div>
-          )}
-
-          <div className="form-group" style={{ marginBottom: '14px' }}>
-            <label
-              style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}
-            >
-              Gateway URL
-            </label>
-            <input
-              type="text"
-              className="form-input"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://127.0.0.1:4200"
-              style={{
-                width: '100%',
-                padding: '8px 10px',
-                borderRadius: '4px',
-                border: '1px solid var(--border-color)',
-                background: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-              }}
-              required
-            />
           </div>
 
-          <div className="form-group" style={{ marginBottom: '20px' }}>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '12px',
-                fontWeight: 600,
-                marginBottom: '6px',
-              }}
-            >
-              <Key size={12} />
-              Gateway Token (Optional / If Required)
-            </label>
-            <input
-              type="password"
-              className="form-input"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter authorization bearer token"
-              style={{
-                width: '100%',
-                padding: '8px 10px',
-                borderRadius: '4px',
-                border: '1px solid var(--border-color)',
-                background: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-              }}
-            />
-            <span
-              style={{
-                fontSize: '11px',
-                color: 'var(--text-tertiary)',
-                marginTop: '4px',
-                display: 'block',
-              }}
-            >
-              Tokens are stored only in session memory and never persisted to permanent local
-              storage or rendered in URLs.
-            </span>
-          </div>
-
-          <div
-            className="modal-actions"
-            style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}
-          >
+          <div className="modal-footer">
             {isConnected && onDisconnect && (
               <button
                 type="button"
-                className="btn-secondary btn-disconnect"
+                className="btn btn-disconnect"
                 onClick={async () => {
                   const res = await onDisconnect();
                   if (res && res.cancelled) return;
                   onClose();
                 }}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--border-color)',
-                  background: 'transparent',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  marginRight: 'auto',
-                }}
+                style={{ marginRight: 'auto' }}
               >
                 Switch to Local Mode
               </button>
             )}
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onClose}
-              style={{
-                padding: '8px 14px',
-                borderRadius: '4px',
-                border: '1px solid var(--border-color)',
-                background: 'transparent',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-            >
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isLoading || !url.trim()}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '4px',
-                border: 'none',
-                background: 'var(--accent-primary)',
-                color: '#fff',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              {isLoading && <RefreshCw size={14} className="spin" />}
+            <button type="submit" className="btn btn-primary" disabled={isLoading || !url.trim()}>
+              {isLoading && <RefreshCw size={13} className="spin" />}
               <span>{isLoading ? 'Connecting...' : isConnected ? 'Reconnect' : 'Connect'}</span>
             </button>
           </div>

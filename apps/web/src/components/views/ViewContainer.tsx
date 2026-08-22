@@ -92,13 +92,11 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
       const views = await backend.listSavedViews();
       setSavedViews(views);
 
-      // Check if current active view was remotely updated or deleted
       if (activeSavedViewId) {
         const found = views.find((v) => v.view.id === activeSavedViewId);
         if (!found) {
           setIsDeletedRemotely(true);
         } else if (activeSavedViewVersion && found.version.token !== activeSavedViewVersion.token) {
-          // View updated remotely
           setActiveSavedViewVersion(found.version);
         }
       }
@@ -107,7 +105,7 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
     }
   }, [backend, activeSavedViewId, activeSavedViewVersion]);
 
-  // Discover properties & load saved views on mount / refreshKey
+  // Discover properties & load saved views
   useEffect(() => {
     let isMounted = true;
     const init = async () => {
@@ -377,20 +375,52 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
   const endRow = Math.min((page + 1) * PAGE_SIZE, queryResult.total);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden select-none">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: 'var(--surface-canvas)',
+        color: 'var(--text-primary)',
+        overflow: 'hidden',
+        userSelect: 'none',
+      }}
+    >
       {/* Degraded Index Warning Banner */}
       {queryResult.indexStatus === 'degraded' && (
-        <div className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 text-amber-200 text-xs flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+        <div
+          style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.12)',
+            borderBottom: '1px solid rgba(245, 158, 11, 0.25)',
+            padding: '6px 16px',
+            color: 'var(--status-warning)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
           <span>Derived index is currently degraded. Query results may be partial or stale.</span>
         </div>
       )}
 
       {/* External Deletion Notification Banner */}
       {isDeletedRemotely && (
-        <div className="bg-red-950/80 border-b border-red-800/80 px-4 py-2 text-red-200 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+        <div
+          style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+            padding: '6px 16px',
+            color: 'var(--status-danger)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} />
             <span>
               This saved view ("{activeSavedViewName}") was deleted externally. Your current query
               is preserved.
@@ -402,7 +432,8 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
               setSaveAsNewMode(true);
               setShowSaveModal(true);
             }}
-            className="px-2.5 py-1 bg-red-900/80 hover:bg-red-800 border border-red-700 text-white rounded text-xs"
+            className="btn btn-primary"
+            style={{ padding: '2px 8px', fontSize: '11px' }}
           >
             Save As New
           </button>
@@ -411,12 +442,23 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Conflict Warning Banner */}
       {conflictError && (
-        <div className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 text-amber-200 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+        <div
+          style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.12)',
+            borderBottom: '1px solid rgba(245, 158, 11, 0.25)',
+            padding: '6px 16px',
+            color: 'var(--status-warning)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} />
             <span>{conflictError}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button
               onClick={async () => {
                 await fetchSavedViews();
@@ -425,7 +467,8 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                   if (remote) handleLoadSavedView(remote);
                 }
               }}
-              className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs"
+              className="btn"
+              style={{ padding: '2px 8px', fontSize: '11px' }}
             >
               Reload Remote
             </button>
@@ -435,7 +478,8 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                 setSaveAsNewMode(true);
                 setShowSaveModal(true);
               }}
-              className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-medium"
+              className="btn btn-primary"
+              style={{ padding: '2px 8px', fontSize: '11px' }}
             >
               Save As New
             </button>
@@ -444,12 +488,34 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
       )}
 
       {/* Top Controls Bar */}
-      <div className="border-b border-slate-800/80 p-3 bg-slate-900/40 flex flex-wrap items-center justify-between gap-3">
+      <div
+        style={{
+          borderBottom: '1px solid var(--border-subtle)',
+          padding: '8px 14px',
+          backgroundColor: 'var(--surface-sidebar)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}
+      >
         {/* Left: Saved Views Picker & View Type Switcher */}
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* Saved Views Dropdown */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs">
-            <Bookmark className="w-3.5 h-3.5 text-sky-400" />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: 'var(--surface-canvas)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              padding: '3px 8px',
+              fontSize: '12px',
+            }}
+          >
+            <Bookmark size={13} style={{ color: 'var(--accent-primary)' }} />
             <select
               value={activeSavedViewId || ''}
               onChange={(e) => {
@@ -461,13 +527,24 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                   if (found) handleLoadSavedView(found);
                 }
               }}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer max-w-[140px] truncate"
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '12px',
+                outline: 'none',
+                maxWidth: '140px',
+              }}
             >
-              <option value="" className="bg-slate-900 text-slate-400">
+              <option value="" style={{ backgroundColor: 'var(--surface-elevated)' }}>
                 {activeSavedViewId ? 'Ephemeral View' : 'Select Saved View...'}
               </option>
               {savedViews.map((sv) => (
-                <option key={sv.view.id} value={sv.view.id} className="bg-slate-900 text-slate-200">
+                <option
+                  key={sv.view.id}
+                  value={sv.view.id}
+                  style={{ backgroundColor: 'var(--surface-elevated)' }}
+                >
                   {sv.view.name} ({sv.view.type})
                 </option>
               ))}
@@ -475,57 +552,63 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
           </div>
 
           {/* View Type Switcher (Table / List / Board) */}
-          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+          <div className="view-mode-group">
             <button
               onClick={() => setViewType('table')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                viewType === 'table'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`view-mode-btn ${viewType === 'table' ? 'active' : ''}`}
               title="Table View"
             >
-              <TableIcon className="w-3.5 h-3.5" />
+              <TableIcon size={13} />
               <span>Table</span>
             </button>
             <button
               onClick={() => setViewType('list')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                viewType === 'list'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`view-mode-btn ${viewType === 'list' ? 'active' : ''}`}
               title="List View"
             >
-              <ListIcon className="w-3.5 h-3.5" />
+              <ListIcon size={13} />
               <span>List</span>
             </button>
             <button
               onClick={() => setViewType('board')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                viewType === 'board'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`view-mode-btn ${viewType === 'board' ? 'active' : ''}`}
               title="Board View"
             >
-              <BoardIcon className="w-3.5 h-3.5" />
+              <BoardIcon size={13} />
               <span>Board</span>
             </button>
           </div>
 
           {/* Group By selector (only in Board mode) */}
           {viewType === 'board' && (
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300">
-              <Layers className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-slate-500 text-[11px]">Group by:</span>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                backgroundColor: 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '3px 8px',
+                fontSize: '12px',
+              }}
+            >
+              <Layers size={13} style={{ color: 'var(--accent-primary)' }} />
+              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Group by:</span>
               <input
                 type="text"
                 list="board-groupby-props"
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value)}
                 placeholder="status..."
-                className="bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none w-20"
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: '12px',
+                  width: '70px',
+                  outline: 'none',
+                }}
               />
               <datalist id="board-groupby-props">
                 <option value="status" />
@@ -540,8 +623,19 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
           )}
 
           {/* Folder Scope Input */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300">
-            <Folder className="w-3.5 h-3.5 text-slate-500" />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              backgroundColor: 'var(--surface-canvas)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              padding: '3px 8px',
+              fontSize: '12px',
+            }}
+          >
+            <Folder size={13} style={{ color: 'var(--text-muted)' }} />
             <input
               type="text"
               placeholder="Scope folder..."
@@ -550,7 +644,14 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                 setFolderScope(e.target.value);
                 setPage(0);
               }}
-              className="bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none w-28 sm:w-36"
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '12px',
+                width: '110px',
+                outline: 'none',
+              }}
             />
             {folderScope && (
               <button
@@ -558,23 +659,25 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                   setFolderScope('');
                   setPage(0);
                 }}
-                className="text-slate-500 hover:text-slate-300"
+                className="btn-icon"
+                style={{ width: '16px', height: '16px' }}
               >
-                <X className="w-3 h-3" />
+                <X size={11} />
               </button>
             )}
           </div>
         </div>
 
         {/* Right: Actions, Filters, Columns, and Save buttons */}
-        <div className="flex items-center gap-2">
-          {/* Columns Selector (Table & Board) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Columns Selector */}
           {viewType !== 'list' && (
             <button
               onClick={() => setShowColumnModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-lg transition-colors"
+              className="btn btn-ghost"
+              style={{ fontSize: '12px', padding: '4px 8px' }}
             >
-              <Columns className="w-3.5 h-3.5 text-sky-400" />
+              <Columns size={13} style={{ color: 'var(--accent-primary)' }} />
               <span>Columns ({selectedColumns.length})</span>
             </button>
           )}
@@ -582,25 +685,33 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
           {/* Filter Button */}
           <button
             onClick={() => setShowFilterModal(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-colors ${
-              filters.length > 0
-                ? 'bg-sky-950/60 border-sky-600/80 text-sky-300'
-                : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300'
-            }`}
+            className={`btn ${filters.length > 0 ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '12px', padding: '4px 8px' }}
           >
-            <Filter className="w-3.5 h-3.5 text-sky-400" />
+            <Filter size={13} />
             <span>Filter {filters.length > 0 && `(${filters.length})`}</span>
           </button>
 
           {/* Saved View Operations Buttons */}
           {activeSavedViewId && !isDeletedRemotely ? (
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                backgroundColor: 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '2px',
+              }}
+            >
               <button
                 onClick={handleQuickUpdate}
                 title="Update Saved View"
-                className="flex items-center gap-1 px-2 py-0.5 text-xs text-sky-400 hover:text-sky-300 hover:bg-slate-800 rounded"
+                className="btn btn-ghost"
+                style={{ padding: '2px 6px', fontSize: '11px', color: 'var(--accent-primary)' }}
               >
-                <Save className="w-3 h-3" />
+                <Save size={11} />
                 <span>Save</span>
               </button>
               <button
@@ -609,16 +720,18 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                   setShowRenameModal(true);
                 }}
                 title="Rename Saved View"
-                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
+                className="btn-icon"
+                style={{ width: '20px', height: '20px' }}
               >
-                <Edit2 className="w-3 h-3" />
+                <Edit2 size={11} />
               </button>
               <button
                 onClick={() => setShowDeleteModal(true)}
                 title="Delete Saved View"
-                className="p-1 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded"
+                className="btn-icon"
+                style={{ width: '20px', height: '20px', color: 'var(--status-danger)' }}
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 size={11} />
               </button>
               <button
                 onClick={() => {
@@ -626,10 +739,10 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                   setSaveAsNewMode(true);
                   setShowSaveModal(true);
                 }}
-                title="Save As New View"
-                className="px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded border-l border-slate-800"
+                className="btn btn-ghost"
+                style={{ padding: '2px 6px', fontSize: '10px' }}
               >
-                Save As New
+                Copy
               </button>
             </div>
           ) : (
@@ -639,9 +752,10 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                 setSaveAsNewMode(false);
                 setShowSaveModal(true);
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-sky-600 hover:bg-sky-500 text-white font-medium rounded-lg shadow-sm transition-colors"
+              className="btn btn-primary"
+              style={{ fontSize: '12px', padding: '4px 10px' }}
             >
-              <Bookmark className="w-3.5 h-3.5" />
+              <Bookmark size={12} />
               <span>Save View</span>
             </button>
           )}
@@ -650,23 +764,46 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Active Filters Pill Bar */}
       {filters.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/20 border-b border-slate-800/60 text-xs">
-          <span className="text-slate-500 text-[11px]">Filters:</span>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 14px',
+            backgroundColor: 'var(--surface-sidebar)',
+            borderBottom: '1px solid var(--border-subtle)',
+            fontSize: '11px',
+          }}
+        >
+          <span style={{ color: 'var(--text-muted)' }}>Filters:</span>
           {filters.map((f, idx) => (
             <span
               key={idx}
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60 text-xs"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-primary)',
+              }}
             >
-              <span className="font-semibold text-slate-200">{f.field}</span>
-              <span className="text-slate-400 text-[11px]">{f.operator}</span>
+              <span style={{ fontWeight: 600 }}>{f.field}</span>
+              <span style={{ color: 'var(--text-muted)' }}>{f.operator}</span>
               {f.value !== undefined && (
-                <span className="text-sky-300 font-mono text-[11px]">{String(f.value)}</span>
+                <span style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+                  {String(f.value)}
+                </span>
               )}
               <button
                 onClick={() => handleRemoveFilter(idx)}
-                className="hover:text-red-400 transition-colors ml-0.5"
+                className="btn-icon"
+                style={{ width: '14px', height: '14px' }}
               >
-                <X className="w-3 h-3" />
+                <X size={10} />
               </button>
             </span>
           ))}
@@ -675,7 +812,8 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
               setFilters([]);
               setPage(0);
             }}
-            className="text-[11px] text-slate-500 hover:text-slate-300 underline ml-1"
+            className="btn-ghost"
+            style={{ fontSize: '11px', textDecoration: 'underline', padding: '0 4px' }}
           >
             Clear all
           </button>
@@ -684,17 +822,41 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Error state */}
       {error && (
-        <div className="bg-red-950/80 border-b border-red-800/80 px-4 py-2 text-red-200 text-xs flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+        <div
+          style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+            padding: '6px 16px',
+            color: 'var(--status-danger)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
           <span>Error: {error}</span>
         </div>
       )}
 
       {/* Main View Area */}
-      <div className="flex-1 overflow-hidden relative">
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {loading && (
-          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px] flex items-center justify-center z-20">
-            <span className="text-xs text-sky-400 font-medium animate-pulse">Running query...</span>
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(13, 15, 18, 0.5)',
+              backdropFilter: 'blur(2px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 20,
+            }}
+          >
+            <span style={{ fontSize: '12px', color: 'var(--accent-primary)', fontWeight: 500 }}>
+              Running query...
+            </span>
           </div>
         )}
 
@@ -738,21 +900,33 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
         )}
       </div>
 
-      {/* Bottom Pagination Bar (Only for Table and List) */}
+      {/* Bottom Pagination Bar */}
       {viewType !== 'board' && (
-        <div className="border-t border-slate-800/80 px-4 py-2 bg-slate-900/40 flex items-center justify-between text-xs text-slate-400">
+        <div
+          style={{
+            borderTop: '1px solid var(--border-subtle)',
+            padding: '6px 14px',
+            backgroundColor: 'var(--surface-sidebar)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+          }}
+        >
           <div>
             Showing {startRow}-{endRow} of {queryResult.total} notes
           </div>
 
-          <div className="flex items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button
               disabled={page === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition-colors"
+              className="btn"
+              style={{ padding: '2px 4px', height: '22px' }}
               title="Previous page"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft size={13} />
             </button>
             <span>
               Page {page + 1} of {totalPages}
@@ -760,10 +934,11 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
             <button
               disabled={page + 1 >= totalPages}
               onClick={() => setPage((p) => p + 1)}
-              className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition-colors"
+              className="btn"
+              style={{ padding: '2px 4px', height: '22px' }}
               title="Next page"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight size={13} />
             </button>
           </div>
         </div>
@@ -771,86 +946,140 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Filter Modal */}
       {showFilterModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Filter className="w-4 h-4 text-sky-400" />
-                Add Filter
-              </h3>
-              <button
-                onClick={() => setShowFilterModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="modal-overlay" onClick={() => setShowFilterModal(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '420px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title">
+                <Filter size={15} style={{ color: 'var(--accent-primary)' }} />
+                <span>Add Property Filter</span>
+              </div>
+              <button className="btn-icon" onClick={() => setShowFilterModal(false)}>
+                <X size={14} />
               </button>
             </div>
 
-            <form onSubmit={handleAddFilter} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">Property Field</label>
-                <input
-                  type="text"
-                  list="available-properties"
-                  value={newFilterField}
-                  onChange={(e) => setNewFilterField(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-sky-500"
-                  placeholder="e.g. status, priority, title..."
-                  required
-                />
-                <datalist id="available-properties">
-                  <option value="title" />
-                  <option value="path" />
-                  <option value="tags" />
-                  {availableProps.map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Operator</label>
-                <select
-                  value={newFilterOp}
-                  onChange={(e) => setNewFilterOp(e.target.value as any)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-sky-500"
-                >
-                  <option value="equals">equals</option>
-                  <option value="not_equals">not equals</option>
-                  <option value="contains">contains</option>
-                  <option value="not_contains">not contains</option>
-                  <option value="greater_than">greater than (&gt;)</option>
-                  <option value="less_than">less than (&lt;)</option>
-                  <option value="is_empty">is empty</option>
-                  <option value="is_not_empty">is not empty</option>
-                </select>
-              </div>
-
-              {newFilterOp !== 'is_empty' && newFilterOp !== 'is_not_empty' && (
+            <form onSubmit={handleAddFilter}>
+              <div
+                className="modal-body"
+                style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+              >
                 <div>
-                  <label className="block text-slate-400 mb-1">Target Value</label>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Property Field
+                  </label>
                   <input
                     type="text"
-                    value={newFilterVal}
-                    onChange={(e) => setNewFilterVal(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-sky-500"
-                    placeholder="Value to match..."
+                    list="available-properties"
+                    value={newFilterField}
+                    onChange={(e) => setNewFilterField(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--surface-canvas)',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                    }}
+                    placeholder="e.g. status, priority, title..."
+                    required
                   />
+                  <datalist id="available-properties">
+                    <option value="title" />
+                    <option value="path" />
+                    <option value="tags" />
+                    {availableProps.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
                 </div>
-              )}
 
-              <div className="flex justify-end gap-2 pt-2">
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Operator
+                  </label>
+                  <select
+                    value={newFilterOp}
+                    onChange={(e) => setNewFilterOp(e.target.value as any)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--surface-canvas)',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="equals">equals</option>
+                    <option value="not_equals">not equals</option>
+                    <option value="contains">contains</option>
+                    <option value="not_contains">not contains</option>
+                    <option value="greater_than">greater than (&gt;)</option>
+                    <option value="less_than">less than (&lt;)</option>
+                    <option value="is_empty">is empty</option>
+                    <option value="is_not_empty">is not empty</option>
+                  </select>
+                </div>
+
+                {newFilterOp !== 'is_empty' && newFilterOp !== 'is_not_empty' && (
+                  <div>
+                    <label
+                      style={{
+                        display: 'block',
+                        fontSize: '11px',
+                        color: 'var(--text-muted)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      Target Value
+                    </label>
+                    <input
+                      type="text"
+                      value={newFilterVal}
+                      onChange={(e) => setNewFilterVal(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border-subtle)',
+                        backgroundColor: 'var(--surface-canvas)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
+                      placeholder="Value to match..."
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer">
                 <button
                   type="button"
                   onClick={() => setShowFilterModal(false)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  className="btn btn-ghost"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium shadow-sm"
-                >
+                <button type="submit" className="btn btn-primary">
                   Add Filter
                 </button>
               </div>
@@ -861,28 +1090,46 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Columns Modal */}
       {showColumnModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Columns className="w-4 h-4 text-sky-400" />
-                Select Visible Columns
-              </h3>
-              <button
-                onClick={() => setShowColumnModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="modal-overlay" onClick={() => setShowColumnModal(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '420px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title">
+                <Columns size={15} style={{ color: 'var(--accent-primary)' }} />
+                <span>Select Visible Columns</span>
+              </div>
+              <button className="btn-icon" onClick={() => setShowColumnModal(false)}>
+                <X size={14} />
               </button>
             </div>
 
-            <div className="space-y-2 max-h-60 overflow-y-auto mb-4 text-xs">
+            <div
+              className="modal-body"
+              style={{
+                maxHeight: '240px',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
               {availableProps.map((prop) => {
                 const isSelected = selectedColumns.includes(prop);
                 return (
                   <label
                     key={prop}
-                    className="flex items-center gap-2 p-1.5 hover:bg-slate-800 rounded cursor-pointer"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: isSelected ? 'var(--surface-selected)' : 'transparent',
+                      cursor: 'pointer',
+                    }}
                   >
                     <input
                       type="checkbox"
@@ -894,24 +1141,30 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
                           setSelectedColumns((prev) => prev.filter((p) => p !== prop));
                         }
                       }}
-                      className="rounded border-slate-700 bg-slate-950 text-sky-500"
+                      style={{ accentColor: 'var(--accent-primary)' }}
                     />
-                    <span className="capitalize text-slate-200">{prop}</span>
+                    <span style={{ textTransform: 'capitalize', color: 'var(--text-primary)' }}>
+                      {prop}
+                    </span>
                   </label>
                 );
               })}
               {availableProps.length === 0 && (
-                <div className="text-slate-500 py-4 text-center italic">
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '16px 0',
+                    color: 'var(--text-muted)',
+                    fontStyle: 'italic',
+                  }}
+                >
                   No frontmatter properties discovered yet in vault
                 </div>
               )}
             </div>
 
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowColumnModal(false)}
-                className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs shadow-sm"
-              >
+            <div className="modal-footer">
+              <button onClick={() => setShowColumnModal(false)} className="btn btn-primary">
                 Done
               </button>
             </div>
@@ -919,69 +1172,118 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
         </div>
       )}
 
-      {/* Save View Modal (Create / Save As New) */}
+      {/* Save View Modal */}
       {showSaveModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Bookmark className="w-4 h-4 text-sky-400" />
-                {saveAsNewMode ? 'Save As New View' : 'Save View'}
-              </h3>
-              <button
-                onClick={() => setShowSaveModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '420px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title">
+                <Bookmark size={15} style={{ color: 'var(--accent-primary)' }} />
+                <span>{saveAsNewMode ? 'Save As New View' : 'Save View'}</span>
+              </div>
+              <button className="btn-icon" onClick={() => setShowSaveModal(false)}>
+                <X size={14} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveViewSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">View Name</label>
-                <input
-                  type="text"
-                  value={modalViewName}
-                  onChange={(e) => setModalViewName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-sky-500"
-                  placeholder="e.g. Active Tasks, High Priority..."
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="text-slate-400 text-[11px] bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 space-y-1">
+            <form onSubmit={handleSaveViewSubmit}>
+              <div
+                className="modal-body"
+                style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+              >
                 <div>
-                  Type: <span className="font-semibold text-slate-200 capitalize">{viewType}</span>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    View Name
+                  </label>
+                  <input
+                    type="text"
+                    value={modalViewName}
+                    onChange={(e) => setModalViewName(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--surface-canvas)',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                    }}
+                    placeholder="e.g. Active Tasks, High Priority..."
+                    required
+                    autoFocus
+                  />
                 </div>
-                {viewType === 'board' && (
+
+                <div
+                  style={{
+                    fontSize: '11px',
+                    color: 'var(--text-secondary)',
+                    backgroundColor: 'var(--surface-canvas)',
+                    padding: '8px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                  }}
+                >
                   <div>
-                    Group by: <span className="font-mono text-sky-300">{groupBy}</span>
+                    Type:{' '}
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        color: 'var(--text-primary)',
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {viewType}
+                    </span>
                   </div>
-                )}
-                <div>
-                  Filters: <span className="font-mono text-slate-200">{filters.length} active</span>
-                </div>
-                <div>
-                  Sorts:{' '}
-                  <span className="font-mono text-slate-200">
-                    {sorts.map((s) => `${s.field}:${s.direction}`).join(', ')}
-                  </span>
+                  {viewType === 'board' && (
+                    <div>
+                      Group by:{' '}
+                      <span
+                        style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-primary)' }}
+                      >
+                        {groupBy}
+                      </span>
+                    </div>
+                  )}
+                  <div>
+                    Filters:{' '}
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                      {filters.length} active
+                    </span>
+                  </div>
+                  <div>
+                    Sorts:{' '}
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                      {sorts.map((s) => `${s.field}:${s.direction}`).join(', ')}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="modal-footer">
                 <button
                   type="button"
                   onClick={() => setShowSaveModal(false)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  className="btn btn-ghost"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium shadow-sm"
-                >
+                <button type="submit" className="btn btn-primary">
                   Save View
                 </button>
               </div>
@@ -992,46 +1294,61 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Rename Modal */}
       {showRenameModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-sky-400" />
-                Rename Saved View
-              </h3>
-              <button
-                onClick={() => setShowRenameModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="modal-overlay" onClick={() => setShowRenameModal(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '420px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title">
+                <Edit2 size={15} style={{ color: 'var(--accent-primary)' }} />
+                <span>Rename Saved View</span>
+              </div>
+              <button className="btn-icon" onClick={() => setShowRenameModal(false)}>
+                <X size={14} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveViewSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">New View Name</label>
+            <form onSubmit={handleSaveViewSubmit}>
+              <div className="modal-body">
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '11px',
+                    color: 'var(--text-muted)',
+                    marginBottom: '4px',
+                  }}
+                >
+                  New View Name
+                </label>
                 <input
                   type="text"
                   value={modalViewName}
                   onChange={(e) => setModalViewName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-sky-500"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'var(--surface-canvas)',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                  }}
                   required
                   autoFocus
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="modal-footer">
                 <button
                   type="button"
                   onClick={() => setShowRenameModal(false)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  className="btn btn-ghost"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium shadow-sm"
-                >
+                <button type="submit" className="btn btn-primary">
                   Rename
                 </button>
               </div>
@@ -1042,41 +1359,43 @@ export const ViewContainer: React.FC<ViewContainerProps> = ({
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-red-400 flex items-center gap-2">
-                <Trash2 className="w-4 h-4" />
-                Delete Saved View
-              </h3>
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '420px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title" style={{ color: 'var(--status-danger)' }}>
+                <Trash2 size={15} />
+                <span>Delete Saved View</span>
+              </div>
+              <button className="btn-icon" onClick={() => setShowDeleteModal(false)}>
+                <X size={14} />
               </button>
             </div>
 
-            <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-              Are you sure you want to delete the saved view{' '}
-              <strong className="text-white">"{activeSavedViewName}"</strong>? This removes the view
-              configuration from <code className="font-mono text-slate-400">.openob/views/</code>{' '}
-              without affecting your Markdown notes.
-            </p>
+            <div className="modal-body">
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                Are you sure you want to delete the saved view{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>"{activeSavedViewName}"</strong>?
+                This removes the configuration from{' '}
+                <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                  .openob/views/
+                </code>{' '}
+                without affecting notes.
+              </p>
+            </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="modal-footer">
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(false)}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+                className="btn btn-ghost"
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleDeleteView}
-                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium text-xs shadow-sm"
-              >
+              <button type="button" onClick={handleDeleteView} className="btn btn-danger">
                 Delete View
               </button>
             </div>

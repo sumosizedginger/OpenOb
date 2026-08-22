@@ -23,15 +23,15 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
   const properties = parsedDoc?.properties || {};
 
-  // Infer property icon / type
   const getPropertyIcon = (val: any) => {
-    if (typeof val === 'boolean') return <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />;
-    if (typeof val === 'number') return <Hash className="w-3.5 h-3.5 text-sky-400" />;
-    if (Array.isArray(val)) return <List className="w-3.5 h-3.5 text-purple-400" />;
+    if (typeof val === 'boolean')
+      return <CheckSquare size={13} style={{ color: 'var(--status-success)' }} />;
+    if (typeof val === 'number') return <Hash size={13} style={{ color: 'var(--status-info)' }} />;
+    if (Array.isArray(val)) return <List size={13} style={{ color: 'var(--accent-primary)' }} />;
     if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
-      return <Calendar className="w-3.5 h-3.5 text-amber-400" />;
+      return <Calendar size={13} style={{ color: 'var(--status-warning)' }} />;
     }
-    return <Type className="w-3.5 h-3.5 text-slate-400" />;
+    return <Type size={13} style={{ color: 'var(--text-muted)' }} />;
   };
 
   const handleAddProperty = () => {
@@ -54,90 +54,181 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 text-slate-200">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', userSelect: 'none' }}>
       {/* Header Tabs */}
-      <div className="flex items-center border-b border-slate-800 px-3 py-2 bg-slate-950/50">
-        <div className="flex items-center gap-1 bg-slate-800/60 p-0.5 rounded-md text-xs">
+      <div style={{ paddingBottom: '8px', borderBottom: '1px solid var(--border-subtle)' }}>
+        <div className="view-mode-group" style={{ width: '100%' }}>
           <button
             onClick={() => setActiveTab('properties')}
-            className={`px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors ${
-              activeTab === 'properties'
-                ? 'bg-sky-500/20 text-sky-300 font-medium'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`view-mode-btn ${activeTab === 'properties' ? 'active' : ''}`}
+            style={{ flex: 1, justifyContent: 'center' }}
           >
-            <Sliders className="w-3.5 h-3.5" />
-            Properties
+            <Sliders size={12} />
+            <span>Properties</span>
           </button>
           <button
             onClick={() => setActiveTab('tags')}
-            className={`px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors ${
-              activeTab === 'tags'
-                ? 'bg-purple-500/20 text-purple-300 font-medium'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`view-mode-btn ${activeTab === 'tags' ? 'active' : ''}`}
+            style={{ flex: 1, justifyContent: 'center' }}
           >
-            <Tag className="w-3.5 h-3.5" />
-            Tags ({allTags.size})
+            <Tag size={12} />
+            <span>Tags ({allTags.size})</span>
           </button>
         </div>
       </div>
 
-      {/* Content Body */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      {/* Body Content */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          paddingTop: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+        }}
+      >
         {activeTab === 'properties' && (
-          <div className="space-y-3">
-            {/* Note Metadata Overview */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Metadata Card */}
             {parsedDoc ? (
-              <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Document Metadata
+              <div
+                style={{
+                  backgroundColor: 'var(--surface-canvas)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'var(--text-muted)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  DOCUMENT METADATA
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-slate-400">
-                    Words: <span className="text-slate-200 font-mono">{parsedDoc.wordCount}</span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '4px',
+                    fontSize: '12px',
+                  }}
+                >
+                  <div style={{ color: 'var(--text-secondary)' }}>
+                    Words:{' '}
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                      {parsedDoc.wordCount}
+                    </span>
                   </div>
-                  <div className="text-slate-400">
-                    Lines: <span className="text-slate-200 font-mono">{parsedDoc.lineCount}</span>
+                  <div style={{ color: 'var(--text-secondary)' }}>
+                    Lines:{' '}
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                      {parsedDoc.lineCount}
+                    </span>
                   </div>
                   {parsedDoc.aliases && parsedDoc.aliases.length > 0 && (
-                    <div className="col-span-2 text-slate-400">
-                      Aliases: <span className="text-sky-300">{parsedDoc.aliases.join(', ')}</span>
+                    <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)' }}>
+                      Aliases:{' '}
+                      <span style={{ color: 'var(--accent-primary)' }}>
+                        {parsedDoc.aliases.join(', ')}
+                      </span>
                     </div>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-slate-500 italic">No active note selected</div>
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  padding: '12px',
+                }}
+              >
+                No active note selected
+              </div>
             )}
 
             {/* Frontmatter Key-Value List */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
-                <span>Frontmatter Fields</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'var(--text-muted)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  FRONTMATTER FIELDS
+                </span>
                 <button
                   onClick={() => setIsAdding(!isAdding)}
-                  className="p-1 rounded text-sky-400 hover:bg-slate-800 flex items-center gap-1 text-[11px]"
+                  className="btn-ghost"
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 6px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    color: 'var(--accent-primary)',
+                  }}
                 >
-                  <Plus className="w-3 h-3" /> Add
+                  <Plus size={11} /> Add
                 </button>
               </div>
 
               {/* Add Property Form */}
               {isAdding && (
-                <div className="bg-slate-950 border border-sky-500/40 rounded-lg p-2.5 space-y-2 text-xs">
-                  <div className="flex gap-2">
+                <div
+                  style={{
+                    backgroundColor: 'var(--surface-elevated)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <input
                       type="text"
                       placeholder="Property name"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
-                      className="flex-1 px-2 py-1 bg-slate-900 border border-slate-700 rounded text-slate-200"
+                      style={{
+                        flex: 1,
+                        fontSize: '12px',
+                        padding: '4px 6px',
+                        backgroundColor: 'var(--surface-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
                     />
                     <select
                       value={newType}
                       onChange={(e: any) => setNewType(e.target.value)}
-                      className="px-2 py-1 bg-slate-900 border border-slate-700 rounded text-slate-200"
+                      style={{
+                        fontSize: '12px',
+                        padding: '4px 6px',
+                        backgroundColor: 'var(--surface-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                      }}
                     >
                       <option value="text">Text</option>
                       <option value="number">Number</option>
@@ -145,17 +236,27 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       <option value="date">Date</option>
                     </select>
                   </div>
-                  <div className="flex gap-2">
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <input
                       type="text"
                       placeholder="Value"
                       value={newVal}
                       onChange={(e) => setNewVal(e.target.value)}
-                      className="flex-1 px-2 py-1 bg-slate-900 border border-slate-700 rounded text-slate-200"
+                      style={{
+                        flex: 1,
+                        fontSize: '12px',
+                        padding: '4px 6px',
+                        backgroundColor: 'var(--surface-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
                     />
                     <button
                       onClick={handleAddProperty}
-                      className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded font-medium"
+                      className="btn btn-primary"
+                      style={{ fontSize: '11px', padding: '4px 10px', height: '26px' }}
                     >
                       Save
                     </button>
@@ -165,30 +266,60 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
               {/* Rendered Properties */}
               {Object.keys(properties).length === 0 ? (
-                <div className="text-xs text-slate-500 italic py-2">
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: 'var(--text-muted)',
+                    fontStyle: 'italic',
+                    padding: '8px 0',
+                  }}
+                >
                   No frontmatter properties defined
                 </div>
               ) : (
-                <div className="space-y-1.5">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {Object.entries(properties).map(([key, val]) => (
                     <div
                       key={key}
-                      className="flex items-center justify-between p-2 rounded-md bg-slate-950/40 border border-slate-800/80 hover:border-slate-700 text-xs"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '5px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'var(--surface-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        fontSize: '12px',
+                      }}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}
+                      >
                         {getPropertyIcon(val)}
-                        <span className="text-slate-300 font-medium truncate">{key}:</span>
+                        <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+                          {key}:
+                        </span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400 font-mono truncate max-w-[120px]">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-mono)',
+                            maxWidth: '120px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           {typeof val === 'object' ? JSON.stringify(val) : String(val)}
                         </span>
                         <button
                           onClick={() => handleDeleteProperty(key)}
-                          className="text-slate-600 hover:text-rose-400 p-0.5"
+                          className="btn-icon"
+                          style={{ width: '18px', height: '18px' }}
                           title="Delete property"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 size={11} style={{ color: 'var(--text-muted)' }} />
                         </button>
                       </div>
                     </div>
@@ -201,24 +332,71 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
         {/* Tags Hierarchy Explorer */}
         {activeTab === 'tags' && (
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-slate-300">Vault Tags</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: 'var(--text-muted)',
+                letterSpacing: '0.02em',
+              }}
+            >
+              VAULT TAGS
+            </div>
             {allTags.size === 0 ? (
-              <div className="text-xs text-slate-500 italic py-2">
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-muted)',
+                  fontStyle: 'italic',
+                  padding: '8px 0',
+                }}
+              >
                 No tags found across vault notes
               </div>
             ) : (
-              <div className="space-y-1">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                 {Array.from(allTags.entries()).map(([tag, count]) => (
                   <button
                     key={tag}
                     onClick={() => onSelectTag?.(tag)}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-md bg-slate-950/40 border border-slate-800/80 hover:border-purple-500/40 hover:bg-purple-950/20 text-xs group transition-colors"
+                    className="tree-item"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '5px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      width: '100%',
+                      textAlign: 'left',
+                    }}
                   >
-                    <div className="flex items-center gap-2 text-purple-300 font-medium">
-                      <Tag className="w-3.5 h-3.5 text-purple-400" />#{tag}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        color: 'var(--accent-primary)',
+                        fontWeight: 500,
+                        fontSize: '12px',
+                      }}
+                    >
+                      <Tag size={12} />
+                      <span>#{tag}</span>
                     </div>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/40 text-purple-300 border border-purple-800/40">
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        padding: '1px 6px',
+                        borderRadius: 'var(--radius-full)',
+                        backgroundColor: 'var(--surface-selected)',
+                        color: 'var(--accent-primary)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
                       {count}
                     </span>
                   </button>

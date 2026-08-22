@@ -38,84 +38,162 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
     refreshList();
   };
 
-  const getPermissionBadgeClass = (perm: PluginPermission) => {
+  const getPermissionBadgeStyle = (perm: PluginPermission): React.CSSProperties => {
     switch (perm) {
       case 'vault.write':
       case 'vault.delete':
-        return 'bg-amber-950/80 text-amber-300 border-amber-800';
+        return {
+          backgroundColor: 'rgba(245, 158, 11, 0.12)',
+          color: 'var(--status-warning)',
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+        };
       case 'workspace.modify':
       case 'editor.extend':
-        return 'bg-purple-950/80 text-purple-300 border-purple-800';
+        return {
+          backgroundColor: 'var(--surface-selected)',
+          color: 'var(--accent-primary)',
+          border: '1px solid var(--border-focus)',
+        };
       case 'ai.use':
-        return 'bg-sky-950/80 text-sky-300 border-sky-800';
+        return {
+          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+          color: 'var(--status-info)',
+          border: '1px solid rgba(56, 189, 248, 0.25)',
+        };
       default:
-        return 'bg-slate-800 text-slate-300 border-slate-700';
+        return {
+          backgroundColor: 'var(--surface-canvas)',
+          color: 'var(--text-muted)',
+          border: '1px solid var(--border-subtle)',
+        };
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[85vh]">
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '640px' }}
+      >
         {/* Top Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <Boxes className="w-5 h-5 text-sky-400" />
-            <h2 className="text-sm font-semibold text-slate-100">Plugin Manager</h2>
+        <div className="modal-header">
+          <div className="modal-title">
+            <Boxes size={18} style={{ color: 'var(--accent-primary)' }} />
+            <span>Plugin Manager</span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-          >
-            <X className="w-4 h-4" />
+          <button className="btn-icon" onClick={onClose}>
+            <X size={15} />
           </button>
         </div>
 
         {/* Plugin List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div
+          className="modal-body"
+          style={{
+            maxHeight: '60vh',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
           {plugins.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-xs">No plugins installed.</div>
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '32px 0',
+                color: 'var(--text-muted)',
+                fontSize: '13px',
+              }}
+            >
+              No plugins registered.
+            </div>
           ) : (
             plugins.map((inst) => (
               <div
                 key={inst.manifest.id}
-                className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3 hover:border-slate-700 transition-colors"
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-lg)',
+                  backgroundColor: 'var(--surface-canvas)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
               >
                 {/* Title & Status */}
-                <div className="flex items-start justify-between gap-3">
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-slate-100">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span
+                        style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}
+                      >
                         {inst.manifest.name}
                       </span>
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          padding: '1px 6px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--surface-sidebar)',
+                          color: 'var(--text-muted)',
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
                         v{inst.manifest.version}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">{inst.manifest.description}</p>
+                    <p
+                      style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}
+                    >
+                      {inst.manifest.description}
+                    </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {inst.status === 'error' && (
                       <button
                         onClick={() => handleRestart(inst.manifest.id)}
-                        className="px-2 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-700 rounded text-xs flex items-center gap-1"
+                        className="btn"
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: '11px',
+                          color: 'var(--status-warning)',
+                        }}
                         title="Restart Plugin"
                       >
-                        <RotateCw className="w-3 h-3" /> Restart
+                        <RotateCw size={11} /> Restart
                       </button>
                     )}
 
                     <button
                       onClick={() => handleToggle(inst)}
-                      className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                        inst.status === 'enabled'
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                          : inst.status === 'error'
-                            ? 'bg-rose-950 text-rose-300 border border-rose-800'
-                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                      }`}
+                      className={`btn ${inst.status === 'enabled' ? 'btn-primary' : 'btn-ghost'}`}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '12px',
+                        backgroundColor:
+                          inst.status === 'enabled'
+                            ? 'var(--status-success)'
+                            : inst.status === 'error'
+                              ? 'rgba(239, 68, 68, 0.2)'
+                              : 'var(--surface-sidebar)',
+                        borderColor:
+                          inst.status === 'enabled'
+                            ? 'var(--status-success)'
+                            : 'var(--border-subtle)',
+                      }}
                     >
-                      <Power className="w-3.5 h-3.5" />
+                      <Power size={12} />
                       <span>
                         {inst.status === 'enabled'
                           ? 'Enabled'
@@ -129,28 +207,55 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
 
                 {/* Error Message if Crashed */}
                 {inst.status === 'error' && inst.error && (
-                  <div className="p-2.5 rounded bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300 flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      fontSize: '12px',
+                      color: 'var(--status-danger)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                     <div>
-                      <span className="font-semibold">Plugin Crashed:</span> {inst.error}
+                      <span style={{ fontWeight: 600 }}>Plugin Crashed:</span> {inst.error}
                     </div>
                   </div>
                 )}
 
                 {/* Declared Permissions (Constitution Law 20) */}
-                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <Shield className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-[11px] text-slate-400">Permissions:</span>
+                <div
+                  style={{
+                    paddingTop: '6px',
+                    borderTop: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '11px',
+                  }}
+                >
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}
+                  >
+                    <Shield size={12} style={{ color: 'var(--text-muted)' }} />
+                    <span style={{ color: 'var(--text-muted)' }}>Permissions:</span>
                     {inst.manifest.permissions.length === 0 ? (
-                      <span className="text-[11px] text-slate-500">None required</span>
+                      <span style={{ color: 'var(--text-muted)' }}>None required</span>
                     ) : (
                       inst.manifest.permissions.map((perm) => (
                         <span
                           key={perm}
-                          className={`text-[10px] px-1.5 py-0.5 rounded border ${getPermissionBadgeClass(
-                            perm
-                          )}`}
+                          style={{
+                            fontSize: '10px',
+                            padding: '1px 6px',
+                            borderRadius: 'var(--radius-sm)',
+                            fontFamily: 'var(--font-mono)',
+                            ...getPermissionBadgeStyle(perm),
+                          }}
                         >
                           {perm}
                         </span>
@@ -161,6 +266,12 @@ export const PluginManagerModal: React.FC<PluginManagerModalProps> = ({
               </div>
             ))
           )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
         </div>
       </div>
     </div>

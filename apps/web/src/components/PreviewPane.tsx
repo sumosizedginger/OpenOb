@@ -130,7 +130,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
             type="checkbox"
             checked={taskItem.checked}
             onChange={() => onToggleTask?.(lineNumber, taskItem.text)}
-            style={{ marginTop: '4px', cursor: 'pointer' }}
+            style={{ marginTop: '4px', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
           />
           <span
             style={{
@@ -177,7 +177,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
     // Regular list items
     if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
       elements.push(
-        <li key={`li-${i}`} style={{ marginLeft: '16px', color: 'var(--text-secondary)' }}>
+        <li key={`li-${i}`} style={{ marginLeft: '16px', color: 'var(--text-primary)' }}>
           {renderInlineFormatting(line.trim().slice(2), onNavigateWikilink)}
         </li>
       );
@@ -187,16 +187,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
     // Blockquote
     if (line.startsWith('>')) {
       elements.push(
-        <blockquote
-          key={`quote-${i}`}
-          style={{
-            borderLeft: '3px solid var(--border-medium)',
-            paddingLeft: '12px',
-            color: 'var(--text-secondary)',
-            fontStyle: 'italic',
-            margin: '10px 0',
-          }}
-        >
+        <blockquote key={`quote-${i}`}>
           {renderInlineFormatting(line.replace(/^>\s?/, ''), onNavigateWikilink)}
         </blockquote>
       );
@@ -213,16 +204,18 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
 
   return (
     <div className="preview-pane">
-      {document.tags.length > 0 && (
-        <div style={{ marginBottom: '16px' }}>
-          {document.tags.map((tag) => (
-            <span key={tag} className="tag-pill">
-              #{tag}
-            </span>
-          ))}
-        </div>
-      )}
-      {elements}
+      <div className="preview-content-wrapper">
+        {document.tags.length > 0 && (
+          <div style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {document.tags.map((tag) => (
+              <span key={tag} className="tag-pill">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {elements}
+      </div>
     </div>
   );
 };

@@ -426,6 +426,7 @@ export function useVault() {
       };
 
       const parsed = await parser.parse(note.path, note.textContent, note.version.hash);
+      await index.upsert(parsed);
       const newTab: OpenTab = {
         path: note.path,
         title: parsed.title || note.path.replace(/\.md$/, '').split('/').pop() || note.path,
@@ -1080,6 +1081,7 @@ export function useVault() {
           currentTab.content,
           res.currentVersion.hash || ''
         );
+        await index.upsert(parsed);
         if (activeTabPathRef.current === currentPath) {
           setParsedDoc(parsed);
           const bl = await backendRef.current.getBacklinks(currentPath);

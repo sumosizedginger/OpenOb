@@ -103,34 +103,32 @@ export const FileTree: React.FC<FileTreeProps> = ({
         <div key={node.path}>
           <div
             className={`tree-item ${isActive ? 'active' : ''}`}
-            style={{ paddingLeft: `${depth * 14 + 12}px` }}
+            style={{ paddingLeft: `${depth * 14 + 10}px` }}
             onClick={() => toggleFolder(node.path)}
           >
-            <span className="tree-icon">
-              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span className="tree-icon" style={{ opacity: 0.5 }}>
+              {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </span>
-            <span className="tree-icon">
-              {isExpanded ? (
-                <FolderOpen size={15} color="#fbbf24" />
-              ) : (
-                <Folder size={15} color="#fbbf24" />
-              )}
+            <span className="tree-icon" style={{ color: '#d97706', opacity: 0.85 }}>
+              {isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
             </span>
             <span className="tree-label">{node.name}</span>
             <div className="tree-item-actions" onClick={(e) => e.stopPropagation()}>
               <button
                 className="btn-icon"
+                style={{ width: '22px', height: '22px' }}
                 title="New Note in Folder"
                 onClick={() => onCreateNote(node.path)}
               >
-                <Plus size={13} />
+                <Plus size={12} />
               </button>
               <button
                 className="btn-icon"
+                style={{ width: '22px', height: '22px' }}
                 title="Delete Folder"
                 onClick={() => onDelete(node.path)}
               >
-                <Trash2 size={13} />
+                <Trash2 size={12} />
               </button>
             </div>
           </div>
@@ -143,17 +141,24 @@ export const FileTree: React.FC<FileTreeProps> = ({
       <div
         key={node.path}
         className={`tree-item ${isActive ? 'active' : ''}`}
-        style={{ paddingLeft: `${depth * 14 + 26}px` }}
+        style={{ paddingLeft: `${depth * 14 + 24}px` }}
         onClick={() => onSelect(node.path)}
       >
         <span className="tree-icon">
-          <FileText size={15} color="#94a3b8" />
+          <FileText size={13} />
         </span>
         {isEditing ? (
           <input
             type="text"
             className="command-input"
-            style={{ fontSize: '13px', padding: '2px 4px', background: 'var(--bg-tertiary)' }}
+            style={{
+              fontSize: '13px',
+              padding: '1px 6px',
+              background: 'var(--surface-elevated)',
+              border: '1px solid var(--border-focus)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-primary)',
+            }}
             value={renameValue}
             autoFocus
             onChange={(e) => setRenameValue(e.target.value)}
@@ -170,13 +175,19 @@ export const FileTree: React.FC<FileTreeProps> = ({
         <div className="tree-item-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn-icon"
+            style={{ width: '22px', height: '22px' }}
             title="Rename Note"
             onClick={() => startRename(node.path, node.name)}
           >
-            <Edit2 size={12} />
+            <Edit2 size={11} />
           </button>
-          <button className="btn-icon" title="Delete Note" onClick={() => onDelete(node.path)}>
-            <Trash2 size={12} />
+          <button
+            className="btn-icon"
+            style={{ width: '22px', height: '22px' }}
+            title="Delete Note"
+            onClick={() => onDelete(node.path)}
+          >
+            <Trash2 size={11} />
           </button>
         </div>
       </div>
@@ -188,13 +199,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
       {tree.length === 0 ? (
         <div
           style={{
-            padding: '16px',
+            padding: '24px 16px',
             color: 'var(--text-muted)',
             fontSize: '12px',
             textAlign: 'center',
           }}
         >
-          Vault is empty
+          No notes in vault
         </div>
       ) : (
         tree.map((n) => renderNode(n))

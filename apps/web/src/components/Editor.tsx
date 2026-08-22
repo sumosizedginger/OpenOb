@@ -11,6 +11,54 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 
+const openObEditorTheme = EditorView.theme(
+  {
+    '&': {
+      backgroundColor: 'var(--surface-canvas)',
+      color: 'var(--text-primary)',
+      fontSize: '15px',
+      fontFamily: 'var(--font-mono)',
+      height: '100%',
+    },
+    '.cm-content': {
+      padding: 'var(--space-8) 0',
+      caretColor: 'var(--accent-primary)',
+      lineHeight: '1.6',
+    },
+    '.cm-scroller': {
+      fontFamily: 'var(--font-mono)',
+      lineHeight: '1.6',
+      maxWidth: '860px',
+      margin: '0 auto',
+      padding: '0 var(--space-8)',
+    },
+    '.cm-gutters': {
+      backgroundColor: 'var(--surface-canvas)',
+      color: 'var(--text-muted)',
+      borderRight: '1px solid transparent',
+      paddingRight: '8px',
+    },
+    '.cm-activeLine': {
+      backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    },
+    '.cm-activeLineGutter': {
+      backgroundColor: 'transparent',
+      color: 'var(--text-secondary)',
+    },
+    '.cm-cursor': {
+      borderLeftColor: 'var(--accent-primary)',
+      borderLeftWidth: '2px',
+    },
+    '.cm-selectionBackground, ::selection': {
+      backgroundColor: 'rgba(124, 109, 250, 0.28)',
+    },
+    '&.cm-focused .cm-selectionBackground': {
+      backgroundColor: 'rgba(124, 109, 250, 0.32)',
+    },
+  },
+  { dark: true }
+);
+
 interface EditorProps {
   content: string;
   onChange: (value: string) => void;
@@ -108,6 +156,7 @@ export const Editor: React.FC<EditorProps> = ({
         history(),
         markdown({ base: markdownLanguage }),
         oneDark,
+        openObEditorTheme,
         customKeymap,
         updateListener,
         clickHandler,
@@ -142,5 +191,5 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }, [content]);
 
-  return <div className="cm-editor-wrapper" ref={containerRef} />;
+  return <div className="codemirror-wrapper" ref={containerRef} />;
 };

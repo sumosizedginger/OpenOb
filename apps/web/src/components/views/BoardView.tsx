@@ -148,7 +148,6 @@ export const BoardView: React.FC<BoardViewProps> = ({
       }
     }
 
-    // Sort regular columns alphabetically / numerically
     regularCols.sort((a, b) => {
       const numA = Number(a.name);
       const numB = Number(b.name);
@@ -216,7 +215,6 @@ export const BoardView: React.FC<BoardViewProps> = ({
     }
 
     if (draggedCard.sourceColName === targetCol.name) {
-      // Dropping in same column is a no-op
       setDraggedCard(null);
       return;
     }
@@ -265,38 +263,80 @@ export const BoardView: React.FC<BoardViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: 'var(--surface-canvas)',
+        color: 'var(--text-primary)',
+        overflow: 'hidden',
+      }}
+    >
       {/* Error / Conflict Banner */}
       {errorMessage && (
-        <div className="bg-amber-950/80 border-b border-amber-800/80 px-4 py-2 text-amber-200 text-xs flex items-center justify-between z-30">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+        <div
+          style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+            padding: '8px 16px',
+            color: 'var(--status-danger)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            zIndex: 30,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} />
             <span>{errorMessage}</span>
           </div>
           <button
             onClick={() => setErrorMessage(null)}
-            className="text-amber-400 hover:text-amber-200 p-0.5"
+            className="btn-icon"
+            style={{ width: '18px', height: '18px' }}
           >
-            <X className="w-3.5 h-3.5" />
+            <X size={12} />
           </button>
         </div>
       )}
 
       {/* Truncation warning banner */}
       {isTruncated && (
-        <div className="bg-sky-950/70 border-b border-sky-800/60 px-4 py-1.5 text-sky-200 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span>
-              Showing first {rows.length} of {total} cards. Refine filters to display the complete
-              board.
-            </span>
-          </div>
+        <div
+          style={{
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
+            padding: '6px 16px',
+            color: 'var(--status-info)',
+            fontSize: '11px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <AlertCircle size={13} style={{ flexShrink: 0 }} />
+          <span>
+            Showing first {rows.length} of {total} cards. Refine filters to display the complete
+            board.
+          </span>
         </div>
       )}
 
       {/* Kanban Column Container */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-4 flex gap-4 items-start select-none">
+      <div
+        style={{
+          flex: 1,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          padding: '16px',
+          display: 'flex',
+          gap: '16px',
+          alignItems: 'flex-start',
+          userSelect: 'none',
+        }}
+      >
         {columns.map((col) => {
           const isDragOver = dragOverColName === col.name;
 
@@ -306,32 +346,88 @@ export const BoardView: React.FC<BoardViewProps> = ({
               onDragOver={(e) => handleDragOver(e, col)}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, col)}
-              className={`flex flex-col w-72 max-w-xs shrink-0 max-h-full rounded-xl transition-all ${
-                isDragOver
-                  ? 'bg-sky-950/40 border-2 border-sky-500 shadow-lg ring-2 ring-sky-500/20'
-                  : 'bg-slate-900/60 border border-slate-800/80 shadow-sm'
-              } backdrop-blur-sm`}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                width: '280px',
+                minWidth: '260px',
+                maxHeight: '100%',
+                borderRadius: 'var(--radius-xl)',
+                backgroundColor: isDragOver ? 'var(--surface-selected)' : 'var(--surface-sidebar)',
+                border: isDragOver
+                  ? '2px solid var(--border-focus)'
+                  : '1px solid var(--border-subtle)',
+                boxShadow: isDragOver ? 'var(--shadow-md)' : 'none',
+                transition: 'all var(--duration-fast) ease',
+              }}
             >
               {/* Column Header */}
-              <div className="px-3.5 py-3 border-b border-slate-800/60 flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Layers className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <Layers size={13} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
                   <span
-                    className="font-medium text-xs text-slate-200 truncate capitalize"
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      color: 'var(--text-primary)',
+                      textTransform: 'capitalize',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
                     title={col.name}
                   >
                     {col.name}
                   </span>
                 </div>
-                <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/50">
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: 600,
+                    padding: '1px 6px',
+                    borderRadius: 'var(--radius-full)',
+                    backgroundColor: 'var(--surface-canvas)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
                   {col.rows.length}
                 </span>
               </div>
 
               {/* Column Cards Scrollable Body */}
-              <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 min-h-[120px]">
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  padding: '10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  minHeight: '120px',
+                }}
+              >
                 {col.rows.length === 0 ? (
-                  <div className="text-center py-8 text-xs text-slate-600 italic">No notes</div>
+                  <div
+                    style={{
+                      textAlign: 'center',
+                      padding: '32px 0',
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    No notes
+                  </div>
                 ) : (
                   col.rows.map((row) => {
                     const extraProps = Object.entries(row.properties || {}).filter(
@@ -347,27 +443,73 @@ export const BoardView: React.FC<BoardViewProps> = ({
                     return (
                       <div
                         key={row.path}
+                        className="group"
                         draggable={canEdit && Boolean(row.version)}
                         onDragStart={(e) => handleDragStart(e, row, col.name)}
                         onClick={() => onNavigate(row.path)}
-                        className={`group p-3 rounded-lg bg-slate-950/80 hover:bg-slate-900 border border-slate-800/70 hover:border-sky-500/50 transition-all cursor-pointer shadow-sm hover:shadow-md relative ${
-                          canEdit && Boolean(row.version)
-                            ? 'cursor-grab active:cursor-grabbing'
-                            : ''
-                        }`}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-lg)',
+                          backgroundColor: 'var(--surface-canvas)',
+                          border: '1px solid var(--border-subtle)',
+                          cursor: canEdit && Boolean(row.version) ? 'grab' : 'pointer',
+                          boxShadow: 'var(--shadow-sm)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          position: 'relative',
+                          transition: 'all var(--duration-fast) ease',
+                        }}
                       >
                         {/* Card Header & Title */}
-                        <div className="flex items-start justify-between gap-1 mb-1.5">
-                          <div className="flex items-start gap-2 min-w-0">
-                            <FileText className="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 mt-0.5 shrink-0 transition-colors" />
-                            <span className="text-xs font-medium text-slate-200 group-hover:text-sky-300 transition-colors break-words leading-tight">
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            justifyContent: 'space-between',
+                            gap: '6px',
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigate(row.path);
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '6px',
+                              minWidth: 0,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <FileText
+                              size={13}
+                              style={{
+                                color: 'var(--accent-primary)',
+                                marginTop: '2px',
+                                flexShrink: 0,
+                              }}
+                            />
+                            <span
+                              style={{
+                                fontSize: '12px',
+                                fontWeight: 500,
+                                color: 'var(--text-primary)',
+                                wordBreak: 'break-word',
+                                lineHeight: '1.4',
+                              }}
+                            >
                               {row.title || row.path}
                             </span>
                           </div>
 
-                          {/* Accessible Move Menu Button */}
+                          {/* Move Menu */}
                           {canEdit && onSetProperty && (
-                            <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              style={{ position: 'relative', flexShrink: 0 }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <button
                                 type="button"
                                 onClick={() =>
@@ -375,15 +517,43 @@ export const BoardView: React.FC<BoardViewProps> = ({
                                     prev === row.path ? null : row.path
                                   )
                                 }
-                                className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="btn-icon"
+                                style={{ width: '18px', height: '18px' }}
                                 title="Move card..."
                               >
-                                <MoreVertical className="w-3.5 h-3.5" />
+                                <MoreVertical size={11} />
                               </button>
 
                               {isMenuOpen && (
-                                <div className="absolute right-0 top-6 w-44 bg-slate-900 border border-slate-800 rounded-lg shadow-xl z-30 p-1 text-xs">
-                                  <div className="px-2 py-1 text-[10px] font-semibold text-slate-500 uppercase border-b border-slate-800/60 mb-1">
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    right: 0,
+                                    top: '22px',
+                                    width: '160px',
+                                    backgroundColor: 'var(--surface-elevated)',
+                                    border: '1px solid var(--border-medium)',
+                                    borderRadius: 'var(--radius-md)',
+                                    boxShadow: 'var(--shadow-lg)',
+                                    zIndex: 30,
+                                    padding: '4px',
+                                    fontSize: '11px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      padding: '4px 6px',
+                                      fontSize: '10px',
+                                      fontWeight: 600,
+                                      color: 'var(--text-muted)',
+                                      textTransform: 'uppercase',
+                                      borderBottom: '1px solid var(--border-subtle)',
+                                      marginBottom: '2px',
+                                    }}
+                                  >
                                     Move to
                                   </div>
                                   {columns
@@ -394,13 +564,36 @@ export const BoardView: React.FC<BoardViewProps> = ({
                                         type="button"
                                         data-testid={`move-to-${targetC.name}`}
                                         onClick={() => handleMoveViaMenu(row, targetC)}
-                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-800 text-slate-300 hover:text-sky-300 flex items-center justify-between"
+                                        style={{
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '4px 6px',
+                                          borderRadius: 'var(--radius-sm)',
+                                          backgroundColor: 'transparent',
+                                          border: 'none',
+                                          color: 'var(--text-primary)',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                        }}
                                       >
-                                        <span className="truncate">{targetC.name}</span>
+                                        <span
+                                          style={{
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {targetC.name}
+                                        </span>
                                         {targetC.isUngrouped ? (
-                                          <Trash2 className="w-3 h-3 text-red-400" />
+                                          <Trash2
+                                            size={11}
+                                            style={{ color: 'var(--status-danger)' }}
+                                          />
                                         ) : (
-                                          <ArrowRight className="w-3 h-3 opacity-50" />
+                                          <ArrowRight size={11} style={{ opacity: 0.5 }} />
                                         )}
                                       </button>
                                     ))}
@@ -411,21 +604,51 @@ export const BoardView: React.FC<BoardViewProps> = ({
                         </div>
 
                         {/* Card Path */}
-                        <div className="text-[10px] font-mono text-slate-500 truncate mb-2 pl-5">
+                        <div
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: 'var(--font-mono)',
+                            color: 'var(--text-muted)',
+                            paddingLeft: '19px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           {row.path}
                         </div>
 
-                        {/* Visible Properties Pills */}
+                        {/* Visible Properties */}
                         {extraProps.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 pl-5 mb-2">
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '4px',
+                              paddingLeft: '19px',
+                            }}
+                          >
                             {extraProps.map(([key, val]) => (
                               <span
                                 key={key}
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300"
-                                title={`${key}: ${String(val)}`}
+                                style={{
+                                  fontSize: '10px',
+                                  padding: '1px 5px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'var(--surface-sidebar)',
+                                  border: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                }}
                               >
-                                <span className="text-slate-500 mr-1">{key}:</span>
-                                <span className="font-mono text-sky-300">
+                                <span style={{ color: 'var(--text-muted)', marginRight: '3px' }}>
+                                  {key}:
+                                </span>
+                                <span
+                                  style={{
+                                    fontFamily: 'var(--font-mono)',
+                                    color: 'var(--accent-primary)',
+                                  }}
+                                >
                                   {typeof val === 'object' && val !== null
                                     ? JSON.stringify(val)
                                     : String(val)}
@@ -437,13 +660,30 @@ export const BoardView: React.FC<BoardViewProps> = ({
 
                         {/* Tags */}
                         {row.tags && row.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pl-5">
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '3px',
+                              paddingLeft: '19px',
+                            }}
+                          >
                             {row.tags.map((tag) => (
                               <span
                                 key={tag}
-                                className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900/90 text-slate-400 border border-slate-800"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px',
+                                  fontSize: '10px',
+                                  padding: '1px 6px',
+                                  borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'var(--surface-selected)',
+                                  color: 'var(--accent-primary)',
+                                  border: '1px solid var(--border-subtle)',
+                                }}
                               >
-                                <Tag className="w-2.5 h-2.5 text-slate-500" />
+                                <Tag size={8} />
                                 <span>{tag}</span>
                               </span>
                             ))}

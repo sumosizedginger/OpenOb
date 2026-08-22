@@ -172,52 +172,103 @@ export const TableView: React.FC<TableViewProps> = ({
   };
 
   return (
-    <div className="w-full h-full overflow-auto bg-slate-950 text-slate-100 select-none">
-      <table className="w-full border-collapse text-xs text-left">
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'auto',
+        backgroundColor: 'var(--surface-canvas)',
+        color: 'var(--text-primary)',
+        userSelect: 'none',
+      }}
+    >
+      <table
+        style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}
+      >
         <thead>
-          <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 font-semibold sticky top-0 z-10 backdrop-blur-md">
+          <tr
+            style={{
+              backgroundColor: 'var(--surface-sidebar)',
+              borderBottom: '1px solid var(--border-subtle)',
+              color: 'var(--text-secondary)',
+              fontWeight: 600,
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+            }}
+          >
             <th
               onClick={() => onSortChange?.('title')}
-              className="p-3 border-r border-slate-800/60 min-w-[200px] cursor-pointer hover:text-slate-200 transition-colors"
+              style={{
+                padding: '10px 14px',
+                borderRight: '1px solid var(--border-subtle)',
+                minWidth: '200px',
+                cursor: 'pointer',
+              }}
             >
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-sky-400" />
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '6px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <FileText size={13} style={{ color: 'var(--accent-primary)' }} />
                   <span>Title</span>
                 </div>
                 {sortField === 'title' ? (
                   sortDirection === 'asc' ? (
-                    <ArrowUp className="w-3 h-3 text-sky-400" />
+                    <ArrowUp size={12} style={{ color: 'var(--accent-primary)' }} />
                   ) : (
-                    <ArrowDown className="w-3 h-3 text-sky-400" />
+                    <ArrowDown size={12} style={{ color: 'var(--accent-primary)' }} />
                   )
                 ) : (
-                  <ArrowUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
+                  <ArrowUpDown size={12} style={{ opacity: 0.3 }} />
                 )}
               </div>
             </th>
 
             <th
               onClick={() => onSortChange?.('path')}
-              className="p-3 border-r border-slate-800/60 min-w-[160px] cursor-pointer hover:text-slate-200 transition-colors"
+              style={{
+                padding: '10px 14px',
+                borderRight: '1px solid var(--border-subtle)',
+                minWidth: '160px',
+                cursor: 'pointer',
+              }}
             >
-              <div className="flex items-center justify-between gap-1.5">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '6px',
+                }}
+              >
                 <span>Path</span>
                 {sortField === 'path' ? (
                   sortDirection === 'asc' ? (
-                    <ArrowUp className="w-3 h-3 text-sky-400" />
+                    <ArrowUp size={12} style={{ color: 'var(--accent-primary)' }} />
                   ) : (
-                    <ArrowDown className="w-3 h-3 text-sky-400" />
+                    <ArrowDown size={12} style={{ color: 'var(--accent-primary)' }} />
                   )
                 ) : (
-                  <ArrowUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
+                  <ArrowUpDown size={12} style={{ opacity: 0.3 }} />
                 )}
               </div>
             </th>
 
-            <th className="p-3 border-r border-slate-800/60 min-w-[140px]">
-              <div className="flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-purple-400" />
+            <th
+              style={{
+                padding: '10px 14px',
+                borderRight: '1px solid var(--border-subtle)',
+                minWidth: '140px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Tag size={13} style={{ color: 'var(--status-info)' }} />
                 <span>Tags</span>
               </div>
             </th>
@@ -226,51 +277,100 @@ export const TableView: React.FC<TableViewProps> = ({
               <th
                 key={col}
                 onClick={() => onSortChange?.(col)}
-                className="p-3 border-r border-slate-800/60 min-w-[130px] cursor-pointer hover:text-slate-200 transition-colors"
+                style={{
+                  padding: '10px 14px',
+                  borderRight: '1px solid var(--border-subtle)',
+                  minWidth: '130px',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="capitalize">{col}</span>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <span>{col}</span>
                   {sortField === col ? (
                     sortDirection === 'asc' ? (
-                      <ArrowUp className="w-3 h-3 text-sky-400" />
+                      <ArrowUp size={12} style={{ color: 'var(--accent-primary)' }} />
                     ) : (
-                      <ArrowDown className="w-3 h-3 text-sky-400" />
+                      <ArrowDown size={12} style={{ color: 'var(--accent-primary)' }} />
                     )
                   ) : (
-                    <ArrowUpDown className="w-3 h-3 opacity-30 hover:opacity-100" />
+                    <ArrowUpDown size={12} style={{ opacity: 0.3 }} />
                   )}
                 </div>
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-800/50">
+        <tbody>
           {rows.map((row) => (
             <tr
               key={row.path}
               onClick={() => onNavigate(row.path)}
-              className="hover:bg-slate-900/50 group transition-colors cursor-pointer"
+              className="tree-item"
+              style={{
+                borderBottom: '1px solid var(--border-subtle)',
+                backgroundColor: 'transparent',
+                borderRadius: 0,
+                margin: 0,
+                display: 'table-row',
+              }}
             >
-              {/* Title (Read-only) */}
-              <td className="p-3 border-r border-slate-800/40 font-medium text-slate-200 group-hover:text-sky-400">
-                <div className="flex items-center gap-2 truncate">
-                  <FileText className="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 shrink-0" />
-                  <span className="truncate">{row.title || row.path}</span>
+              {/* Title */}
+              <td
+                style={{
+                  padding: '8px 14px',
+                  borderRight: '1px solid var(--border-subtle)',
+                  fontWeight: 500,
+                  color: 'var(--text-primary)',
+                  maxWidth: '220px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                  <span
+                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {row.title || row.path}
+                  </span>
                 </div>
               </td>
 
-              {/* Path (Read-only) */}
-              <td className="p-3 border-r border-slate-800/40 text-slate-500 font-mono text-[11px] truncate">
+              {/* Path */}
+              <td
+                style={{
+                  padding: '8px 14px',
+                  borderRight: '1px solid var(--border-subtle)',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  maxWidth: '180px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {row.path}
               </td>
 
-              {/* Tags (Read-only) */}
-              <td className="p-3 border-r border-slate-800/40">
-                <div className="flex flex-wrap gap-1">
+              {/* Tags */}
+              <td style={{ padding: '8px 14px', borderRight: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                   {row.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="px-1.5 py-0.5 rounded text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/50"
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: 'var(--radius-full)',
+                        fontSize: '10px',
+                        backgroundColor: 'var(--surface-selected)',
+                        color: 'var(--accent-primary)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
                     >
                       #{tag}
                     </span>
@@ -278,7 +378,7 @@ export const TableView: React.FC<TableViewProps> = ({
                 </div>
               </td>
 
-              {/* Dynamic Property Columns (Editable) */}
+              {/* Dynamic Property Columns */}
               {columns.map((col) => {
                 const val = row.properties?.[col];
                 const isEditing = activeEditor?.path === row.path && activeEditor?.col === col;
@@ -297,10 +397,15 @@ export const TableView: React.FC<TableViewProps> = ({
                     <td
                       key={col}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-1.5 border-r border-slate-800/40 bg-slate-900/90 relative z-20 min-w-[160px]"
+                      style={{
+                        padding: '4px 8px',
+                        borderRight: '1px solid var(--border-subtle)',
+                        backgroundColor: 'var(--surface-elevated)',
+                        minWidth: '160px',
+                      }}
                     >
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-1">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                           {activeEditor.valueType === 'boolean' ? (
                             <select
                               ref={inputRef as React.RefObject<HTMLSelectElement>}
@@ -312,7 +417,15 @@ export const TableView: React.FC<TableViewProps> = ({
                                 )
                               }
                               onKeyDown={handleKeyDown}
-                              className="bg-slate-950 border border-sky-500 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none flex-1"
+                              style={{
+                                backgroundColor: 'var(--surface-canvas)',
+                                border: '1px solid var(--border-focus)',
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '3px 6px',
+                                fontSize: '12px',
+                                color: 'var(--text-primary)',
+                                flex: 1,
+                              }}
                             >
                               <option value="true">true</option>
                               <option value="false">false</option>
@@ -329,47 +442,75 @@ export const TableView: React.FC<TableViewProps> = ({
                                 )
                               }
                               onKeyDown={handleKeyDown}
-                              className="bg-slate-950 border border-sky-500 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none flex-1"
+                              style={{
+                                backgroundColor: 'var(--surface-canvas)',
+                                border: '1px solid var(--border-focus)',
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '3px 6px',
+                                fontSize: '12px',
+                                color: 'var(--text-primary)',
+                                flex: 1,
+                                outline: 'none',
+                              }}
                               placeholder="Value..."
                             />
                           )}
 
                           {activeEditor.isSaving ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400 shrink-0" />
+                            <Loader2
+                              size={13}
+                              className="spin"
+                              style={{ color: 'var(--accent-primary)' }}
+                            />
                           ) : (
                             <>
                               <button
                                 type="button"
                                 onClick={() => handleCommitEdit()}
-                                className="p-1 rounded bg-sky-600 hover:bg-sky-500 text-white shrink-0"
+                                className="btn btn-primary"
+                                style={{ padding: '3px 6px', height: '22px' }}
                                 title="Save (Enter)"
                               >
-                                <Check className="w-3 h-3" />
+                                <Check size={11} />
                               </button>
                               <button
                                 type="button"
                                 onClick={handleCancelEdit}
-                                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 shrink-0"
+                                className="btn"
+                                style={{ padding: '3px 6px', height: '22px' }}
                                 title="Cancel (Esc)"
                               >
-                                <X className="w-3 h-3" />
+                                <X size={11} />
                               </button>
                               <button
                                 type="button"
                                 onClick={handleClearProperty}
-                                className="p-1 rounded bg-red-950/60 hover:bg-red-900 border border-red-800/60 text-red-300 shrink-0"
-                                title="Clear property (delete from note)"
+                                className="btn"
+                                style={{
+                                  padding: '3px 6px',
+                                  height: '22px',
+                                  color: 'var(--status-danger)',
+                                }}
+                                title="Clear property"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 size={11} />
                               </button>
                             </>
                           )}
                         </div>
 
                         {activeEditor.errorMessage && (
-                          <div className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/40 p-1 rounded border border-amber-800/40">
-                            <AlertTriangle className="w-3 h-3 shrink-0" />
-                            <span className="truncate">{activeEditor.errorMessage}</span>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '10px',
+                              color: 'var(--status-warning)',
+                            }}
+                          >
+                            <AlertTriangle size={11} />
+                            <span>{activeEditor.errorMessage}</span>
                           </div>
                         )}
                       </div>
@@ -386,17 +527,21 @@ export const TableView: React.FC<TableViewProps> = ({
                         handleStartEdit(e, row, col);
                       }
                     }}
-                    className={`p-3 border-r border-slate-800/40 text-slate-300 truncate ${
-                      canEdit && onSetProperty
-                        ? 'hover:bg-slate-800/60 cursor-pointer hover:border-sky-500/30'
-                        : ''
-                    }`}
+                    style={{
+                      padding: '8px 14px',
+                      borderRight: '1px solid var(--border-subtle)',
+                      color: 'var(--text-secondary)',
+                      maxWidth: '160px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
                     title={canEdit ? 'Click to edit property' : undefined}
                   >
                     {displayVal ? (
-                      <span className="truncate">{displayVal}</span>
+                      <span>{displayVal}</span>
                     ) : (
-                      <span className="text-slate-600 italic">-</span>
+                      <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>-</span>
                     )}
                   </td>
                 );
@@ -407,8 +552,18 @@ export const TableView: React.FC<TableViewProps> = ({
       </table>
 
       {rows.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-500 text-sm gap-2">
-          <FileText className="w-8 h-8 opacity-30 text-slate-400" />
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '64px 0',
+            color: 'var(--text-muted)',
+            gap: '8px',
+          }}
+        >
+          <FileText size={32} style={{ opacity: 0.3 }} />
           <p>No documents match this query</p>
         </div>
       )}

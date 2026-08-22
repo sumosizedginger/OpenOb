@@ -48,7 +48,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'create-note',
       title: 'Create New Note',
       sub: 'Create a new markdown note at vault root',
-      icon: <Plus size={15} color="var(--accent-primary)" />,
+      icon: <Plus size={14} style={{ color: 'var(--accent-primary)' }} />,
       run: () => {
         onCreateNote();
         onClose();
@@ -58,7 +58,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'create-folder',
       title: 'Create New Folder',
       sub: 'Create a directory for organizing notes',
-      icon: <FolderPlus size={15} color="#fbbf24" />,
+      icon: <FolderPlus size={14} style={{ color: '#d97706' }} />,
       run: () => {
         onCreateFolder();
         onClose();
@@ -68,7 +68,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       id: 'rebuild-index',
       title: 'Rebuild Derived Index',
       sub: 'Reconstruct full-text search and backlink indexes from files',
-      icon: <RefreshCw size={15} color="var(--status-info)" />,
+      icon: <RefreshCw size={14} style={{ color: 'var(--status-info)' }} />,
       run: () => {
         onRefresh();
         onClose();
@@ -83,12 +83,23 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const total = filteredNotes.length + filteredActions.length;
+      if (total > 0) setSelectedIndex((prev) => (prev + 1) % total);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const total = filteredNotes.length + filteredActions.length;
+      if (total > 0) setSelectedIndex((prev) => (prev - 1 + total) % total);
     } else if (e.key === 'Enter') {
-      if (filteredNotes.length > 0) {
-        onOpenNote(filteredNotes[selectedIndex % filteredNotes.length].path);
+      if (selectedIndex < filteredNotes.length) {
+        onOpenNote(filteredNotes[selectedIndex].path);
         onClose();
-      } else if (filteredActions.length > 0) {
-        filteredActions[0].run();
+      } else {
+        const actionIdx = selectedIndex - filteredNotes.length;
+        if (filteredActions[actionIdx]) {
+          filteredActions[actionIdx].run();
+        }
       }
     }
   };
@@ -97,18 +108,21 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     <div className="modal-overlay" onClick={onClose}>
       <div className="command-palette" onClick={(e) => e.stopPropagation()}>
         <div className="command-input-wrapper">
-          <Search size={18} color="var(--text-muted)" />
+          <Search size={16} style={{ color: 'var(--text-muted)' }} />
           <input
             type="text"
             className="command-input"
-            placeholder="Type a note name or command... (Esc to close)"
+            placeholder="Type a note name or action..."
             value={query}
             autoFocus
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIndex(0);
+            }}
             onKeyDown={handleKeyDown}
           />
           <button className="btn-icon" onClick={onClose}>
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
@@ -120,57 +134,91 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   fontSize: '11px',
                   fontWeight: 600,
                   color: 'var(--text-muted)',
-                  padding: '6px 12px',
+                  padding: '4px 10px',
+                  letterSpacing: '0.02em',
                 }}
               >
                 NOTES ({filteredNotes.length})
               </div>
-              {filteredNotes.map((note, index) => (
-                <div
-                  key={note.path}
-                  className={`command-item ${index === selectedIndex ? 'selected' : ''}`}
-                  onClick={() => {
-                    onOpenNote(note.path);
-                    onClose();
-                  }}
-                >
-                  <div className="command-item-left">
-                    <FileText size={15} color="var(--accent-primary)" />
-                    <div>
-                      <div className="command-item-title">{note.name.replace(/\.md$/, '')}</div>
-                      <div className="command-item-sub">{note.path}</div>
+              {filteredNotes.map((note, index) => {
+                const isSelected = index === selectedIndex;
+                return (
+                  <div
+                    key={note.path}
+                    className={`command-item ${isSelected ? 'selected' : ''}`}
+                    onClick={() => {
+                      onOpenNote(note.path);
+                      onClose();
+                    }}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <FileText
+                        size={14}
+                        style={{
+                          color: isSelected ? 'var(--accent-primary)' : 'var(--text-muted)',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div style={{ minWidth: 0 }}>
+                        <div className="command-item-title">{note.name.replace(/\.md$/, '')}</div>
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: 'var(--text-muted)',
+                            fontFamily: 'var(--font-mono)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {note.path}
+                        </div>
+                      </div>
                     </div>
+                    <span className="command-badge">Note</span>
                   </div>
-                  <span className="command-badge">Open</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
           {filteredActions.length > 0 && (
-            <div style={{ marginTop: '8px' }}>
+            <div style={{ marginTop: '6px' }}>
               <div
                 style={{
                   fontSize: '11px',
                   fontWeight: 600,
                   color: 'var(--text-muted)',
-                  padding: '6px 12px',
+                  padding: '4px 10px',
+                  letterSpacing: '0.02em',
                 }}
               >
                 ACTIONS
               </div>
-              {filteredActions.map((act) => (
-                <div key={act.id} className="command-item" onClick={act.run}>
-                  <div className="command-item-left">
-                    {act.icon}
-                    <div>
-                      <div className="command-item-title">{act.title}</div>
-                      <div className="command-item-sub">{act.sub}</div>
+              {filteredActions.map((act, idx) => {
+                const globalIdx = filteredNotes.length + idx;
+                const isSelected = globalIdx === selectedIndex;
+                return (
+                  <div
+                    key={act.id}
+                    className={`command-item ${isSelected ? 'selected' : ''}`}
+                    onClick={act.run}
+                    onMouseEnter={() => setSelectedIndex(globalIdx)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {act.icon}
+                      <div>
+                        <div className="command-item-title">{act.title}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {act.sub}
+                        </div>
+                      </div>
                     </div>
+                    <span className="command-badge">Action</span>
                   </div>
-                  <span className="command-badge">Action</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

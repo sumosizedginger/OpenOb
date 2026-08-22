@@ -13,7 +13,6 @@ import {
 import { VaultPath } from '@okw/core';
 import { AIBackend, WorkspaceBackend } from '@okw/workspace';
 import {
-  Bot,
   Send,
   Square,
   Sparkles,
@@ -25,6 +24,7 @@ import {
   Link,
   AlertTriangle,
   RefreshCw,
+  Bot,
 } from 'lucide-react';
 
 export interface AIChatDrawerProps {
@@ -335,36 +335,77 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   const currentProviderInfo = providers.find((p) => p.id === providerId);
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-slate-100 border-l border-slate-800 select-none">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        userSelect: 'none',
+        backgroundColor: 'var(--surface-sidebar)',
+      }}
+    >
       {/* Top Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 bg-slate-900 border-b border-slate-800">
-        <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-sky-400" />
-          <span className="text-xs font-semibold text-slate-200">AI Assistant</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono uppercase">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Bot size={15} style={{ color: 'var(--accent-primary)' }} />
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            AI Assistant
+          </span>
+          <span
+            style={{
+              fontSize: '10px',
+              fontFamily: 'var(--font-mono)',
+              textTransform: 'uppercase',
+              padding: '1px 6px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--surface-canvas)',
+              color: 'var(--accent-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
             {providerId}
           </span>
           {aiBackend.isGatewayMode && (
-            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
+            <span
+              style={{
+                fontSize: '10px',
+                padding: '1px 6px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                color: 'var(--status-success)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+              }}
+            >
               Gateway
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            className="btn-icon"
+            style={{ width: '22px', height: '22px' }}
             title="BYOK & AI Settings"
           >
-            <Settings className="w-3.5 h-3.5" />
+            <Settings size={12} />
           </button>
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              className="btn-icon"
+              style={{ width: '22px', height: '22px' }}
+              title="Close AI Assistant"
             >
-              <X className="w-4 h-4" />
+              <X size={12} />
             </button>
           )}
         </div>
@@ -372,23 +413,50 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
       {/* Settings Modal (BYOK & Provider Selection) */}
       {showSettings && (
-        <div className="p-3 bg-slate-900/95 border-b border-slate-800 text-xs space-y-2.5 animate-in slide-in-from-top-1">
-          <div className="font-semibold text-slate-200 flex items-center justify-between">
-            <span>AI Provider & BYOK Keys</span>
+        <div
+          style={{
+            padding: '10px 12px',
+            backgroundColor: 'var(--surface-elevated)',
+            borderBottom: '1px solid var(--border-medium)',
+            fontSize: '11px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+            }}
+          >
+            <span>AI Provider & BYOK Settings</span>
             <button
               onClick={() => setShowSettings(false)}
-              className="text-slate-400 hover:text-slate-200"
+              className="btn-icon"
+              style={{ width: '16px', height: '16px' }}
             >
-              <X className="w-3.5 h-3.5" />
+              <X size={11} />
             </button>
           </div>
 
           <div>
-            <label className="text-[11px] text-slate-400">Provider:</label>
+            <label style={{ color: 'var(--text-muted)' }}>Provider:</label>
             <select
               value={providerId}
               onChange={(e) => setProviderId(e.target.value as AIProviderId)}
-              className="w-full mt-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
+              style={{
+                width: '100%',
+                marginTop: '3px',
+                padding: '4px 6px',
+                backgroundColor: 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-primary)',
+              }}
             >
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -399,21 +467,39 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           </div>
 
           {currentProviderInfo?.type === 'cloud' && (
-            <div className="space-y-1">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {!aiBackend.isGatewayMode ? (
-                <div className="p-2 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300 text-[11px] leading-snug">
+                <div
+                  style={{
+                    padding: '6px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    color: 'var(--status-warning)',
+                    fontSize: '11px',
+                  }}
+                >
                   Cloud BYOK requires OpenOb Gateway so API keys remain outside browser application
                   state.
                 </div>
               ) : (
                 <>
-                  <label className="text-[11px] text-slate-400 flex items-center justify-between">
+                  <label
+                    style={{
+                      color: 'var(--text-muted)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                    }}
+                  >
                     <span>API Key (Stored in Gateway memory):</span>
                     {maskedKey && (
-                      <span className="text-[10px] text-emerald-400 font-mono">{maskedKey}</span>
+                      <span
+                        style={{ color: 'var(--status-success)', fontFamily: 'var(--font-mono)' }}
+                      >
+                        {maskedKey}
+                      </span>
                     )}
                   </label>
-                  <div className="flex items-center gap-1.5">
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <input
                       type="password"
                       placeholder={
@@ -421,30 +507,43 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
                       }
                       value={inputApiKey}
                       onChange={(e) => setInputApiKey(e.target.value)}
-                      className="flex-1 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-sky-500"
+                      style={{
+                        flex: 1,
+                        padding: '4px 6px',
+                        backgroundColor: 'var(--surface-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                      }}
                     />
                     <button
                       onClick={handleSaveApiKey}
                       disabled={!inputApiKey.trim()}
-                      className="px-2 py-1 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-white text-[11px]"
+                      className="btn btn-primary"
+                      style={{ padding: '4px 8px', fontSize: '11px' }}
                     >
                       Save
                     </button>
                     {maskedKey && (
                       <button
                         onClick={handleClearApiKey}
-                        className="px-2 py-1 bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 rounded text-[11px]"
+                        className="btn"
+                        style={{ padding: '4px 8px', fontSize: '11px' }}
                       >
                         Clear
                       </button>
                     )}
                   </div>
                   {keySavedMessage && (
-                    <div className="text-[10px] text-emerald-400">
-                      ✓ Key securely configured in Gateway
+                    <div style={{ color: 'var(--status-success)', fontSize: '10px' }}>
+                      ✓ Key securely saved in Gateway
                     </div>
                   )}
-                  {secretError && <div className="text-[10px] text-rose-400">⚠️ {secretError}</div>}
+                  {secretError && (
+                    <div style={{ color: 'var(--status-danger)', fontSize: '10px' }}>
+                      ⚠️ {secretError}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -452,29 +551,50 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         </div>
       )}
 
-      {/* Scope & Model Selector Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900/60 border-b border-slate-800 text-[11px]">
-        {/* Scope Selector */}
-        <div className="flex items-center gap-1 text-slate-400">
-          <span className="text-[10px]">Scope:</span>
+      {/* Controls Row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          borderBottom: '1px solid var(--border-subtle)',
+          fontSize: '11px',
+          gap: '6px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
           <select
             value={scopeType}
             onChange={(e) => setScopeType(e.target.value as RetrievalScopeType)}
-            className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer"
+            style={{
+              fontSize: '11px',
+              padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'var(--surface-canvas)',
+              color: 'var(--text-secondary)',
+              maxWidth: '120px',
+            }}
           >
             <option value="current_note">Current Note</option>
-            <option value="folder">Current Folder</option>
+            <option value="folder">Folder</option>
             <option value="vault">Whole Vault</option>
           </select>
-        </div>
 
-        {/* Model Selector */}
-        <div className="flex items-center gap-1 text-slate-400">
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
             disabled={isLoadingModels || !!modelError || models.length === 0}
-            className="bg-slate-950 border border-slate-700 disabled:opacity-50 rounded px-1.5 py-0.5 text-slate-200 focus:outline-none cursor-pointer max-w-[130px] truncate"
+            style={{
+              flex: 1,
+              fontSize: '11px',
+              padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'var(--surface-canvas)',
+              color: 'var(--text-secondary)',
+            }}
           >
             {isLoadingModels ? (
               <option value="">Loading...</option>
@@ -493,53 +613,124 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         </div>
       </div>
 
-      {/* Provider Model Discovery Error Banner */}
+      {/* Provider Model Error Banner */}
       {modelError && (
-        <div className="px-3 py-1.5 bg-rose-950/60 border-b border-rose-800/80 text-rose-300 text-[11px] flex items-center justify-between">
-          <span className="truncate flex items-center gap-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span className="truncate">{modelError}</span>
+        <div
+          style={{
+            padding: '6px 8px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+            color: 'var(--status-danger)',
+            fontSize: '11px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <AlertTriangle size={12} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {modelError}
+            </span>
           </span>
           <button
             onClick={() => void refreshProviderData()}
-            className="ml-2 px-1.5 py-0.5 rounded bg-rose-900/80 hover:bg-rose-800 text-[10px] text-white shrink-0 flex items-center gap-1"
+            className="btn"
+            style={{ padding: '1px 6px', fontSize: '10px', height: '20px' }}
           >
-            <RefreshCw className="w-2.5 h-2.5" /> Retry
+            <RefreshCw size={10} /> Retry
           </button>
         </div>
       )}
 
       {/* Messages Feed */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+        }}
+      >
         {messages.length === 0 && (
-          <div className="text-center py-12 text-slate-500 text-xs space-y-2">
-            <Sparkles className="w-6 h-6 mx-auto text-sky-400/60" />
-            <p>Ask anything about your notes or request changes.</p>
-            <div className="text-[11px] text-slate-600">
-              Cloud BYOK & Local AI supported with strict secret protection.
-            </div>
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '32px 12px',
+              color: 'var(--text-muted)',
+              fontSize: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Sparkles size={24} style={{ opacity: 0.3, color: 'var(--accent-primary)' }} />
+            <p>Ask anything about your notes or propose changes.</p>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              100% local or self-hosted gateway AI with zero vendor lock-in.
+            </span>
           </div>
         )}
 
         {messages.map((msg, idx) => (
           <div
             key={idx}
-            className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              gap: '4px',
+            }}
           >
             <div
-              className={`p-2.5 rounded-xl text-xs max-w-[90%] leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-sky-600 text-white rounded-br-none'
-                  : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
-              }`}
+              style={{
+                padding: '8px 10px',
+                borderRadius: 'var(--radius-lg)',
+                fontSize: '12px',
+                lineHeight: '1.5',
+                maxWidth: '90%',
+                backgroundColor:
+                  msg.role === 'user' ? 'var(--surface-selected)' : 'var(--surface-canvas)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-primary)',
+              }}
             >
-              <div className="whitespace-pre-wrap">{msg.content || '...'}</div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content || '...'}</div>
 
-              {/* Clickable Citations */}
+              {/* Citations */}
               {msg.citations && msg.citations.length > 0 && (
-                <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex flex-wrap gap-1">
-                  <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                    <Link className="w-2.5 h-2.5 text-sky-400" /> Citations
+                <div
+                  style={{
+                    marginTop: '6px',
+                    paddingTop: '6px',
+                    borderTop: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '4px',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      color: 'var(--text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                    }}
+                  >
+                    <Link size={9} /> Citations
                     {responseMetadata?.retrievedSources &&
                     responseMetadata.retrievedSources.length > 0
                       ? ` (${responseMetadata.retrievedSources.length} sources):`
@@ -549,7 +740,15 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
                     <button
                       key={cIdx}
                       onClick={() => onNavigate(cite.notePath)}
-                      className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 hover:bg-sky-950 text-sky-300 border border-slate-700/60 transition-colors"
+                      style={{
+                        padding: '1px 5px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '10px',
+                        backgroundColor: 'var(--surface-sidebar)',
+                        color: 'var(--accent-primary)',
+                        border: '1px solid var(--border-subtle)',
+                        cursor: 'pointer',
+                      }}
                     >
                       {cite.noteTitle} {cite.lineStart ? `(L${cite.lineStart})` : ''}
                     </button>
@@ -562,61 +761,92 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
         {/* Proposed Edit Card */}
         {activeProposal && (
-          <div className="p-3 bg-slate-900 border border-sky-600/50 rounded-xl shadow-lg space-y-2 text-xs animate-in fade-in">
-            <div className="flex items-center justify-between font-semibold text-sky-300">
-              <span className="flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5" /> Proposed Note Edit
+          <div
+            style={{
+              padding: '10px',
+              backgroundColor: 'var(--surface-canvas)',
+              border: '1px solid var(--border-focus)',
+              borderRadius: 'var(--radius-lg)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              fontSize: '12px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                color: 'var(--accent-primary)',
+                fontWeight: 600,
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <FileText size={13} /> Proposed Note Edit
               </span>
-              <span className="text-[10px] text-slate-400">{activeProposal.path}</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                {activeProposal.path}
+              </span>
             </div>
 
-            <div className="text-slate-400 text-[11px]">{activeProposal.explanation}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              {activeProposal.explanation}
+            </div>
 
             {/* OCC Conflict Notice */}
             {proposalConflictError && (
-              <div className="p-2 rounded bg-rose-950/70 border border-rose-800/80 text-rose-300 text-[11px] space-y-1.5">
-                <div className="flex items-center gap-1 font-semibold">
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Note changed since proposal was generated</span>
+              <div
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: 'var(--status-danger)',
+                  fontSize: '11px',
+                }}
+              >
+                <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <AlertTriangle size={12} /> Note changed since proposal was generated
                 </div>
-                <div className="text-[10px] text-rose-200/80">{proposalConflictError}</div>
-                <div className="flex items-center gap-1.5 pt-1">
+                <div style={{ fontSize: '10px', marginTop: '2px' }}>{proposalConflictError}</div>
+                <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
                   <button
-                    onClick={() => {
-                      onNavigate(activeProposal.path);
-                    }}
-                    className="px-2 py-0.5 bg-rose-900/60 hover:bg-rose-800 rounded text-[10px] text-rose-200 flex items-center gap-1"
+                    onClick={() => onNavigate(activeProposal.path)}
+                    className="btn"
+                    style={{ padding: '2px 6px', fontSize: '10px' }}
                   >
-                    <RefreshCw className="w-2.5 h-2.5" /> Reload Note
+                    <RefreshCw size={10} /> Reload Note
                   </button>
                   <button
                     onClick={() => {
                       setActiveProposal(null);
                       setProposalConflictError(null);
                     }}
-                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] text-slate-300"
+                    className="btn btn-ghost"
+                    style={{ padding: '2px 6px', fontSize: '10px' }}
                   >
-                    Discard Proposal
+                    Discard
                   </button>
                 </div>
               </div>
             )}
 
             {!proposalConflictError && (
-              <div className="flex items-center gap-2 pt-1">
+              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
                 <button
                   onClick={handleAcceptProposal}
-                  className="flex-1 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 rounded text-white font-medium flex items-center justify-center gap-1 shadow-sm transition-colors"
+                  className="btn btn-primary"
+                  style={{ flex: 1, padding: '4px 8px', fontSize: '11px' }}
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Accept Edit</span>
+                  <CheckCircle2 size={12} /> Accept Edit
                 </button>
                 <button
                   onClick={() => setActiveProposal(null)}
-                  className="py-1 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 flex items-center justify-center gap-1 transition-colors"
+                  className="btn btn-ghost"
+                  style={{ padding: '4px 8px', fontSize: '11px' }}
                 >
-                  <XCircle className="w-3.5 h-3.5" />
-                  <span>Reject</span>
+                  <XCircle size={12} /> Reject
                 </button>
               </div>
             )}
@@ -627,8 +857,25 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       </div>
 
       {/* Input Area */}
-      <form onSubmit={handleSendMessage} className="p-2.5 bg-slate-900 border-t border-slate-800">
-        <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 focus-within:border-sky-500 rounded-xl px-2.5 py-1.5">
+      <form
+        onSubmit={handleSendMessage}
+        style={{
+          padding: '8px',
+          borderTop: '1px solid var(--border-subtle)',
+          backgroundColor: 'var(--surface-sidebar)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: 'var(--surface-canvas)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '4px 8px',
+          }}
+        >
           <input
             type="text"
             placeholder={
@@ -639,26 +886,41 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
             disabled={isGenerating}
-            className="flex-1 bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
+            style={{
+              flex: 1,
+              backgroundColor: 'transparent',
+              border: 'none',
+              outline: 'none',
+              fontSize: '12px',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-sans)',
+            }}
           />
 
           {isGenerating ? (
             <button
               type="button"
               onClick={handleStopGeneration}
-              className="p-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white transition-colors"
+              className="btn"
+              style={{
+                padding: '4px',
+                backgroundColor: 'var(--status-danger)',
+                borderColor: 'var(--status-danger)',
+                color: '#fff',
+              }}
               title="Stop Generation"
             >
-              <Square className="w-3.5 h-3.5" />
+              <Square size={11} />
             </button>
           ) : (
             <button
               type="submit"
               disabled={!inputPrompt.trim() || !selectedModel || !!modelError}
-              className="p-1 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white transition-colors"
+              className="btn btn-primary"
+              style={{ padding: '4px 8px', height: '26px' }}
               title="Send Prompt"
             >
-              <Send className="w-3.5 h-3.5" />
+              <Send size={11} />
             </button>
           )}
         </div>

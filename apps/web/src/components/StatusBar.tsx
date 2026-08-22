@@ -44,12 +44,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   return (
     <div className="status-bar">
       <div className="status-left">
-        <span
+        <button
+          type="button"
+          aria-label={vaultMode === 'gateway' ? 'OpenOb Gateway' : 'Connect to Gateway'}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '5px',
             cursor: onOpenGatewayModal ? 'pointer' : 'default',
+            background: 'transparent',
+            border: 'none',
+            color: 'inherit',
+            font: 'inherit',
+            padding: 0,
           }}
           onClick={onOpenGatewayModal}
           title={
@@ -106,7 +113,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
               <Lock size={9} /> Read-Only
             </span>
           )}
-        </span>
+        </button>
         {activePath && <span style={{ color: 'var(--text-secondary)' }}>{activePath}</span>}
       </div>
 

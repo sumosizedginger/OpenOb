@@ -68,67 +68,148 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (results.length > 0) setSelectedIndex((prev) => (prev + 1) % results.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (results.length > 0)
+        setSelectedIndex((prev) => (prev - 1 + results.length) % results.length);
+    } else if (e.key === 'Enter') {
+      if (results[selectedIndex]) {
+        onSelectResult(results[selectedIndex].path);
+        onClose();
+      }
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content search-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="search-modal-header">
-          <Search size={18} className="search-icon" />
+      <div
+        className="command-palette"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '640px' }}
+      >
+        <div className="command-input-wrapper">
+          <Search size={16} style={{ color: 'var(--text-muted)' }} />
           <input
             type="text"
-            className="search-modal-input"
+            className="command-input"
             placeholder={
               selectedTag
-                ? `Searching tag #${selectedTag}...`
-                : 'Search note titles, content, or #tags...'
+                ? `Searching #${selectedTag}...`
+                : 'Search notes by title, text, or tags...'
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             autoFocus
           />
           {selectedTag && (
-            <div className="search-tag-chip">
-              <Tag size={12} />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 6px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: 'var(--surface-selected)',
+                color: 'var(--accent-primary)',
+                fontSize: '11px',
+              }}
+            >
+              <Tag size={10} />
               <span>#{selectedTag}</span>
-              <button className="btn-icon" onClick={() => setSelectedTag(null)}>
-                <X size={12} />
+              <button
+                className="btn-icon"
+                style={{ width: '14px', height: '14px' }}
+                onClick={() => setSelectedTag(null)}
+              >
+                <X size={9} />
               </button>
             </div>
           )}
           <button className="btn-icon" onClick={onClose}>
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
-        <div className="search-results-list">
+        <div className="command-list" style={{ maxHeight: '420px' }}>
           {results.length === 0 && (query.trim() || selectedTag) && (
-            <div className="search-empty-state">No matching notes found.</div>
+            <div
+              style={{
+                padding: '24px',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+                fontSize: '13px',
+              }}
+            >
+              No matching notes found.
+            </div>
           )}
 
-          {results.map((result, idx) => (
-            <div
-              key={result.path}
-              className={`search-result-item ${idx === selectedIndex ? 'selected' : ''}`}
-              onClick={() => {
-                onSelectResult(result.path);
-                onClose();
-              }}
-              onMouseEnter={() => setSelectedIndex(idx)}
-            >
-              <div className="result-header">
-                <FileText size={14} className="result-icon" />
-                <span className="result-title">{result.title || result.path}</span>
-                <span className="result-path">{result.path}</span>
-              </div>
-
-              {result.excerpt && (
-                <div className="result-snippet">
-                  <div className="result-match-line">
-                    <span className="match-line-text">{result.excerpt}</span>
-                  </div>
+          {results.map((result, idx) => {
+            const isSelected = idx === selectedIndex;
+            return (
+              <div
+                key={result.path}
+                className={`command-item ${isSelected ? 'selected' : ''}`}
+                style={{
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '4px',
+                  padding: '8px 12px',
+                }}
+                onClick={() => {
+                  onSelectResult(result.path);
+                  onClose();
+                }}
+                onMouseEnter={() => setSelectedIndex(idx)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
+                  <FileText
+                    size={13}
+                    style={{ color: isSelected ? 'var(--accent-primary)' : 'var(--text-muted)' }}
+                  />
+                  <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
+                    {result.title || result.path}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                      marginLeft: 'auto',
+                    }}
+                  >
+                    {result.path}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {result.excerpt && (
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: 'var(--text-secondary)',
+                      fontFamily: 'var(--font-mono)',
+                      paddingLeft: '6px',
+                      borderLeft: '2px solid var(--border-subtle)',
+                      lineHeight: '1.4',
+                      width: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {result.excerpt}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

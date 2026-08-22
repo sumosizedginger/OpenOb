@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useVault } from './hooks/useVault.js';
 import { FileTree } from './components/FileTree.js';
 import { Editor } from './components/Editor.js';
@@ -47,18 +47,18 @@ import {
   RefreshCw,
   FolderOpen,
   ShieldCheck,
-  Link2,
   ListTree,
   PanelLeftClose,
   PanelLeft,
   Share2,
-  Sliders,
   LayoutGrid,
   FileText,
   Bot,
   Boxes,
   AlertTriangle,
   Server,
+  MoreHorizontal,
+  X,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -107,10 +107,25 @@ export const App: React.FC = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isGatewayModalOpen, setIsGatewayModalOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [selectedSearchTag, setSelectedSearchTag] = useState<string | null>(null);
   const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
+
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    if (isMoreMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMoreMenuOpen]);
 
   const aiBackend = React.useMemo(() => {
     if (vaultMode === 'gateway' && gatewayUrl) {
@@ -252,13 +267,22 @@ export const App: React.FC = () => {
           void saveActiveNote();
         }
       }
+
+      // Escape: Dismiss active overlay modals
+      if (e.key === 'Escape') {
+        setIsCommandPaletteOpen(false);
+        setIsSearchModalOpen(false);
+        setIsGlobalGraphOpen(false);
+        setIsPluginModalOpen(false);
+        setIsGatewayModalOpen(false);
+        setIsMoreMenuOpen(false);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveActiveNote, activeTabPath, closeTab]);
 
-  // P5-2: Restored heading navigation in preview and editor (matching heading-line IDs)
   const handleSelectHeading = (heading: ParsedHeading) => {
     if (viewMode === 'editor') {
       setViewMode('split');
@@ -286,7 +310,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Phase 7: Apply user-accepted AI proposed edit (Constitution Law 19)
   const handleApplyProposedEdit = async (proposal: ProposedEdit) => {
     return await applyAIProposedEdit(proposal);
   };
@@ -301,33 +324,39 @@ export const App: React.FC = () => {
             onClick={() => setShowSidebar((prev) => !prev)}
             title="Toggle Sidebar (Ctrl+B)"
           >
-            {showSidebar ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+            {showSidebar ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
           </button>
           <div className="app-logo">
-            <ShieldCheck size={18} className="logo-icon" />
+            <ShieldCheck size={16} className="logo-icon" />
             <span className="logo-text">OpenOb</span>
           </div>
-          <span className="vault-badge">{vaultName}</span>
-
-          {/* Mode Switcher: Notes Editor vs Database Views (Phase 6) */}
-          <div className="view-mode-group" style={{ marginLeft: '12px' }}>
-            <button
-              className={`view-mode-btn ${mainMode === 'editor' ? 'active' : ''}`}
-              title="Notes Editor"
-              onClick={() => setMainMode('editor')}
+          <span className="vault-badge" title={`Vault: ${vaultName}`}>
+            {vaultName}
+          </span>
+          {activeTab && (
+            <span
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginLeft: '4px',
+              }}
             >
-              <FileText size={14} />
-              <span>Editor</span>
-            </button>
-            <button
-              className={`view-mode-btn ${mainMode === 'views' ? 'active' : ''}`}
-              title="Notion-Like Database Views"
-              onClick={() => setMainMode('views')}
-            >
-              <LayoutGrid size={14} />
-              <span>Views</span>
-            </button>
-          </div>
+              <span style={{ color: 'var(--text-muted)' }}>/</span>
+              <span
+                style={{
+                  maxWidth: '180px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {activeTab.path}
+              </span>
+            </span>
+          )}
         </div>
 
         <div className="header-center">
@@ -339,123 +368,138 @@ export const App: React.FC = () => {
             }}
             title="Quick Open (Ctrl+P)"
           >
-            <Search size={14} />
+            <Search size={13} />
             <span>Search or jump to note...</span>
             <kbd>Ctrl+P</kbd>
           </button>
         </div>
 
         <div className="header-right">
-          <button
-            className={`btn-icon ${mainMode === 'views' ? 'active' : ''}`}
-            title="Database Views"
-            onClick={() => setMainMode((prev) => (prev === 'views' ? 'editor' : 'views'))}
-          >
-            <LayoutGrid size={15} />
-          </button>
-
-          <button
-            className={`btn-icon ${isGlobalGraphOpen ? 'active' : ''}`}
-            title="Graph View (Ctrl+G)"
-            onClick={() => setIsGlobalGraphOpen((prev) => !prev)}
-          >
-            <Share2 size={15} />
-          </button>
-
-          <button
-            className={`btn-icon ${isPluginModalOpen ? 'active' : ''}`}
-            title="Plugin Manager"
-            onClick={() => setIsPluginModalOpen(true)}
-          >
-            <Boxes size={15} />
-          </button>
-
-          <button
-            className={`btn-icon ${vaultMode === 'gateway' ? 'active' : ''}`}
-            title={
-              vaultMode === 'gateway'
-                ? `Connected to Gateway (${vaultName})`
-                : 'Connect to OpenOb Gateway'
-            }
-            onClick={() => setIsGatewayModalOpen(true)}
-          >
-            <Server size={16} />
-          </button>
-
-          <button
-            className="btn-icon"
-            title="Open Directory from Disk"
-            onClick={() => void openDirectoryVault()}
-          >
-            <FolderOpen size={16} />
-          </button>
+          {/* Mode Switcher: Notes Editor vs Database Views */}
+          <div className="view-mode-group">
+            <button
+              className={`view-mode-btn ${mainMode === 'editor' ? 'active' : ''}`}
+              data-testid="main-mode-editor"
+              title="Notes Editor"
+              onClick={() => setMainMode('editor')}
+            >
+              <FileText size={13} />
+              <span>Editor</span>
+            </button>
+            <button
+              className={`view-mode-btn ${mainMode === 'views' ? 'active' : ''}`}
+              data-testid="main-mode-views"
+              title="Database Views"
+              onClick={() => setMainMode('views')}
+            >
+              <LayoutGrid size={13} />
+              <span>Views</span>
+            </button>
+          </div>
 
           {mainMode === 'editor' && (
             <div className="view-mode-group">
               <button
                 className={`view-mode-btn ${viewMode === 'editor' ? 'active' : ''}`}
+                data-testid="view-mode-editor"
                 title="Editor View"
                 onClick={() => setViewMode('editor')}
               >
-                <BookOpen size={14} />
+                <BookOpen size={13} />
               </button>
               <button
                 className={`view-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
-                title="Split View (Ctrl+\)"
+                data-testid="view-mode-split"
+                title="Split View"
                 onClick={() => setViewMode('split')}
               >
-                <Columns size={14} />
+                <Columns size={13} />
               </button>
               <button
                 className={`view-mode-btn ${viewMode === 'preview' ? 'active' : ''}`}
+                data-testid="view-mode-preview"
                 title="Preview View"
                 onClick={() => setViewMode('preview')}
               >
-                <Eye size={14} />
+                <Eye size={13} />
               </button>
             </div>
           )}
 
-          <div className="right-panel-toggles">
+          <button
+            className={`btn-icon ${showRightPanel === 'ai' ? 'active' : ''}`}
+            data-testid="toggle-ai"
+            title="Toggle AI Assistant"
+            onClick={() => setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))}
+          >
+            <Bot size={15} />
+          </button>
+
+          <button
+            className={`btn-icon ${showRightPanel && showRightPanel !== 'ai' ? 'active' : ''}`}
+            data-testid="toggle-inspector"
+            title="Toggle Inspector"
+            onClick={() => setShowRightPanel((prev) => (prev && prev !== 'ai' ? null : 'outline'))}
+          >
+            <ListTree size={15} />
+          </button>
+
+          {/* More Actions Dropdown */}
+          <div style={{ position: 'relative' }} ref={moreMenuRef}>
             <button
-              className={`btn-icon ${showRightPanel === 'outline' ? 'active' : ''}`}
-              title="Toggle Outline"
-              onClick={() => setShowRightPanel((prev) => (prev === 'outline' ? null : 'outline'))}
+              className={`btn-icon ${isMoreMenuOpen ? 'active' : ''}`}
+              data-testid="more-menu"
+              title="More Actions"
+              onClick={() => setIsMoreMenuOpen((prev) => !prev)}
             >
-              <ListTree size={16} />
+              <MoreHorizontal size={15} />
             </button>
-            <button
-              className={`btn-icon ${showRightPanel === 'backlinks' ? 'active' : ''}`}
-              title="Toggle Backlinks"
-              onClick={() =>
-                setShowRightPanel((prev) => (prev === 'backlinks' ? null : 'backlinks'))
-              }
-            >
-              <Link2 size={16} />
-            </button>
-            <button
-              className={`btn-icon ${showRightPanel === 'graph' ? 'active' : ''}`}
-              title="Toggle Local Graph"
-              onClick={() => setShowRightPanel((prev) => (prev === 'graph' ? null : 'graph'))}
-            >
-              <Share2 size={15} />
-            </button>
-            <button
-              className={`btn-icon ${showRightPanel === 'properties' ? 'active' : ''}`}
-              title="Toggle Properties & Tags"
-              onClick={() =>
-                setShowRightPanel((prev) => (prev === 'properties' ? null : 'properties'))
-              }
-            >
-              <Sliders size={15} />
-            </button>
-            <button
-              className={`btn-icon ${showRightPanel === 'ai' ? 'active' : ''}`}
-              title="Toggle Local AI Assistant"
-              onClick={() => setShowRightPanel((prev) => (prev === 'ai' ? null : 'ai'))}
-            >
-              <Bot size={16} />
-            </button>
+
+            {isMoreMenuOpen && (
+              <div className="more-menu-popover">
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    setIsGlobalGraphOpen(true);
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <Share2 size={14} />
+                  <span>Global Graph View</span>
+                  <kbd>Ctrl+G</kbd>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    setIsPluginModalOpen(true);
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <Boxes size={14} />
+                  <span>Plugin Manager</span>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    setIsGatewayModalOpen(true);
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <Server size={14} />
+                  <span>{vaultMode === 'gateway' ? 'Gateway Settings' : 'Connect to Gateway'}</span>
+                </button>
+                <button
+                  className="more-menu-item"
+                  onClick={() => {
+                    void openDirectoryVault();
+                    setIsMoreMenuOpen(false);
+                  }}
+                >
+                  <FolderOpen size={14} />
+                  <span>Open Folder from Disk</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -464,11 +508,11 @@ export const App: React.FC = () => {
         <div
           className="degraded-atomicity-banner"
           style={{
-            background: 'var(--accent-warning, rgba(245, 158, 11, 0.12))',
-            color: '#f59e0b',
-            borderBottom: '1px solid rgba(245, 158, 11, 0.3)',
-            padding: '6px 16px',
+            background: 'var(--status-warning, #f59e0b)',
+            color: '#0d0f12',
+            padding: '4px 16px',
             fontSize: '12px',
+            fontWeight: 500,
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
@@ -492,20 +536,27 @@ export const App: React.FC = () => {
               <div className="sidebar-header-actions">
                 <button
                   className="btn-icon"
+                  style={{ width: '24px', height: '24px' }}
                   title="New Note (Ctrl+N)"
                   onClick={() => void createNote()}
                 >
-                  <FilePlus size={14} />
-                </button>
-                <button className="btn-icon" title="New Folder" onClick={() => void createFolder()}>
-                  <FolderPlus size={14} />
+                  <FilePlus size={13} />
                 </button>
                 <button
                   className="btn-icon"
+                  style={{ width: '24px', height: '24px' }}
+                  title="New Folder"
+                  onClick={() => void createFolder()}
+                >
+                  <FolderPlus size={13} />
+                </button>
+                <button
+                  className="btn-icon"
+                  style={{ width: '24px', height: '24px' }}
                   title="Refresh & Rebuild Index"
                   onClick={() => void refreshVault()}
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw size={13} />
                 </button>
               </div>
             </div>
@@ -515,6 +566,7 @@ export const App: React.FC = () => {
               activePath={activeTabPath}
               onSelect={(path) => {
                 setMainMode('editor');
+                if (viewMode === 'preview') setViewMode('split');
                 void openNote(path);
               }}
               onCreateNote={(name) => void createNote(name)}
@@ -533,6 +585,7 @@ export const App: React.FC = () => {
               refreshKey={eventRefreshCounter}
               onNavigate={(path) => {
                 setMainMode('editor');
+                if (viewMode === 'preview') setViewMode('split');
                 void openNote(path);
               }}
             />
@@ -578,13 +631,26 @@ export const App: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                       color: 'var(--text-muted)',
-                      gap: '12px',
+                      gap: '16px',
                     }}
                   >
-                    <BookOpen size={36} style={{ opacity: 0.3 }} />
-                    <p>No document open</p>
+                    <BookOpen size={40} style={{ opacity: 0.25, strokeWidth: 1.5 }} />
+                    <div style={{ textAlign: 'center' }}>
+                      <p
+                        style={{
+                          fontSize: '15px',
+                          fontWeight: 500,
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        No document open
+                      </p>
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Create a note or select one from the sidebar
+                      </p>
+                    </div>
                     <button className="btn btn-primary" onClick={() => void createNote()}>
-                      <FilePlus size={13} /> Create Note
+                      <FilePlus size={14} /> Create Note
                     </button>
                   </div>
                 )}
@@ -593,86 +659,131 @@ export const App: React.FC = () => {
           )}
         </main>
 
-        {/* Right Rail: Outline, Backlinks, Local Graph, Properties, or AI Assistant */}
-        {showRightPanel === 'outline' && parsedDoc && (
-          <OutlinePanel headings={parsedDoc.headings} onSelectHeading={handleSelectHeading} />
-        )}
+        {/* Right Rail: Unified Inspector Shell */}
+        {showRightPanel && (
+          <aside className="inspector-rail">
+            <div className="inspector-header">
+              <div className="inspector-tabs">
+                <button
+                  className={`inspector-tab ${showRightPanel === 'outline' ? 'active' : ''}`}
+                  onClick={() => setShowRightPanel('outline')}
+                >
+                  Outline
+                </button>
+                <button
+                  className={`inspector-tab ${showRightPanel === 'backlinks' ? 'active' : ''}`}
+                  onClick={() => setShowRightPanel('backlinks')}
+                >
+                  Backlinks
+                </button>
+                <button
+                  className={`inspector-tab ${showRightPanel === 'properties' ? 'active' : ''}`}
+                  onClick={() => setShowRightPanel('properties')}
+                >
+                  Properties
+                </button>
+                <button
+                  className={`inspector-tab ${showRightPanel === 'ai' ? 'active' : ''}`}
+                  onClick={() => setShowRightPanel('ai')}
+                >
+                  AI
+                </button>
+                <button
+                  className={`inspector-tab ${showRightPanel === 'graph' ? 'active' : ''}`}
+                  onClick={() => setShowRightPanel('graph')}
+                >
+                  Graph
+                </button>
+              </div>
+              <button
+                className="btn-icon"
+                style={{ width: '22px', height: '22px' }}
+                onClick={() => setShowRightPanel(null)}
+                title="Close Inspector"
+              >
+                <X size={13} />
+              </button>
+            </div>
 
-        {showRightPanel === 'backlinks' && activeTab && (
-          <BacklinksPanel
-            backlinks={backlinks}
-            parsedDoc={parsedDoc}
-            index={index}
-            onNavigate={(path) => {
-              setMainMode('editor');
-              void openNote(path);
-            }}
-            onCreateNote={(name) => void createNote(name)}
-          />
-        )}
+            <div className="inspector-body">
+              {showRightPanel === 'outline' && parsedDoc && (
+                <OutlinePanel headings={parsedDoc.headings} onSelectHeading={handleSelectHeading} />
+              )}
 
-        {showRightPanel === 'graph' && (
-          <div style={{ width: '320px', height: '100%' }}>
-            <GraphView
-              index={index}
-              activeNotePath={activeTabPath}
-              refreshKey={
-                activeTab?.initialSnapshot?.version.hash ||
-                activeTab?.initialSnapshot?.version.token
-              }
-              isLocal={true}
-              onNavigate={(path) => {
-                setMainMode('editor');
-                void openNote(path);
-              }}
-            />
-          </div>
-        )}
+              {showRightPanel === 'backlinks' && activeTab && (
+                <BacklinksPanel
+                  backlinks={backlinks}
+                  parsedDoc={parsedDoc}
+                  index={index}
+                  onNavigate={(path) => {
+                    setMainMode('editor');
+                    void openNote(path);
+                  }}
+                  onCreateNote={(name) => void createNote(name)}
+                />
+              )}
 
-        {showRightPanel === 'properties' && (
-          <div style={{ width: '300px', height: '100%' }}>
-            <PropertiesPanel
-              parsedDoc={parsedDoc}
-              allTags={allTags}
-              onSelectTag={(tag) => {
-                setSelectedSearchTag(tag);
-                setIsSearchModalOpen(true);
-              }}
-              onUpdateProperties={(newProps) => {
-                if (activeTab) {
-                  const updated = updateDocumentFrontmatter(activeTab.content, newProps);
-                  updateContent(activeTab.path, updated);
-                }
-              }}
-            />
-          </div>
-        )}
-
-        {showRightPanel === 'ai' && (
-          <div style={{ width: '340px', height: '100%' }}>
-            <AIChatDrawer
-              aiBackend={aiBackend}
-              workspaceBackend={backend}
-              activeNotePath={activeTabPath}
-              activeNoteContent={activeTab?.content}
-              activeNoteVersion={
-                activeTab?.initialSnapshot?.version
-                  ? {
-                      token: activeTab.initialSnapshot.version.token,
-                      hash: activeTab.initialSnapshot.version.hash,
-                      modifiedAt: activeTab.initialSnapshot.version.modifiedAt,
-                      size: activeTab.initialSnapshot.version.size,
+              {showRightPanel === 'graph' && (
+                <div style={{ width: '100%', height: '100%', minHeight: '300px' }}>
+                  <GraphView
+                    index={index}
+                    activeNotePath={activeTabPath}
+                    refreshKey={
+                      activeTab?.initialSnapshot?.version.hash ||
+                      activeTab?.initialSnapshot?.version.token
                     }
-                  : undefined
-              }
-              onNavigate={(path) => {
-                setMainMode('editor');
-                void openNote(path);
-              }}
-              onApplyProposedEdit={handleApplyProposedEdit}
-              onClose={() => setShowRightPanel(null)}
-            />
-          </div>
+                    isLocal={true}
+                    onNavigate={(path) => {
+                      setMainMode('editor');
+                      void openNote(path);
+                    }}
+                  />
+                </div>
+              )}
+
+              {showRightPanel === 'properties' && (
+                <PropertiesPanel
+                  parsedDoc={parsedDoc}
+                  allTags={allTags}
+                  onSelectTag={(tag) => {
+                    setSelectedSearchTag(tag);
+                    setIsSearchModalOpen(true);
+                  }}
+                  onUpdateProperties={(newProps) => {
+                    if (activeTab) {
+                      const updated = updateDocumentFrontmatter(activeTab.content, newProps);
+                      updateContent(activeTab.path, updated);
+                    }
+                  }}
+                />
+              )}
+
+              {showRightPanel === 'ai' && (
+                <AIChatDrawer
+                  aiBackend={aiBackend}
+                  workspaceBackend={backend}
+                  activeNotePath={activeTabPath}
+                  activeNoteContent={activeTab?.content}
+                  activeNoteVersion={
+                    activeTab?.initialSnapshot?.version
+                      ? {
+                          token: activeTab.initialSnapshot.version.token,
+                          hash: activeTab.initialSnapshot.version.hash,
+                          modifiedAt: activeTab.initialSnapshot.version.modifiedAt,
+                          size: activeTab.initialSnapshot.version.size,
+                        }
+                      : undefined
+                  }
+                  onNavigate={(path) => {
+                    setMainMode('editor');
+                    void openNote(path);
+                  }}
+                  onApplyProposedEdit={handleApplyProposedEdit}
+                  onClose={() => setShowRightPanel(null)}
+                />
+              )}
+            </div>
+          </aside>
         )}
       </div>
 
@@ -692,8 +803,19 @@ export const App: React.FC = () => {
 
       {/* Global Full-Screen Graph Modal */}
       {isGlobalGraphOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 animate-in fade-in duration-150">
-          <div className="relative w-full max-w-6xl h-[85vh] bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col">
+        <div className="modal-overlay" onClick={() => setIsGlobalGraphOpen(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '92vw',
+              maxWidth: '1200px',
+              height: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: 0,
+            }}
+          >
             <GraphView
               index={index}
               activeNotePath={activeTabPath}
