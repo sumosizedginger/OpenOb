@@ -8,3 +8,4 @@ export * from './client.js';
 export * from './backend.js';
 export * from './saved-views.js';
 export * from './ai-backend.js';
+export * from './plugin-services.js';

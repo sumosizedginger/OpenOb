@@ -141,44 +141,62 @@ Exit gate:
 - cloud secret cannot be read back by UI
 - provider failure cannot affect note operations
 
-## Phase 9 — Plugin SDK
+## Phase 9 — Plugin SDK (Completed in Phase 3H)
 
 Deliver:
 
-- manifest
-- permissions
-- plugin host
-- commands
-- views
-- settings
-- vault/search/AI APIs
+- manifest validation & contribution declarations
+- capability-gated in-process plugin host & bridge
+- version-aware OCC note contracts (PluginNoteSnapshot)
+- reserved .openob metadata boundary guard
+- dual-mode backend execution (Gateway REST vs Local FSA)
+- search freshness through host services
+- AI chat integration with zero secret leakage
+- lifecycle & UI crash containment
 - developer template
 
 Exit gate:
 
 - crashing plugin does not crash workspace
-- unauthorized capability calls fail
+- unauthorized capability calls fail closed with PermissionDeniedError
 - first-party plugin can be built with no private imports
+- OCC version tokens required on all updates, eliminating blind overwrite races
 
-## Phase 10 — First-Party Plugin Pack
+## Phase 10 — First-Party Plugin Pack (Completed in Phase 3H)
 
-Potential:
+Delivered First-Party Plugins (API Version 2.x):
 
-- Daily Notes
-- Templates
-- Calendar
-- Kanban
-- Character Bible
-- Manuscript Tools
-- Git
-- Advanced Graph
-- AI providers
+- Daily Notes (`@okw/plugin/plugins/daily-notes`)
+- Templates (`@okw/plugin/plugins/templates`)
+- Word Count (`@okw/plugin/plugins/word-count`)
+- Character Bible (`@okw/plugin/plugins/character-bible`)
+- Manuscript Tools (`@okw/plugin/plugins/manuscript-tools`)
 
 Exit gate:
 
 - API pain points resolved publicly, not with secret backdoors
+- Strict OCC and permission boundaries verified across full suite of first-party plugins
 
-## Phase 11 — Dogfood / Public Alpha
+## Phase 11 — Electron Desktop Shell & Embedded Gateway (Completed in Phase 3I)
+
+Deliver:
+
+- Electron desktop application (`apps/desktop`) with strict security defaults (`nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, CSP)
+- Embedded Gateway bound to ephemeral loopback (`127.0.0.1:0`) with per-session bearer tokens
+- Unified single canonical mutation authority (Workspace/Gateway backend)
+- Native file watcher (`NativeVaultWatcher`) with self-write deduplication
+- Disposable SQLite index reconstruction from Markdown notes
+- AES-256-GCM encrypted native desktop secret store (`DesktopSecretStore`)
+- Packaging configuration via `electron-builder` for Windows x64 (NSIS + portable), macOS, and Linux
+- Preload bridge (`window.openobDesktop`) with zero raw Node/FS IPC exposure
+
+Exit gate:
+
+- Zero token leakage into DOM, storage, logs, URLs, or note corpora
+- External changes sync live to UI without mutation loops
+- Full desktop lifecycle integration and E2E suites passing
+
+## Phase 12 — Dogfood / Public Alpha
 
 Deliver:
 
@@ -191,16 +209,6 @@ Exit gate:
 
 - core workflows feel better than returning to another notes app for target users
 - no severity-critical integrity bugs
-
-## Phase 12 — Desktop Wrapper
-
-Deliver later:
-
-- Electron shell
-- filesystem watcher
-- native integration
-- secure key storage
-- update flow
 
 ## Phase 13 — Sync
 

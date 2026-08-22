@@ -10,7 +10,10 @@
     "openob-mcp": "./dist/bin/mcp.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",

@@ -1,7 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { AddressInfo } from 'node:net';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
@@ -19,6 +18,7 @@ import {
   redactSecrets,
   retrieveContext,
   ServerSecretStore,
+  SecretStore,
   isReservedOpenObPath,
 } from '@okw/ai';
 import { VaultPath } from '@okw/core';
@@ -45,7 +45,7 @@ export interface GatewayOptions {
   readonly maxBodyBytes?: number;
   readonly serveWeb?: boolean;
   readonly webDistPath?: string;
-  readonly secretStore?: ServerSecretStore;
+  readonly secretStore?: ServerSecretStore | SecretStore;
   readonly aiManager?: AIManager;
 }
 
@@ -212,23 +212,16 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
       (method === 'GET' || method === 'HEAD') &&
       !pathname.startsWith('/api/')
     ) {
-      const defaultWebDist = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        '../../web/dist'
+      const webDistDir = path.resolve(
+        options.webDistPath || path.resolve(process.cwd(), 'apps/web/dist')
       );
-      let webDistDir = path.resolve(options.webDistPath || defaultWebDist);
-      if (!fs.existsSync(webDistDir)) {
-        const fallbackDist = path.resolve(process.cwd(), 'apps/web/dist');
-        if (fs.existsSync(fallbackDist)) {
-          webDistDir = fallbackDist;
-        }
-      }
 
       const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
       let targetFile = path.resolve(webDistDir, relativePath);
 
-      // Disallow directory traversal outside of webDistDir
-      if (targetFile.startsWith(webDistDir)) {
+      // Disallow directory traversal outside of webDistDir (strict path containment boundary P3-1)
+      const webDistBoundary = webDistDir.endsWith(path.sep) ? webDistDir : webDistDir + path.sep;
+      if (targetFile === webDistDir || targetFile.startsWith(webDistBoundary)) {
         let fileBuffer: Buffer | null = null;
         let fileExt = path.extname(targetFile).toLowerCase();
 
@@ -261,6 +254,10 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           res.setHeader('Content-Type', mimeType);
           res.setHeader('X-Content-Type-Options', 'nosniff');
           res.setHeader('X-Frame-Options', 'DENY');
+          res.setHeader(
+            'Content-Security-Policy',
+            "default-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';"
+          );
           if (method === 'HEAD') {
             res.end();
           } else {
@@ -911,7 +908,10 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
         try {
           providerInstance = await aiManager.getProvider(providerId as AIProviderId);
         } catch (err: any) {
-          const known = secretStore.getAllKnownSecrets();
+          const known =
+            typeof (secretStore as any)?.getAllKnownSecrets === 'function'
+              ? (secretStore as any).getAllKnownSecrets()
+              : [];
           const redactedMsg = redactSecrets(
             err?.message || 'Failed to initialize AI provider',
             known
@@ -982,7 +982,10 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           res.write('data: [DONE]\n\n');
           res.end();
         } catch (err: any) {
-          const known = secretStore.getAllKnownSecrets();
+          const known =
+            typeof (secretStore as any)?.getAllKnownSecrets === 'function'
+              ? (secretStore as any).getAllKnownSecrets()
+              : [];
           const redactedMsg = redactSecrets(err?.message || 'AI generation failed', known);
           if (!res.headersSent) {
             res.statusCode = 502;
@@ -1090,7 +1093,10 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
             res.end(JSON.stringify({ models }));
             return;
           } catch (err: any) {
-            const known = secretStore.getAllKnownSecrets();
+            const known =
+              typeof (secretStore as any)?.getAllKnownSecrets === 'function'
+                ? (secretStore as any).getAllKnownSecrets()
+                : [];
             const redactedMsg = redactSecrets(err?.message || 'Failed to list models', known);
             res.statusCode = 502;
             res.end(JSON.stringify({ code: 'AI_PROVIDER_ERROR', message: redactedMsg }));
@@ -1415,3 +1421,15 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     },
   };
 }
+
+export const DESKTOP_GATEWAY_SCOPES = [
+  'workspace.read',
+  'workspace.search',
+  'workspace.write',
+  'properties.write',
+  'workspace.rename',
+  'workspace.delete',
+  'workspace.views.write',
+  'workspace.ai.use',
+  'workspace.ai.configure',
+] as const;

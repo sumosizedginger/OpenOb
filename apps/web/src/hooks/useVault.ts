@@ -289,11 +289,13 @@ export function useVault() {
         } else {
           if (isMounted) {
             setGatewayReachable(false);
+            setSaveStatus('disconnected');
           }
         }
       } catch {
         if (isMounted) {
           setGatewayReachable(false);
+          setSaveStatus('disconnected');
         }
       }
     };
@@ -674,7 +676,10 @@ export function useVault() {
       onConnect: () => {
         setGatewayReachable(true);
       },
-      onDisconnect: () => {},
+      onDisconnect: () => {
+        setGatewayReachable(false);
+        setSaveStatus('disconnected');
+      },
     });
 
     return () => {
@@ -700,14 +705,17 @@ export function useVault() {
         vaultModeRef.current = 'gateway';
         setVaultName(info.name);
 
-        try {
-          sessionStorage.setItem('openob_gateway_url', url);
-          if (token) {
-            sessionStorage.setItem('openob_gateway_token', token);
-          } else {
-            sessionStorage.removeItem('openob_gateway_token');
-          }
-        } catch {}
+        // In desktop mode, token is delivered in-memory only via preload bridge; never persist to sessionStorage
+        if (typeof window === 'undefined' || !(window as any).openobDesktop) {
+          try {
+            sessionStorage.setItem('openob_gateway_url', url);
+            if (token) {
+              sessionStorage.setItem('openob_gateway_token', token);
+            } else {
+              sessionStorage.removeItem('openob_gateway_token');
+            }
+          } catch {}
+        }
 
         setOpenTabs([]);
         setActiveTabPath(null);
@@ -797,6 +805,32 @@ export function useVault() {
   // Auto-connect or seed initial vault on mount
   useEffect(() => {
     void (async () => {
+      // 1. Electron Desktop Bootstrap integration (in-memory token delivery)
+      if (typeof window !== 'undefined' && window.openobDesktop) {
+        try {
+          const bootstrap = await window.openobDesktop.getBootstrapConfig();
+          if (bootstrap && bootstrap.gatewayUrl) {
+            const res = await connectToGateway(bootstrap.gatewayUrl, bootstrap.token);
+            if (res.success) {
+              window.openobDesktop.onLifecycleEvent(async (event) => {
+                if (event.type === 'vault-switched' && event.payload) {
+                  await connectToGateway(event.payload.gatewayUrl, event.payload.token);
+                }
+              });
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('[useVault] Failed to connect to desktop gateway bootstrap:', err);
+        }
+        // In desktop mode, if embedded gateway is unreachable, fail truthfully without ghost state (P3-5)
+        setGatewayConnected(false);
+        setSaveStatus('disconnected');
+        setGatewayReachable(false);
+        return;
+      }
+
+      // 2. Browser session restoration
       let restored = false;
       try {
         const savedUrl = sessionStorage.getItem('openob_gateway_url');
@@ -819,8 +853,22 @@ export function useVault() {
     })();
   }, []);
 
-  // Open directory via File System Access API
+  // Open directory via Native Picker (Desktop) or File System Access API (Browser)
   const openDirectoryVault = async () => {
+    // 1. Electron Desktop native directory picker
+    if (typeof window !== 'undefined' && window.openobDesktop) {
+      try {
+        const newBootstrap = await window.openobDesktop.chooseVault();
+        if (newBootstrap && newBootstrap.gatewayUrl) {
+          await connectToGateway(newBootstrap.gatewayUrl, newBootstrap.token);
+        }
+        return;
+      } catch (err) {
+        console.error('[useVault] Error choosing desktop vault:', err);
+      }
+    }
+
+    // 2. Browser File System Access API
     if ('showDirectoryPicker' in window) {
       try {
         const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });

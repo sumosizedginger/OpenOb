@@ -9,6 +9,7 @@ export interface SecretStore {
   hasSecret(providerId: string): Promise<boolean>;
   getMaskedSecret(providerId: string): Promise<string | null>;
   clearSecret(providerId: string): Promise<void>;
+  getAllKnownSecrets?(): string[];
 }
 
 /**
@@ -16,6 +17,10 @@ export interface SecretStore {
  */
 export class StandardSecretStore implements SecretStore {
   private readonly memoryStorage = new Map<string, string>();
+
+  getAllKnownSecrets(): string[] {
+    return Array.from(this.memoryStorage.values()).filter(Boolean);
+  }
 
   async setSecret(providerId: string, secret: string): Promise<void> {
     const cleanSecret = secret.trim();

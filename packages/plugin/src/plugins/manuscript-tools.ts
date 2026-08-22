@@ -4,7 +4,7 @@ export const manuscriptToolsManifest: PluginManifest = {
   id: 'okw.manuscript-tools',
   name: 'Manuscript Tools & Word Tracker',
   version: '1.0.0',
-  apiVersion: '1.x',
+  apiVersion: '2.x',
   description: 'Novel and manuscript progress tracker with chapter statistics and target goals.',
   permissions: ['vault.read'],
   contributes: {
@@ -34,8 +34,8 @@ export class ManuscriptToolsPlugin implements Plugin {
 
         let totalWords = 0;
         for (const path of chapterPaths) {
-          const content = await api.vault.read(path);
-          const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+          const snap = await api.vault.read(path);
+          const words = snap.content.trim() ? snap.content.trim().split(/\s+/).length : 0;
           totalWords += words;
         }
 

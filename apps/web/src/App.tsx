@@ -17,7 +17,11 @@ import { CommandPalette } from './components/CommandPalette.js';
 import { ParsedHeading, VaultPath } from '@okw/core';
 import { updateDocumentFrontmatter } from '@okw/markdown';
 import { ProposedEdit } from '@okw/ai';
-import { GatewayAIBackend, LocalAIBackend } from '@okw/workspace';
+import {
+  GatewayAIBackend,
+  LocalAIBackend,
+  createWorkspacePluginHostServices,
+} from '@okw/workspace';
 import {
   PluginHost,
   wordCountManifest,
@@ -66,7 +70,6 @@ export const App: React.FC = () => {
     gatewayReachable,
     eventRefreshCounter,
     backend,
-    storage,
     entries,
     openTabs,
     activeTab,
@@ -109,12 +112,21 @@ export const App: React.FC = () => {
   const [isPluginModalOpen, setIsPluginModalOpen] = useState(false);
   const [allTags, setAllTags] = useState<Map<string, number>>(new Map());
 
-  // Initialize PluginHost with First-Party Plugins (Constitution Law 20)
+  const aiBackend = React.useMemo(() => {
+    if (vaultMode === 'gateway' && gatewayUrl) {
+      const token = (backend as any)?.getClient?.()?.getToken?.() || (backend as any)?.token || '';
+      return new GatewayAIBackend({
+        url: gatewayUrl,
+        token,
+      });
+    }
+    return new LocalAIBackend(backend);
+  }, [vaultMode, gatewayUrl, backend]);
+
+  // Initialize PluginHost with First-Party Plugins (Constitution Law 20 / Phase 3H)
   const [pluginHost] = useState<PluginHost>(() => {
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: activeTabPath,
+    const services = createWorkspacePluginHostServices(backend, aiBackend, {
+      getActiveNotePath: () => activeTabPath,
       openNote: async (p) => {
         setMainMode('editor');
         await openNote(p);
@@ -123,6 +135,8 @@ export const App: React.FC = () => {
         alert(msg);
       },
     });
+
+    const host = new PluginHost({ services });
 
     host.registerPlugin(wordCountManifest, () => new WordCountPlugin());
     host.registerPlugin(dailyNotesManifest, () => new DailyNotesPlugin());
@@ -139,14 +153,22 @@ export const App: React.FC = () => {
     return host;
   });
 
-  // Keep plugin host context updated with live state
+  // Keep plugin host context updated with live backend authority (Gateway vs Standalone)
   useEffect(() => {
     pluginHost.updateContext({
-      storage,
-      index,
-      activeNotePath: activeTabPath,
+      services: createWorkspacePluginHostServices(backend, aiBackend, {
+        getActiveNotePath: () => activeTabPath,
+        openNote: async (p) => {
+          setMainMode('editor');
+          await openNote(p);
+        },
+        showNotice: (msg) => {
+          alert(msg);
+        },
+      }),
     });
-  }, [pluginHost, storage, index, activeTabPath]);
+    (window as any).__pluginHost = pluginHost;
+  }, [pluginHost, backend, aiBackend, activeTabPath, openNote]);
 
   // Aggregate vault tags for Properties & Tags Explorer
   useEffect(() => {
@@ -263,17 +285,6 @@ export const App: React.FC = () => {
       }
     }
   };
-
-  const aiBackend = React.useMemo(() => {
-    if (vaultMode === 'gateway' && gatewayUrl) {
-      const token = (backend as any)?.getClient?.()?.getToken?.() || (backend as any)?.token || '';
-      return new GatewayAIBackend({
-        url: gatewayUrl,
-        token,
-      });
-    }
-    return new LocalAIBackend(backend);
-  }, [vaultMode, gatewayUrl, backend]);
 
   // Phase 7: Apply user-accepted AI proposed edit (Constitution Law 19)
   const handleApplyProposedEdit = async (proposal: ProposedEdit) => {

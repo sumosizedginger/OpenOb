@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryVaultStorage } from '@okw/vault';
-import { MemoryDocumentIndex } from '@okw/index';
 import {
   PluginHost,
   PluginManifest,
   Plugin,
   PluginAPI,
+  PluginHostServices,
   PermissionDeniedError,
   wordCountManifest,
   WordCountPlugin,
@@ -13,17 +12,82 @@ import {
   DailyNotesPlugin,
 } from '../index.js';
 
+function createMockServices(initialNotes: Record<string, string> = {}): {
+  services: PluginHostServices;
+  store: Map<string, { content: string; version: string }>;
+  activeNote: { path: string | null };
+} {
+  const store = new Map<string, { content: string; version: string }>();
+  let vCounter = 1;
+  for (const [k, v] of Object.entries(initialNotes)) {
+    store.set(k, { content: v, version: `v${vCounter++}` });
+  }
+
+  const activeNote = { path: null as string | null };
+
+  const services: PluginHostServices = {
+    notes: {
+      read: async (path) => {
+        const item = store.get(path);
+        if (!item) throw new Error(`Note not found: ${path}`);
+        return { path, content: item.content, version: { token: item.version } };
+      },
+      create: async (path, content) => {
+        if (store.has(path)) throw new Error(`Note already exists: ${path}`);
+        const ver = `v${vCounter++}`;
+        store.set(path, { content, version: ver });
+        return { path, version: { token: ver } };
+      },
+      update: async (path, content, expected) => {
+        const item = store.get(path);
+        if (!item) throw new Error(`Note not found: ${path}`);
+        if (item.version !== expected.token) throw new Error('Version conflict');
+        const ver = `v${vCounter++}`;
+        store.set(path, { content, version: ver });
+        return { path, version: { token: ver } };
+      },
+      delete: async (path, expected) => {
+        const item = store.get(path);
+        if (!item) throw new Error(`Note not found: ${path}`);
+        if (item.version !== expected.token) throw new Error('Version conflict');
+        store.delete(path);
+      },
+      list: async (prefix) => {
+        return Array.from(store.keys()).filter((p) => !prefix || p.startsWith(prefix)) as any[];
+      },
+    },
+    search: {
+      query: async (query) => {
+        const res = [];
+        for (const [p, item] of store.entries()) {
+          if (item.content.includes(query) || p.includes(query)) {
+            res.push({ path: p as any, title: p, score: 1 });
+          }
+        }
+        return res;
+      },
+    },
+    workspace: {
+      getActiveNotePath: () => activeNote.path as any,
+      openNote: async (p) => {
+        activeNote.path = p;
+      },
+      showNotice: () => {},
+    },
+  };
+
+  return { services, store, activeNote };
+}
+
 describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
   it('Law 20 (F-006): Throws PermissionDeniedError when plugin accesses undeclared capabilities', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-    await storage.write('Secret.md', null, 'Classified document');
+    const { services } = createMockServices({ 'Secret.md': 'Classified document' });
 
     const unauthorizedManifest: PluginManifest = {
       id: 'unauthorized-plugin',
       name: 'Unauthorized Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['workspace.modify'], // ONLY workspace.modify, NO vault.read or vault.write
     };
 
@@ -40,7 +104,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
         }
 
         try {
-          await api.vault.write('Hacked.md', 'Data');
+          await api.vault.create('Hacked.md', 'Data');
         } catch (e: any) {
           caughtVaultWriteError = e;
         }
@@ -54,13 +118,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    const host = new PluginHost({ services });
 
     host.registerPlugin(unauthorizedManifest, () => new TestPlugin());
     const enabled = await host.enablePlugin(unauthorizedManifest.id);
@@ -72,14 +130,13 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
   });
 
   it('Law 20 (F-007): Crashing plugin during onload is safely contained and marked as error', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
+    const { services } = createMockServices();
 
     const buggyManifest: PluginManifest = {
       id: 'buggy-plugin',
       name: 'Buggy Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read'],
     };
 
@@ -90,13 +147,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    const host = new PluginHost({ services });
 
     host.registerPlugin(buggyManifest, () => new CrashingPlugin());
     const enabled = await host.enablePlugin(buggyManifest.id);
@@ -110,8 +161,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
   });
 
   it('controls plugin lifecycle: enable, disable, and restart', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
+    const { services } = createMockServices();
 
     let loaded = false;
     let unloaded = false;
@@ -120,7 +170,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
       id: 'lifecycle-test',
       name: 'Lifecycle Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: [],
     };
 
@@ -133,13 +183,7 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
       }
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    const host = new PluginHost({ services });
 
     host.registerPlugin(lifecycleManifest, () => new LifecyclePlugin());
     expect(host.getPlugin(lifecycleManifest.id)?.status).toBe('loaded');
@@ -157,20 +201,27 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
   });
 
   it('runs first-party plugins (WordCount and DailyNotes) cleanly via public API', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-    await storage.write('Notes/Doc.md', null, '# Title\n\nOne two three four five words.');
+    const { services, store, activeNote } = createMockServices({
+      'Notes/Doc.md': '# Title\n\nOne two three four five words.',
+    });
+    activeNote.path = 'Notes/Doc.md';
 
     const noticeSpy = vi.fn();
-    const openNoteSpy = vi.fn();
-
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: 'Notes/Doc.md',
-      openNote: openNoteSpy,
-      showNotice: noticeSpy,
+    const openNoteSpy = vi.fn(async (p: any) => {
+      activeNote.path = p;
     });
+
+    const hostServices: PluginHostServices = {
+      ...services,
+      workspace: {
+        ...services.workspace,
+        getActiveNotePath: () => activeNote.path as any,
+        openNote: openNoteSpy,
+        showNotice: noticeSpy,
+      },
+    };
+
+    const host = new PluginHost({ services: hostServices });
 
     // 1. Word Count Plugin
     host.registerPlugin(wordCountManifest, () => new WordCountPlugin());
@@ -190,22 +241,22 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
     const today = new Date().toISOString().slice(0, 10);
     expect(openNoteSpy).toHaveBeenCalledWith(`Daily/${today}.md`);
 
-    const createdNote = await storage.read(`Daily/${today}.md`);
-    expect(new TextDecoder().decode(createdNote.content)).toContain(`# Daily Note: ${today}`);
+    const createdNote = store.get(`Daily/${today}.md`);
+    expect(createdNote?.content).toContain(`# Daily Note: ${today}`);
   });
 
   it('P1-UI-001: enabled plugins dynamically observe updated context (no mount-time freezing)', async () => {
-    const storageA = new MemoryVaultStorage();
-    const storageB = new MemoryVaultStorage();
-    const indexA = new MemoryDocumentIndex();
-    const indexB = new MemoryDocumentIndex();
+    const { services: servicesA, store: storeA } = createMockServices({
+      'Initial.md': 'Initial content',
+    });
+    const { services: servicesB, store: storeB } = createMockServices();
 
     let capturedAPI: PluginAPI | null = null;
     const dynamicManifest: PluginManifest = {
       id: 'dynamic-context-plugin',
       name: 'Dynamic Context Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read', 'vault.write', 'workspace.modify'],
     };
 
@@ -216,38 +267,24 @@ describe('Plugin SDK & Isolated Capability Host (Constitution Law 20)', () => {
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage: storageA,
-      index: indexA,
-      activeNotePath: 'Initial.md',
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    const host = new PluginHost({ services: servicesA });
 
     host.registerPlugin(dynamicManifest, () => new ContextTestPlugin());
     await host.enablePlugin(dynamicManifest.id);
 
     expect(capturedAPI).not.toBeNull();
 
-    // 1. Initial write lands in storageA
-    await capturedAPI!.vault.write('TestA.md', 'Content in A');
-    expect(await storageA.exists('TestA.md')).toBe(true);
-    expect(await storageB.exists('TestA.md')).toBe(false);
-    expect(capturedAPI!.workspace.getActiveNotePath()).toBe('Initial.md');
+    // 1. Initial write lands in storeA
+    await capturedAPI!.vault.create('TestA.md', 'Content in A');
+    expect(storeA.has('TestA.md')).toBe(true);
+    expect(storeB.has('TestA.md')).toBe(false);
 
-    // 2. Switch context to storageB (simulating real vault opening in UI)
-    host.updateContext({
-      storage: storageB,
-      index: indexB,
-      activeNotePath: 'ActiveInB.md',
-    });
+    // 2. Switch context to servicesB (simulating real vault switching in UI)
+    host.updateContext({ services: servicesB });
 
-    // 3. Write through previously enabled plugin MUST land in storageB, not storageA
-    await capturedAPI!.vault.write('TestB.md', 'Content in B');
-    expect(await storageB.exists('TestB.md')).toBe(true);
-    expect(await storageA.exists('TestB.md')).toBe(false);
-
-    // 4. Workspace active note path MUST reflect updated context
-    expect(capturedAPI!.workspace.getActiveNotePath()).toBe('ActiveInB.md');
+    // 3. Write through previously enabled plugin MUST land in storeB, not storeA
+    await capturedAPI!.vault.create('TestB.md', 'Content in B');
+    expect(storeB.has('TestB.md')).toBe(true);
+    expect(storeA.has('TestB.md')).toBe(false);
   });
 });

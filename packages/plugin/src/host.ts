@@ -1,12 +1,14 @@
-import type {
+import {
   Plugin,
   PluginCommand,
   PluginHostContext,
   PluginInstance,
   PluginManifest,
   PluginView,
+  VALID_PLUGIN_PERMISSIONS,
 } from './types.js';
 import { createPluginAPI } from './bridge.js';
+import { DuplicateContributionError, InvalidManifestError } from './errors.js';
 
 export interface PluginRegistration {
   manifest: PluginManifest;
@@ -14,8 +16,91 @@ export interface PluginRegistration {
 }
 
 /**
+ * Validates a plugin manifest for structural correctness and permitted capabilities.
+ */
+export function validatePluginManifest(manifest: PluginManifest): void {
+  if (!manifest || typeof manifest !== 'object') {
+    throw new InvalidManifestError('unknown', 'Manifest must be a non-null object.');
+  }
+
+  const { id, name, version, apiVersion, permissions, contributes } = manifest;
+
+  if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(id) || id.length > 128) {
+    throw new InvalidManifestError(
+      id || 'unknown',
+      'Plugin ID must be a non-empty alphanumeric string (max 128 chars, dots/dashes/underscores allowed).'
+    );
+  }
+
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    throw new InvalidManifestError(id, 'Plugin name must be a non-empty string.');
+  }
+
+  if (!version || typeof version !== 'string' || version.trim().length === 0) {
+    throw new InvalidManifestError(id, 'Plugin version must be a non-empty string.');
+  }
+
+  if (!apiVersion || typeof apiVersion !== 'string' || apiVersion.trim().length === 0) {
+    throw new InvalidManifestError(id, 'Plugin apiVersion must be a non-empty string.');
+  }
+
+  if (!Array.isArray(permissions)) {
+    throw new InvalidManifestError(id, 'Plugin permissions must be an array.');
+  }
+
+  const seenPerms = new Set<string>();
+  for (const perm of permissions) {
+    if (!VALID_PLUGIN_PERMISSIONS.includes(perm as any)) {
+      throw new InvalidManifestError(id, `Unknown or unauthorized permission: "${perm}".`);
+    }
+    if (seenPerms.has(perm)) {
+      throw new InvalidManifestError(id, `Duplicate permission declared: "${perm}".`);
+    }
+    seenPerms.add(perm);
+  }
+
+  if (contributes) {
+    if (typeof contributes !== 'object') {
+      throw new InvalidManifestError(id, 'contributes must be an object.');
+    }
+
+    if (contributes.commands) {
+      if (!Array.isArray(contributes.commands)) {
+        throw new InvalidManifestError(id, 'contributes.commands must be an array.');
+      }
+      const seenCmds = new Set<string>();
+      for (const cmd of contributes.commands) {
+        if (!cmd || typeof cmd.id !== 'string' || cmd.id.trim().length === 0) {
+          throw new InvalidManifestError(id, 'Declared command must have a non-empty string id.');
+        }
+        if (seenCmds.has(cmd.id)) {
+          throw new InvalidManifestError(id, `Duplicate command ID declared: "${cmd.id}".`);
+        }
+        seenCmds.add(cmd.id);
+      }
+    }
+
+    if (contributes.views) {
+      if (!Array.isArray(contributes.views)) {
+        throw new InvalidManifestError(id, 'contributes.views must be an array.');
+      }
+      const seenViews = new Set<string>();
+      for (const view of contributes.views) {
+        if (!view || typeof view.id !== 'string' || view.id.trim().length === 0) {
+          throw new InvalidManifestError(id, 'Declared view must have a non-empty string id.');
+        }
+        if (seenViews.has(view.id)) {
+          throw new InvalidManifestError(id, `Duplicate view ID declared: "${view.id}".`);
+        }
+        seenViews.add(view.id);
+      }
+    }
+  }
+}
+
+/**
  * Permission-gated, crash-resilient Plugin Host (Constitution Law 20, F-007).
- * Controls plugin lifecycle, capability gating, and error containment.
+ * Controls plugin lifecycle, capability gating, contribution safety, and error containment.
  */
 export class PluginHost {
   private readonly registrations = new Map<string, PluginRegistration>();
@@ -35,16 +120,20 @@ export class PluginHost {
   }
 
   registerPlugin(manifest: PluginManifest, factory: () => Plugin): void {
-    this.registrations.set(manifest.id, { manifest, factory });
-    if (!this.instances.has(manifest.id)) {
-      this.instances.set(manifest.id, {
-        manifest,
-        plugin: null,
-        status: 'loaded',
-        registeredCommands: [],
-        registeredViews: [],
-      });
+    validatePluginManifest(manifest);
+
+    if (this.registrations.has(manifest.id)) {
+      throw new DuplicateContributionError(manifest.id, 'plugin', manifest.id);
     }
+
+    this.registrations.set(manifest.id, { manifest, factory });
+    this.instances.set(manifest.id, {
+      manifest,
+      plugin: null,
+      status: 'loaded',
+      registeredCommands: [],
+      registeredViews: [],
+    });
   }
 
   async enablePlugin(pluginId: string): Promise<boolean> {
@@ -65,11 +154,35 @@ export class PluginHost {
       inst.registeredCommands = [];
       inst.registeredViews = [];
 
+      const onRegisterCommand = (cmd: PluginCommand) => {
+        // Collision check across other enabled plugins
+        for (const [otherId, otherInst] of this.instances.entries()) {
+          if (otherId !== pluginId && otherInst.status === 'enabled') {
+            if (otherInst.registeredCommands.some((c) => c.id === cmd.id)) {
+              throw new DuplicateContributionError(pluginId, 'command', cmd.id);
+            }
+          }
+        }
+      };
+
+      const onRegisterView = (view: PluginView) => {
+        // Collision check across other enabled plugins
+        for (const [otherId, otherInst] of this.instances.entries()) {
+          if (otherId !== pluginId && otherInst.status === 'enabled') {
+            if (otherInst.registeredViews.some((v) => v.id === view.id)) {
+              throw new DuplicateContributionError(pluginId, 'view', view.id);
+            }
+          }
+        }
+      };
+
       const api = createPluginAPI(
         reg.manifest,
         () => this.context,
         inst.registeredCommands,
-        inst.registeredViews
+        inst.registeredViews,
+        onRegisterCommand,
+        onRegisterView
       );
 
       // Safe execution boundary (Law 20, F-007)
@@ -161,5 +274,23 @@ export class PluginHost {
       }
     }
     return { success: false, error: `Command "${commandId}" not found.` };
+  }
+
+  renderView(viewId: string, container: HTMLElement): { success: boolean; error?: string } {
+    for (const inst of this.instances.values()) {
+      if (inst.status === 'enabled') {
+        const view = inst.registeredViews.find((v) => v.id === viewId);
+        if (view) {
+          try {
+            view.render(container);
+            return { success: true };
+          } catch (err: any) {
+            container.innerHTML = `<div class="plugin-view-error" style="color: #f87171; padding: 8px; font-size: 12px;">Plugin View Error: ${err?.message || 'Failed to render'}</div>`;
+            return { success: false, error: err?.message || 'Failed to render view' };
+          }
+        }
+      }
+    }
+    return { success: false, error: `View "${viewId}" not found.` };
   }
 }

@@ -14,6 +14,11 @@ import {
   applyProposedEdit,
 } from '@okw/ai';
 import {
+  OpenObWorkspace,
+  LocalWorkspaceBackend,
+  createWorkspacePluginHostServices,
+} from '@okw/workspace';
+import {
   PluginHost,
   wordCountManifest,
   WordCountPlugin,
@@ -132,16 +137,25 @@ Updated with veteran lore.`;
     let navigatedPath: string | null = null;
     const notices: string[] = [];
 
-    const pluginHost = new PluginHost({
+    const workspace = new OpenObWorkspace({
       storage,
       index,
-      activeNotePath: 'Manuscript/Chapter_01.md',
-      openNote: async (p) => {
-        navigatedPath = p;
-      },
-      showNotice: (msg) => {
-        notices.push(msg);
-      },
+      parser,
+      safeWriter,
+      readOnly: false,
+    });
+    const backend = new LocalWorkspaceBackend(workspace);
+
+    const pluginHost = new PluginHost({
+      services: createWorkspacePluginHostServices(backend, undefined, {
+        getActiveNotePath: () => 'Manuscript/Chapter_01.md',
+        openNote: async (p) => {
+          navigatedPath = p;
+        },
+        showNotice: (msg) => {
+          notices.push(msg);
+        },
+      }),
     });
 
     pluginHost.registerPlugin(wordCountManifest, () => new WordCountPlugin());

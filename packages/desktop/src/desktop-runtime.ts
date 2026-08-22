@@ -4,6 +4,7 @@ import { NodeFsVaultStorage, SafeWriter } from '@okw/vault';
 import { SqliteDocumentIndex, rebuildVaultIndex } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 import { FileSnapshot } from '@okw/core';
+import { OpenObWorkspace } from '@okw/workspace';
 import { NativeVaultWatcher } from './fs-watcher.js';
 import { DesktopSecretStore } from './secure-storage.js';
 import { WatcherEvent } from './types.js';
@@ -25,6 +26,7 @@ export class DesktopVaultRuntime {
   readonly safeWriter: SafeWriter;
   readonly parser: DefaultDocumentParser;
   readonly index: SqliteDocumentIndex;
+  readonly workspace: OpenObWorkspace;
   readonly watcher: NativeVaultWatcher;
   readonly secretStore: DesktopSecretStore | null;
   private unsubscribeWatcher: (() => void) | null = null;
@@ -61,6 +63,14 @@ export class DesktopVaultRuntime {
     this.parser = new DefaultDocumentParser();
     this.index = index;
     this.secretStore = secretStore;
+    this.workspace = new OpenObWorkspace({
+      vaultName: path.basename(vaultPath),
+      storage: this.storage,
+      index: this.index,
+      parser: this.parser,
+      safeWriter: this.safeWriter,
+      readOnly: false,
+    });
     this.watcher = new NativeVaultWatcher(vaultPath, {
       debounceMs: options.debounceMs ?? 50,
     });
@@ -299,6 +309,19 @@ export class DesktopVaultRuntime {
     this._reconciliationState = this.verificationErrors.length > 0 ? 'degraded' : 'verified';
   }
 
+  private pendingResyncs: Map<string, NodeJS.Timeout> = new Map();
+
+  private schedulePendingResync(event: WatcherEvent): void {
+    if (this.pendingResyncs.has(event.path)) {
+      clearTimeout(this.pendingResyncs.get(event.path)!);
+    }
+    const timer = setTimeout(() => {
+      this.pendingResyncs.delete(event.path);
+      void this.handleWatcherEvent(event);
+    }, 500);
+    this.pendingResyncs.set(event.path, timer);
+  }
+
   private async handleWatcherEvent(event: WatcherEvent): Promise<void> {
     if (!event.path.endsWith('.md') && !event.path.endsWith('.markdown')) {
       return;
@@ -309,6 +332,11 @@ export class DesktopVaultRuntime {
         await this.index.remove(event.path);
         this.pathWriteTimestamps.set(event.path, Date.now());
         this.scheduleCheckpoint();
+        this.workspace.getEventPublisher().publish({
+          type: 'note.deleted',
+          path: event.path,
+          timestamp: Date.now(),
+        });
       } else {
         let snapshot: FileSnapshot | null = null;
         try {
@@ -320,22 +348,47 @@ export class DesktopVaultRuntime {
             snapshot = await this.storage.read(event.path);
           } catch {
             console.warn(
-              `[DesktopVaultRuntime] Transient read failure on "${event.path}"; marked dirty for future sync.`
+              `[DesktopVaultRuntime] Transient read failure on "${event.path}"; scheduling bounded resync.`
             );
+            this.schedulePendingResync(event);
             return;
           }
         }
 
         if (snapshot) {
-          const parsed = await this.parser.parse(
-            event.path,
-            snapshot.content,
-            snapshot.version.hash
-          );
-          await this.index.upsert(parsed, {
-            modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
-            size: snapshot.size ?? snapshot.version.size ?? 0,
-          });
+          // Self-write deduplication: check if index already has this exact hash (O(1) lookup)
+          let existing: { hash: string } | null | undefined = null;
+          if (typeof (this.index as any).getSourceManifestForPath === 'function') {
+            existing = await (this.index as any).getSourceManifestForPath(event.path);
+          } else {
+            const manifest = await this.index.getSourceManifest();
+            existing = manifest.find((m) => m.path === event.path);
+          }
+          const isSelfWrite = existing && existing.hash === snapshot.version.hash;
+
+          if (!isSelfWrite) {
+            const parsed = await this.parser.parse(
+              event.path,
+              snapshot.content,
+              snapshot.version.hash
+            );
+            await this.index.upsert(parsed, {
+              modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt ?? 0,
+              size: snapshot.size ?? snapshot.version.size ?? 0,
+            });
+            this.workspace.getEventPublisher().publish({
+              type: event.type === 'created' ? 'note.created' : 'note.modified',
+              path: event.path,
+              timestamp: Date.now(),
+              version: {
+                token: snapshot.version.hash,
+                hash: snapshot.version.hash,
+                modifiedAt: snapshot.modifiedAt ?? snapshot.version.modifiedAt,
+                size: snapshot.size ?? snapshot.version.size,
+              },
+            });
+          }
+
           this.pathWriteTimestamps.set(event.path, Date.now());
           this.scheduleCheckpoint();
         }
@@ -380,6 +433,11 @@ export class DesktopVaultRuntime {
 
   async close(): Promise<void> {
     await this.waitForVerification();
+
+    for (const timer of this.pendingResyncs.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingResyncs.clear();
 
     if (this.checkpointTimer) {
       clearTimeout(this.checkpointTimer);

@@ -1,0 +1,17 @@
+{
+  "name": "example-openob-plugin",
+  "version": "1.0.0",
+  "description": "Example developer template for OpenOb plugins (Phase 3H SDK)",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "@okw/core": "*",
+    "@okw/plugin": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

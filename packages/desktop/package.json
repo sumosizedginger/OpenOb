@@ -12,7 +12,8 @@
     "@okw/vault": "*",
     "@okw/index": "*",
     "@okw/markdown": "*",
-    "@okw/ai": "*"
+    "@okw/ai": "*",
+    "@okw/workspace": "*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

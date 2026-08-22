@@ -3,6 +3,11 @@ import { MemoryVaultStorage } from '@okw/vault';
 import { MemoryDocumentIndex, buildGraphData } from '@okw/index';
 import { DefaultDocumentParser } from '@okw/markdown';
 import {
+  OpenObWorkspace,
+  LocalWorkspaceBackend,
+  createWorkspacePluginHostServices,
+} from '@okw/workspace';
+import {
   PluginHost,
   PluginManifest,
   Plugin,
@@ -13,26 +18,54 @@ import {
   dailyNotesManifest,
   DailyNotesPlugin,
 } from '@okw/plugin';
-import { ConflictError } from '@okw/core';
+import { ConflictError, VaultPath } from '@okw/core';
+
+function createHarness(options?: { activeNotePath?: string | null }) {
+  const storage = new MemoryVaultStorage();
+  const index = new MemoryDocumentIndex();
+  const parser = new DefaultDocumentParser();
+
+  const workspace = new OpenObWorkspace({
+    storage,
+    index,
+    parser,
+    readOnly: false,
+  });
+  const backend = new LocalWorkspaceBackend(workspace);
+
+  let currentActiveNote = options?.activeNotePath ?? null;
+  let openedNote: string | null = null;
+
+  const services = createWorkspacePluginHostServices(backend, undefined, {
+    getActiveNotePath: () => currentActiveNote as any,
+    openNote: async (p) => {
+      openedNote = p;
+      currentActiveNote = p;
+    },
+    showNotice: () => {},
+  });
+
+  const host = new PluginHost({ services });
+  return {
+    host,
+    workspace,
+    backend,
+    storage,
+    index,
+    getOpenedNote: () => openedNote,
+    setActiveNote: (p: string | null) => {
+      currentActiveNote = p;
+    },
+  };
+}
 
 describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Containment (Constitution Law 20)', () => {
   it('Law 20 (F-007): Crashing plugin does not crash workspace or interfere with other plugins', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-    const parser = new DefaultDocumentParser();
+    const { host, workspace, storage, index } = createHarness({ activeNotePath: 'Important.md' });
 
     // 1. Seed vault
     const noteContent = `# Critical Work\n\nCore notes that must remain intact.`;
-    await storage.write('Important.md', null, noteContent);
-    await index.upsert(await parser.parse('Important.md', noteContent));
-
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: 'Important.md',
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    await workspace.createNote({ path: 'Important.md', content: noteContent });
 
     // 2. Register well-behaved plugin
     host.registerPlugin(wordCountManifest, () => new WordCountPlugin());
@@ -43,7 +76,7 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
       id: 'malicious.crasher',
       name: 'Host Destroyer',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read'],
     };
 
@@ -78,21 +111,19 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
   });
 
   it('Law 20 (F-006): Unauthorized capability calls fail closed with PermissionDeniedError', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    await storage.write('Confidential.md', null, '# Confidential Data');
+    const { host, workspace, storage } = createHarness();
+    await workspace.createNote({ path: 'Confidential.md', content: '# Confidential Data' });
 
     const unauthorizedManifest: PluginManifest = {
       id: 'unauthorized.reader',
       name: 'Unauthorized Reader',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: [], // Declares ZERO permissions!
     };
 
     let attemptReadError: any = null;
-    let attemptWriteError: any = null;
+    let attemptCreateError: any = null;
     let attemptOpenNoteError: any = null;
 
     class SnoopingPlugin implements Plugin {
@@ -108,9 +139,9 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
             }
 
             try {
-              await api.vault.write('Injected.md', 'Data');
+              await api.vault.create('Injected.md', 'Data');
             } catch (e) {
-              attemptWriteError = e;
+              attemptCreateError = e;
             }
 
             try {
@@ -124,14 +155,6 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
-
     host.registerPlugin(unauthorizedManifest, () => new SnoopingPlugin());
     await host.enablePlugin(unauthorizedManifest.id);
 
@@ -140,7 +163,7 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
 
     // Law 20: Every unauthorized capability access MUST throw PermissionDeniedError
     expect(attemptReadError).toBeInstanceOf(PermissionDeniedError);
-    expect(attemptWriteError).toBeInstanceOf(PermissionDeniedError);
+    expect(attemptCreateError).toBeInstanceOf(PermissionDeniedError);
     expect(attemptOpenNoteError).toBeInstanceOf(PermissionDeniedError);
 
     // Disk MUST NOT contain any injected file
@@ -149,14 +172,14 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
   });
 
   it('P9-2 (F-030) Regression: Self-escalation via api.manifest mutation fails closed', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
+    const { host, workspace, storage } = createHarness();
+    await workspace.createNote({ path: 'Shared.md', content: '# Initial' });
 
     const readOnlyManifest: PluginManifest = {
       id: 'escalation.attacker',
       name: 'Escalation Attacker',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read'], // ONLY read, NOT write
     };
 
@@ -171,23 +194,15 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
           // Object.freeze might throw in strict mode
         }
 
-        // Attempt write after mutation
+        // Attempt create/write after mutation
         try {
-          await api.vault.write('HackedByEscalation.md', 'Malicious Data');
+          await api.vault.create('HackedByEscalation.md', 'Malicious Data');
         } catch (err) {
           writeError = err;
         }
       }
       onunload() {}
     }
-
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
 
     host.registerPlugin(readOnlyManifest, () => new SelfEscalatingPlugin());
     await host.enablePlugin(readOnlyManifest.id);
@@ -201,17 +216,19 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
   });
 
   it('P9-1 (F-031) Regression: Plugin write does not force-overwrite concurrent disk changes', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
+    const { host, workspace } = createHarness();
 
     const initialContent = `# Original Note\n\nInitial version.`;
-    await storage.write('SharedNote.md', null, initialContent);
+    const initialNote = await workspace.createNote({
+      path: 'SharedNote.md',
+      content: initialContent,
+    });
 
     const writeManifest: PluginManifest = {
       id: 'writer.plugin',
       name: 'Writer Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read', 'vault.write'],
     };
 
@@ -224,30 +241,25 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
-
     host.registerPlugin(writeManifest, () => new SafeWriterPlugin());
     await host.enablePlugin(writeManifest.id);
     expect(pluginApiHandle).not.toBeNull();
 
     // 1. Plugin reads note at version v1
-    const v1Snap = await storage.read('SharedNote.md');
+    const v1Snap = await pluginApiHandle!.vault.read('SharedNote.md');
 
     // 2. User modifies file concurrently on disk to version v2
     const userEdits = `# Original Note\n\nUser edited this in parallel.`;
-    await storage.write('SharedNote.md', v1Snap.version, userEdits);
+    await workspace.updateNote({
+      path: 'SharedNote.md',
+      content: userEdits,
+      expectedVersion: initialNote.currentVersion,
+    });
 
-    // 3. Plugin tries to write with stale snapshot
+    // 3. Plugin tries to write with stale snapshot v1
     let caughtConflict: any = null;
     try {
-      // Simulate slow plugin write with stale version
-      await storage.write('SharedNote.md', v1Snap.version, 'Stale Plugin Data');
+      await pluginApiHandle!.vault.update('SharedNote.md', 'Stale Plugin Data', v1Snap.version);
     } catch (err) {
       caughtConflict = err;
     }
@@ -255,25 +267,13 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
     // Must throw ConflictError and NEVER overwrite user edits
     expect(caughtConflict).toBeInstanceOf(ConflictError);
 
-    const currentDisk = new TextDecoder().decode((await storage.read('SharedNote.md')).content);
+    const currentDisk = (await workspace.readNote('SharedNote.md')).textContent;
     expect(currentDisk).toBe(userEdits);
     expect(currentDisk).not.toContain('Stale Plugin Data');
   });
 
   it('First-party plugins (DailyNotes) execute completely using public API contracts', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    let openedNote: string | null = null;
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async (p) => {
-        openedNote = p;
-      },
-      showNotice: () => {},
-    });
+    const { host, workspace, getOpenedNote } = createHarness();
 
     host.registerPlugin(dailyNotesManifest, () => new DailyNotesPlugin());
     await host.enablePlugin(dailyNotesManifest.id);
@@ -282,23 +282,21 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
     expect(runRes.success).toBe(true);
 
     const today = new Date().toISOString().slice(0, 10);
-    expect(openedNote).toBe(`Daily/${today}.md`);
+    expect(getOpenedNote()).toBe(`Daily/${today}.md`);
 
-    const createdDoc = await storage.read(`Daily/${today}.md`);
-    expect(new TextDecoder().decode(createdDoc.content)).toContain(`# Daily Note: ${today}`);
+    const createdDoc = await workspace.readNote(`Daily/${today}.md`);
+    expect(createdDoc.textContent).toContain(`# Daily Note: ${today}`);
   });
 
   it('P1-PLUGIN-001 (F-032): Documents same-realm capability facade boundary and fail-closed permission enforcement', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    await storage.write('Secret.md', null, '# Secret Note');
+    const { host, workspace } = createHarness();
+    await workspace.createNote({ path: 'Secret.md', content: '# Secret Note' });
 
     const readOnlyManifest: PluginManifest = {
       id: 'readonly.plugin',
       name: 'ReadOnly Plugin',
       version: '1.0.0',
-      apiVersion: '1.x',
+      apiVersion: '2.x',
       permissions: ['vault.read'],
     };
 
@@ -311,25 +309,17 @@ describe('Phase 9 Exit Gate: Plugin SDK, Isolated Capability Host & Crash Contai
       onunload() {}
     }
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
-
     host.registerPlugin(readOnlyManifest, () => new ReadOnlyPlugin());
     await host.enablePlugin(readOnlyManifest.id);
 
     expect(pluginApi).not.toBeNull();
 
     // Permitted call succeeds
-    const text = await pluginApi!.vault.read('Secret.md');
-    expect(text).toBe('# Secret Note');
+    const snap = await pluginApi!.vault.read('Secret.md');
+    expect(snap.content).toBe('# Secret Note');
 
     // Undeclared write capability fails closed
-    await expect(pluginApi!.vault.write('Secret.md', '# Hijacked')).rejects.toThrow(
+    await expect(pluginApi!.vault.create('Secret2.md', '# Hijacked')).rejects.toThrow(
       PermissionDeniedError
     );
 

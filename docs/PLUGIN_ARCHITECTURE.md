@@ -22,150 +22,104 @@ Example:
   "id": "author.character-bible",
   "name": "Character Bible",
   "version": "1.0.0",
-  "apiVersion": "1.x",
-  "permissions": ["vault.read", "workspace.modify"],
+  "apiVersion": "2.x",
+  "permissions": ["vault.read", "vault.write", "workspace.modify"],
   "contributes": {
-    "commands": ["characterBible.create"],
-    "views": ["characterBible.sidebar"]
+    "commands": [
+      { "id": "characterBible.create", "name": "Create Character Profile" },
+      { "id": "characterBible.list", "name": "List Character Roster" }
+    ],
+    "views": [{ "id": "characterBible.sidebar", "name": "Character Bible" }]
   }
 }
 ```
 
-## Public API Surface
-
-Potential namespaces:
+## Public API Surface (API Version 2.x)
 
 ```ts
-app.commands;
-app.workspace;
-app.editor;
-app.vault;
-app.search;
-app.graph;
-app.ai;
-app.settings;
-app.ui;
+// PluginAPI namespaces:
+app.vault; // read(path), create(path, content), update(path, content, expectedVersion), delete(path, expectedVersion), list(folderPrefix?)
+app.commands; // registerCommand({ id, name, callback })
+app.workspace; // getActiveNotePath(), openNote(path)
+app.search; // query(text, options?)
+app.ai; // chat(prompt, options?)
+app.ui; // registerView({ id, name, render }), showNotice(message)
+app.manifest; // Read-only copy of plugin manifest
 ```
 
-Plugins must not import internal modules.
+Plugins interact exclusively through `PluginAPI` backed by `PluginHostServices`. Internal storage, direct index mutations, and secret stores are completely inaccessible to plugins.
 
-## Isolation
+## Host Services Architecture & Dual-Mode Backend
 
-Current runtime model (First-Party Plugins):
+`@okw/plugin` defines abstract `PluginHostServices`:
 
-- First-party plugins execute in the same JavaScript realm against `PluginHost` and `PluginAPI`.
-- Capability permissions are validated fail-closed against an immutable snapshot of declared permissions (`F-006`, `F-030`).
-- Runtime crashes during plugin lifecycle (load, unload, command execution) are trapped and contained, preventing workspace failure (`F-007`).
-- Note: This is a permission facade, not an execution isolation boundary (`F-032`).
+- `notes`: read, create, update, delete, list
+- `search`: query
+- `ai`: chat
+- `workspace`: getActiveNotePath, openNote, showNotice
 
-Target model (Required before third-party plugin distribution):
+`createWorkspacePluginHostServices(backend, aiBackend, uiCallbacks)` in `@okw/workspace` bridges the workspace backend to host services:
 
-- Plugin logic in a dedicated Web Worker or isolated iframe.
-- Message-based capability proxy over `postMessage`.
-- Strict CSP and capability token isolation to prevent access to DOM or ambient storage (`sessionStorage`).
+- **Gateway Mode**: Routes plugin calls through `GatewayWorkspaceBackend` (HTTP REST).
+- **Standalone Mode**: Routes plugin calls through `LocalWorkspaceBackend` (in-memory / FSA).
+- **Read-Only Enforced**: If the workspace is mounted read-only, mutating note APIs fail closed with `403 ForbiddenError`.
+- **Reserved Metadata Namespace Guard**: Plugin operations targeting `.openob/`, `.OPENOB/`, etc. are rejected immediately with `InvalidPathError`.
 
-A plugin crash is recoverable:
+## Version-Aware Optimistic Concurrency Control (OCC)
 
-```text
-Plugin failed
-[Restart]
-[Disable]
-[Report]
-```
+Plugins cannot perform blind writes or fetch-latest-then-overwrite mutations:
+
+1. `api.vault.read(path)` returns `PluginNoteSnapshot { path, content, version }`.
+2. `api.vault.update(path, content, expectedVersion)` requires passing the snapshot's concurrency token.
+3. If an external process or user modified the note in the interim, the update throws `409 ConflictError`.
+
+## Isolation & Security Boundaries
+
+### Current Runtime Model (Phase 3H: Built-In & First-Party Plugins)
+
+- First-party and built-in plugins execute in-process against `PluginHost` and capability-gated `PluginAPI`.
+- Permissions are strictly validated fail-closed on every API call against an immutable snapshot of declared permissions.
+- Manifests are strictly validated at registration (`id` syntax, required fields, permission whitelist, duplicate prevention).
+- Declared contribution enforcement: Plugins can only register commands and views explicitly declared in their `contributes` section.
+- Registration collision prevention: Duplicate command and view IDs across plugins are rejected.
+- Lifecycle & UI Crash Containment: Unhandled exceptions during `onload`, `onunload`, command execution, and view `render` are caught and isolated, preventing host or container crashing.
+- AI Zero-Secret Leakage: AI prompts route through host `ai.chat`; API keys and credentials are never exposed to plugins.
+
+### Target Future Model (Untrusted / Third-Party Marketplace Distribution)
+
+- Out-of-process isolation using Web Workers or sandboxed iframes.
+- Structured asynchronous message proxying across postMessage boundaries.
+- Tight Content Security Policy (CSP) forbidding ambient global access.
 
 ## Permissions
 
-Potential capabilities:
+Active capabilities in 2.x:
 
 ```text
-vault.read
-vault.write
-vault.delete
-workspace.modify
-editor.extend
-search.query
-graph.read
-graph.extend
-ai.use
-ai.provider
-network
-clipboard
-filesystem.external
+vault.read        - Read notes and list folders
+vault.write       - Create and update notes (requires OCC token)
+vault.delete      - Delete notes (requires OCC token)
+search.query      - Execute keyword search queries
+ai.use            - Send chat queries through configured AI backend
+workspace.modify  - Open notes in the active workspace editor
 ```
 
 Permission changes across plugin upgrades must be shown to the user.
 
-## First-Party Dogfooding
+## First-Party Plugins
 
-Where practical, build non-core features through the same plugin API exposed to third parties.
+All five first-party plugins are fully implemented on top of the 2.x Plugin SDK:
 
-Candidate first-party plugins:
+1. **Daily Notes** (`@okw/plugin/plugins/daily-notes`): Opens/creates today's daily note under `Daily/YYYY-MM-DD.md`.
+2. **Templates** (`@okw/plugin/plugins/templates`): Creates notes from templates and inserts default templates using OCC-guarded updates.
+3. **Word Count** (`@okw/plugin/plugins/word-count`): Reads the active note snapshot and calculates word, character, and line stats.
+4. **Character Bible** (`@okw/plugin/plugins/character-bible`): Creates character sheets under `Characters/` and lists roster.
+5. **Manuscript Tools** (`@okw/plugin/plugins/manuscript-tools`): Aggregates chapter word counts and reports progress towards manuscript goals.
 
-- Daily Notes
-- Templates
-- Calendar
-- Kanban
-- Character Bible
-- Manuscript Tools
-- Git
-- Citation Manager
-- Publishing
-- Advanced Graph
-- AI providers
+## Developer Experience & Template
 
-If a first-party plugin needs an undocumented escape hatch, treat that as evidence the public API is incomplete.
+A standalone developer template is provided in `examples/plugin-template/`:
 
-## Developer Experience
-
-Target workflow:
-
-```bash
-npm create <project>-plugin
-npm install
-npm run dev
-```
-
-Development mode should support:
-
-- local plugin folder
-- hot reload
-- manifest validation
-- permission debugging
-- API typing
-- example plugins
-
-## Registry
-
-Do not build a marketplace before the API is stable.
-
-Later registry metadata may include:
-
-- plugin ID
-- version
-- API compatibility
-- repository
-- release artifact URL
-- checksum
-- permissions
-- author
-- license
-
-Installation should eventually support:
-
-- registry
-- GitHub release
-- URL
-- ZIP
-- local development folder
-
-Alternative registries should be technically possible.
-
-## API Stability
-
-Once public:
-
-- use semantic API versions
-- deprecate before removal
-- document breaking changes
-- provide migration guidance
-- maintain compatibility tests
+- Complete `package.json` with `@okw/plugin` dependencies.
+- Standard plugin lifecycle (`onload`, `onunload`) with version-aware OCC note updates and command registration.
+- Documentation explaining manifest structure and capability gating.

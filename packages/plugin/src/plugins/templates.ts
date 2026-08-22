@@ -1,10 +1,11 @@
 import { Plugin, PluginAPI, PluginManifest } from '../types.js';
+import { VaultPath } from '@okw/core';
 
 export const templatesManifest: PluginManifest = {
   id: 'okw.templates',
   name: 'Templates Engine',
   version: '1.0.0',
-  apiVersion: '1.x',
+  apiVersion: '2.x',
   description: 'Create and insert reusable note templates with dynamic variables.',
   permissions: ['vault.read', 'vault.write', 'workspace.modify'],
   contributes: {
@@ -34,14 +35,15 @@ export class TemplatesPlugin implements Plugin {
         const dateStr = now.toISOString().slice(0, 10);
         const timeStr = now.toTimeString().slice(0, 8);
         const title = `Meeting-${dateStr}`;
-        const newPath = `Notes/${title}.md`;
+        const newPath = `Notes/${title}.md` as VaultPath;
 
         // Check if custom template exists in Templates/
         let templateContent = `---\ntitle: {{title}}\ndate: {{date}}\ntags: [meeting]\n---\n# {{title}}\n\n## Attendees\n- \n\n## Discussion\n\n## Action Items\n- [ ] `;
 
         const existingTemplates = await api.vault.list('Templates');
-        if (existingTemplates.includes('Templates/Meeting.md')) {
-          templateContent = await api.vault.read('Templates/Meeting.md');
+        if (existingTemplates.includes('Templates/Meeting.md' as VaultPath)) {
+          const tSnap = await api.vault.read('Templates/Meeting.md' as VaultPath);
+          templateContent = tSnap.content;
         }
 
         const interpolated = interpolateTemplate(templateContent, {
@@ -51,7 +53,7 @@ export class TemplatesPlugin implements Plugin {
           datetime: `${dateStr} ${timeStr}`,
         });
 
-        await api.vault.write(newPath, interpolated);
+        await api.vault.create(newPath, interpolated);
         await api.workspace.openNote(newPath);
         api.ui.showNotice(`Created new note from template: ${newPath}`);
       },
@@ -80,8 +82,8 @@ export class TemplatesPlugin implements Plugin {
           datetime: `${dateStr} ${timeStr}`,
         });
 
-        const currentContent = await api.vault.read(activePath);
-        await api.vault.write(activePath, currentContent + interpolated);
+        const snap = await api.vault.read(activePath);
+        await api.vault.update(activePath, snap.content + interpolated, snap.version);
         api.ui.showNotice(`Inserted meeting template into ${activePath}`);
       },
     });

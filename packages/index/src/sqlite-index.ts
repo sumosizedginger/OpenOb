@@ -151,6 +151,28 @@ export class SqliteDocumentIndex implements DocumentIndex {
   }
 
   /**
+   * Returns metadata manifest for a single document path (O(1) indexed lookup).
+   */
+  async getSourceManifestForPath(path: string): Promise<SourceDocumentManifest | null> {
+    const stmt = this.db.prepare(
+      'SELECT path, hash, modified_at, size FROM documents WHERE path = ?'
+    );
+    stmt.bind([path]);
+    let result: SourceDocumentManifest | null = null;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as any;
+      result = {
+        path: row.path,
+        hash: row.hash,
+        modifiedAt: Number(row.modified_at),
+        size: Number(row.size),
+      };
+    }
+    stmt.free();
+    return result;
+  }
+
+  /**
    * Updates filesystem stat metadata without requiring full re-parse.
    */
   async setSourceMetadata(path: string, modifiedAt: number, size: number): Promise<void> {

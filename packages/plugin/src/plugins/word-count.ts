@@ -4,7 +4,7 @@ export const wordCountManifest: PluginManifest = {
   id: 'okw.word-count',
   name: 'Document Statistics & Word Count',
   version: '1.0.0',
-  apiVersion: '1.x',
+  apiVersion: '2.x',
   description: 'Calculates word count, character count, and estimated reading time for documents.',
   permissions: ['vault.read'],
   contributes: {
@@ -24,7 +24,8 @@ export class WordCountPlugin implements Plugin {
           return;
         }
 
-        const text = await api.vault.read(activePath);
+        const snap = await api.vault.read(activePath);
+        const text = snap.content;
         const words = text.trim() ? text.trim().split(/\s+/).length : 0;
         const chars = text.length;
         const readingTimeMins = Math.ceil(words / 200);

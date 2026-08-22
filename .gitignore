@@ -5,6 +5,8 @@ node_modules/
 # Build artifacts
 dist/
 build/
+release/
+apps/desktop/release/
 *.tsbuildinfo
 
 # Test & coverage

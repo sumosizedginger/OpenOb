@@ -13,6 +13,7 @@
     { "path": "./packages/desktop" },
     { "path": "./packages/workspace" },
     { "path": "./apps/gateway" },
-    { "path": "./apps/web" }
+    { "path": "./apps/web" },
+    { "path": "./apps/desktop" }
   ]
 }

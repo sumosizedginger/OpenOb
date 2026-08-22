@@ -436,7 +436,9 @@ Native vault project documentation.
       await healthGateway.stop();
 
       // Within ~4 seconds, the health check probe flips status to Disconnected without user input
-      await expect(page.locator('.badge-disconnected, .save-status.disconnected')).toBeVisible({
+      await expect(
+        page.locator('.badge-disconnected, .save-status.disconnected').first()
+      ).toBeVisible({
         timeout: 6000,
       });
       await expect(page.locator('.status-bar')).toContainText('Disconnected');

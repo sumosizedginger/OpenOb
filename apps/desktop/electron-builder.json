@@ -1,0 +1,43 @@
+{
+  "appId": "com.openob.app",
+  "productName": "OpenOb",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json",
+    "node_modules/**/*",
+    "../../apps/web/dist/**/*",
+    "../../apps/gateway/dist/**/*",
+    "../../packages/*/dist/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
+  "mac": {
+    "target": ["dmg", "zip"],
+    "category": "public.app-category.productivity"
+  },
+  "linux": {
+    "target": ["AppImage"],
+    "category": "Utility"
+  }
+}

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryVaultStorage } from '@okw/vault';
 import { MemoryDocumentIndex } from '@okw/index';
+import { DefaultDocumentParser } from '@okw/markdown';
+import {
+  OpenObWorkspace,
+  LocalWorkspaceBackend,
+  createWorkspacePluginHostServices,
+} from '@okw/workspace';
 import {
   PluginHost,
   templatesManifest,
@@ -15,26 +21,53 @@ import {
   DailyNotesPlugin,
 } from '@okw/plugin';
 
+async function createTestHost(options?: {
+  initialNotes?: Record<string, string>;
+  activeNotePath?: string | null;
+  onOpenNote?: (p: string) => Promise<void>;
+  onShowNotice?: (m: string) => void;
+}) {
+  const storage = new MemoryVaultStorage();
+  const index = new MemoryDocumentIndex();
+  const parser = new DefaultDocumentParser();
+
+  const workspace = new OpenObWorkspace({
+    storage,
+    index,
+    parser,
+    readOnly: false,
+  });
+  const backend = new LocalWorkspaceBackend(workspace);
+
+  if (options?.initialNotes) {
+    for (const [p, content] of Object.entries(options.initialNotes)) {
+      await workspace.createNote({ path: p, content });
+    }
+  }
+
+  const services = createWorkspacePluginHostServices(backend, undefined, {
+    getActiveNotePath: () => (options?.activeNotePath ?? null) as any,
+    openNote: options?.onOpenNote ? async (p) => options.onOpenNote!(p) : async () => {},
+    showNotice: options?.onShowNotice ?? (() => {}),
+  });
+
+  const host = new PluginHost({ services });
+  return { host, workspace, backend, storage, index };
+}
+
 describe('Phase 10 Exit Gate: First-Party Plugin Pack & Public API Dogfooding (Constitution Law 20, D-020)', () => {
   it('TemplatesPlugin: creates notes from template and interpolates dynamic variables', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    // 1. Create a custom template in Templates/
-    const customTemplate = `---\ntitle: {{title}}\ndate: {{date}}\ntags: [custom-template]\n---\n# {{title}}\nCreated at {{time}}.\n`;
-    await storage.write('Templates/Meeting.md', null, customTemplate);
-
     let openedNote: string | null = null;
     const noticeSpy = vi.fn();
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async (p) => {
+    const { host, backend } = await createTestHost({
+      initialNotes: {
+        'Templates/Meeting.md': `---\ntitle: {{title}}\ndate: {{date}}\ntags: [custom-template]\n---\n# {{title}}\nCreated at {{time}}.\n`,
+      },
+      onOpenNote: async (p) => {
         openedNote = p;
       },
-      showNotice: noticeSpy,
+      onShowNotice: noticeSpy,
     });
 
     host.registerPlugin(templatesManifest, () => new TemplatesPlugin());
@@ -47,30 +80,22 @@ describe('Phase 10 Exit Gate: First-Party Plugin Pack & Public API Dogfooding (C
     const today = new Date().toISOString().slice(0, 10);
     expect(openedNote).toBe(`Notes/Meeting-${today}.md`);
 
-    const createdDoc = await storage.read(`Notes/Meeting-${today}.md`);
-    const docText = new TextDecoder().decode(createdDoc.content);
-
-    expect(docText).toContain(`title: Meeting-${today}`);
-    expect(docText).toContain(`date: ${today}`);
-    expect(docText).not.toContain('{{title}}');
-    expect(docText).not.toContain('{{date}}');
+    const createdDoc = await backend.readNote(`Notes/Meeting-${today}.md`);
+    expect(createdDoc.textContent).toContain(`title: Meeting-${today}`);
+    expect(createdDoc.textContent).toContain(`date: ${today}`);
+    expect(createdDoc.textContent).not.toContain('{{title}}');
+    expect(createdDoc.textContent).not.toContain('{{date}}');
   });
 
   it('CharacterBiblePlugin: creates structured character profile and tallies roster', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
     let openedPath: string | null = null;
     const noticeSpy = vi.fn();
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async (p) => {
+    const { host, backend } = await createTestHost({
+      onOpenNote: async (p) => {
         openedPath = p;
       },
-      showNotice: noticeSpy,
+      onShowNotice: noticeSpy,
     });
 
     host.registerPlugin(characterBibleManifest, () => new CharacterBiblePlugin());
@@ -81,11 +106,10 @@ describe('Phase 10 Exit Gate: First-Party Plugin Pack & Public API Dogfooding (C
     expect(createRes.success).toBe(true);
     expect(openedPath).toBe('Characters/NewCharacter.md');
 
-    const charDoc = await storage.read('Characters/NewCharacter.md');
-    const charText = new TextDecoder().decode(charDoc.content);
-    expect(charText).toContain('type: character');
-    expect(charText).toContain('role: protagonist');
-    expect(charText).toContain('# NewCharacter');
+    const charDoc = await backend.readNote('Characters/NewCharacter.md');
+    expect(charDoc.textContent).toContain('type: character');
+    expect(charDoc.textContent).toContain('role: protagonist');
+    expect(charDoc.textContent).toContain('# NewCharacter');
 
     // 2. List Roster
     const listRes = await host.executeCommand('characterBible.list');
@@ -94,22 +118,15 @@ describe('Phase 10 Exit Gate: First-Party Plugin Pack & Public API Dogfooding (C
   });
 
   it('ManuscriptToolsPlugin: scans manuscript chapters, tallies words, and calculates target progress', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    // 1. Seed 3 chapter notes in Manuscript/
-    await storage.write('Manuscript/Chapter_01.md', null, '# Chapter 1\n\n' + 'word '.repeat(1000));
-    await storage.write('Manuscript/Chapter_02.md', null, '# Chapter 2\n\n' + 'word '.repeat(2000));
-    await storage.write('Manuscript/Chapter_03.md', null, '# Chapter 3\n\n' + 'word '.repeat(2000));
-
     const noticeSpy = vi.fn();
 
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: noticeSpy,
+    const { host } = await createTestHost({
+      initialNotes: {
+        'Manuscript/Chapter_01.md': '# Chapter 1\n\n' + 'word '.repeat(1000),
+        'Manuscript/Chapter_02.md': '# Chapter 2\n\n' + 'word '.repeat(2000),
+        'Manuscript/Chapter_03.md': '# Chapter 3\n\n' + 'word '.repeat(2000),
+      },
+      onShowNotice: noticeSpy,
     });
 
     host.registerPlugin(manuscriptToolsManifest, () => new ManuscriptToolsPlugin());
@@ -126,16 +143,7 @@ describe('Phase 10 Exit Gate: First-Party Plugin Pack & Public API Dogfooding (C
   });
 
   it('Zero Private Imports: All first-party plugins operate concurrently via standard host lifecycle', async () => {
-    const storage = new MemoryVaultStorage();
-    const index = new MemoryDocumentIndex();
-
-    const host = new PluginHost({
-      storage,
-      index,
-      activeNotePath: null,
-      openNote: async () => {},
-      showNotice: () => {},
-    });
+    const { host } = await createTestHost();
 
     // Register all 5 first-party plugins
     host.registerPlugin(wordCountManifest, () => new WordCountPlugin());

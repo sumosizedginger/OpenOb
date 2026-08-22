@@ -1,15 +1,26 @@
-import { DocumentIndex, VaultPath, VaultStorage } from '@okw/core';
-import { AIManager } from '@okw/ai';
+import { FileVersion, VaultPath } from '@okw/core';
 
-export type PluginPermission =
-  | 'vault.read'
-  | 'vault.write'
-  | 'vault.delete'
-  | 'workspace.modify'
-  | 'editor.extend'
-  | 'search.query'
-  | 'graph.read'
-  | 'ai.use';
+export type DocumentVersionToken =
+  | FileVersion
+  | {
+      readonly token: string;
+      readonly hash?: string;
+      readonly modifiedAt?: number;
+      readonly size?: number;
+    };
+
+export const VALID_PLUGIN_PERMISSIONS = [
+  'vault.read',
+  'vault.write',
+  'vault.delete',
+  'workspace.modify',
+  'editor.extend',
+  'search.query',
+  'graph.read',
+  'ai.use',
+] as const;
+
+export type PluginPermission = (typeof VALID_PLUGIN_PERMISSIONS)[number];
 
 export interface PluginCommand {
   readonly id: string;
@@ -30,10 +41,10 @@ export interface PluginManifest {
   readonly apiVersion: string;
   readonly description?: string;
   readonly author?: string;
-  readonly permissions: PluginPermission[];
+  readonly permissions: readonly PluginPermission[];
   readonly contributes?: {
-    readonly commands?: readonly { id: string; name: string }[];
-    readonly views?: readonly { id: string; name: string }[];
+    readonly commands?: readonly { readonly id: string; readonly name: string }[];
+    readonly views?: readonly { readonly id: string; readonly name: string }[];
   };
 }
 
@@ -48,23 +59,67 @@ export interface PluginInstance {
   registeredViews: PluginView[];
 }
 
+export interface PluginNoteSnapshot {
+  readonly path: VaultPath;
+  readonly content: string;
+  readonly version: DocumentVersionToken;
+}
+
+export interface PluginNoteMutationResult {
+  readonly path: VaultPath;
+  readonly version: DocumentVersionToken;
+}
+
+export interface PluginSearchResult {
+  readonly path: VaultPath;
+  readonly title: string;
+  readonly score: number;
+  readonly matchSnippet?: string;
+}
+
+export interface PluginHostServices {
+  readonly notes: {
+    read(path: VaultPath): Promise<PluginNoteSnapshot>;
+    create(path: VaultPath, content: string): Promise<PluginNoteMutationResult>;
+    update(
+      path: VaultPath,
+      content: string,
+      expectedVersion: DocumentVersionToken
+    ): Promise<PluginNoteMutationResult>;
+    delete(path: VaultPath, expectedVersion: DocumentVersionToken): Promise<void>;
+    list(folderPrefix?: string): Promise<VaultPath[]>;
+  };
+  readonly search: {
+    query(text: string, options?: { limit?: number }): Promise<PluginSearchResult[]>;
+  };
+  readonly ai?: {
+    chat(prompt: string): Promise<string>;
+  };
+  readonly workspace: {
+    getActiveNotePath(): VaultPath | null;
+    openNote(path: VaultPath): Promise<void>;
+    showNotice(message: string): void;
+  };
+}
+
 export interface PluginHostContext {
-  storage: VaultStorage;
-  index: DocumentIndex;
-  activeNotePath: VaultPath | null;
-  openNote: (path: VaultPath) => Promise<void>;
-  showNotice: (message: string) => void;
-  aiManager?: AIManager;
+  services: PluginHostServices;
 }
 
 export interface PluginVaultAPI {
-  read(path: VaultPath): Promise<string>;
-  write(path: VaultPath, content: string): Promise<void>;
+  read(path: VaultPath): Promise<PluginNoteSnapshot>;
+  create(path: VaultPath, content: string): Promise<PluginNoteMutationResult>;
+  update(
+    path: VaultPath,
+    content: string,
+    expectedVersion: DocumentVersionToken
+  ): Promise<PluginNoteMutationResult>;
+  delete(path: VaultPath, expectedVersion: DocumentVersionToken): Promise<void>;
   list(folderPrefix?: string): Promise<VaultPath[]>;
 }
 
 export interface PluginSearchAPI {
-  query(text: string): Promise<any[]>;
+  query(text: string, options?: { limit?: number }): Promise<PluginSearchResult[]>;
 }
 
 export interface PluginWorkspaceAPI {

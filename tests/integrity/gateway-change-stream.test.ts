@@ -17,13 +17,7 @@ import {
 import { RunningGateway, startGateway } from '../../apps/gateway/src/server.js';
 
 async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close((err) => (err ? reject(err) : resolve(port)));
-    });
-  });
+  return 0;
 }
 
 describe('Phase 3C Live Gateway Change Stream Integrity & Protocol Tests', () => {

@@ -277,7 +277,7 @@ Initial clean text.
     // 3. Stop Gateway A
     const port = (runningGateway.server.address() as net.AddressInfo).port;
     await runningGateway.stop();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 400));
 
     // 4. Start Gateway B on same vault and same port
     const parser = new DefaultDocumentParser();

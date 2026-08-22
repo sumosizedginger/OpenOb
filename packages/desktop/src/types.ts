@@ -18,7 +18,49 @@ export interface VaultWatcher {
   isWatching(): boolean;
 }
 
+export interface DesktopBootstrapConfig {
+  readonly gatewayUrl: string;
+  readonly token: string;
+  readonly vaultName: string;
+  readonly vaultPath?: string;
+  readonly storageStatus?: 'ready' | 'unavailable' | 'corrupted';
+}
+
+export interface DesktopAppInfo {
+  readonly name: string;
+  readonly version: string;
+  readonly platform: string;
+  readonly storageStatus?: 'ready' | 'unavailable' | 'corrupted';
+}
+
+export interface DesktopWindowBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly maximized?: boolean;
+}
+
+export interface DesktopConfig {
+  readonly lastVaultPath?: string;
+  readonly windowBounds?: DesktopWindowBounds;
+}
+
+export type DesktopLifecycleEventType = 'before-vault-switch' | 'vault-switched' | 'quitting';
+
+export interface DesktopLifecycleEvent {
+  readonly type: DesktopLifecycleEventType;
+  readonly payload?: any;
+}
+
+/**
+ * @deprecated Legacy in-process IPC channel definitions (P3-4).
+ * Electron desktop shell uses loopback HTTP gateway for data mutations and hardened preload bridge for lifecycle.
+ */
 export type NativeIpcChannel =
+  | 'desktop:get-bootstrap'
+  | 'desktop:choose-vault'
+  | 'desktop:get-info'
   | 'vault:open-dialog'
   | 'vault:reveal'
   | 'watcher:event'

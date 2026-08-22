@@ -1,10 +1,11 @@
 import { Plugin, PluginAPI, PluginManifest } from '../types.js';
+import { VaultPath } from '@okw/core';
 
 export const characterBibleManifest: PluginManifest = {
   id: 'okw.character-bible',
   name: 'Character Bible & Worldbuilding',
   version: '1.0.0',
-  apiVersion: '1.x',
+  apiVersion: '2.x',
   description: 'Manage character profiles, relationships, factions, and world-building notes.',
   permissions: ['vault.read', 'vault.write', 'workspace.modify', 'search.query'],
   contributes: {
@@ -22,7 +23,7 @@ export class CharacterBiblePlugin implements Plugin {
       name: 'Character Bible: New Character Profile',
       callback: async () => {
         const charName = 'NewCharacter';
-        const targetPath = `Characters/${charName}.md`;
+        const targetPath = `Characters/${charName}.md` as VaultPath;
 
         const template = `---
 title: ${charName}
@@ -50,7 +51,7 @@ A brief summary of who this character is and their narrative motivation.
 ## Biography & Arcs
 `;
 
-        await api.vault.write(targetPath, template);
+        await api.vault.create(targetPath, template);
         await api.workspace.openNote(targetPath);
         api.ui.showNotice(`Created character profile: ${targetPath}`);
       },

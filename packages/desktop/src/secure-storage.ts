@@ -58,6 +58,23 @@ export class DesktopSecretStore implements SecretStore {
     return this.lastLoadError;
   }
 
+  getStorageStatus(): 'ready' | 'unavailable' | 'corrupted' {
+    if (this.lastLoadError) return 'corrupted';
+    return 'ready';
+  }
+
+  resetStorage(): void {
+    this.memoryCache.clear();
+    this.lastLoadError = null;
+    this.salt = crypto.randomBytes(16).toString('hex');
+    this.masterKey = this.deriveKey(this.salt);
+    if (this.storagePath && fs.existsSync(this.storagePath)) {
+      try {
+        fs.unlinkSync(this.storagePath);
+      } catch {}
+    }
+  }
+
   async getSecret(providerId: string): Promise<string | null> {
     return this.memoryCache.get(providerId) || null;
   }
@@ -126,6 +143,10 @@ export class DesktopSecretStore implements SecretStore {
 
   async listSecretKeys(): Promise<string[]> {
     return Array.from(this.memoryCache.keys());
+  }
+
+  getAllKnownSecrets(): string[] {
+    return Array.from(this.memoryCache.values()).filter(Boolean);
   }
 
   private encrypt(plainText: string): EncryptedPayload {
