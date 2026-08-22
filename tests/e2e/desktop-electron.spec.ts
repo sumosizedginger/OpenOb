@@ -20,7 +20,7 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       const window = await electronApp.firstWindow();
       await window.waitForLoadState('domcontentloaded');
       const title = await window.title();
-      expect(title).toBe('Open Knowledge Workspace');
+      expect(title).toBe('OpenOb');
 
       // 2. Verify Preload Bridge is securely injected
       const isDesktopInjected = await window.evaluate(() => {
@@ -86,7 +86,7 @@ test.describe('Real Electron Desktop Launch & Embedded Gateway Smoke Test (P0-1,
       const window = await electronApp.firstWindow();
       await window.waitForLoadState('domcontentloaded');
       const title = await window.title();
-      expect(title).toBe('Open Knowledge Workspace');
+      expect(title).toBe('OpenOb');
 
       const bootstrap = await window.evaluate(async () => {
         return await (window as any).openobDesktop.getBootstrapConfig();

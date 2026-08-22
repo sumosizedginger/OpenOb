@@ -4,10 +4,10 @@ node_modules/
 
 # Build artifacts
 dist/
-build/
 release/
 apps/desktop/release/
 *.tsbuildinfo
+!apps/desktop/build/**
 
 # Test & coverage
 coverage/

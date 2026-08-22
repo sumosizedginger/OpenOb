@@ -14,6 +14,7 @@
     "../../packages/*/dist/**/*"
   ],
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -33,10 +34,12 @@
     "createStartMenuShortcut": true
   },
   "mac": {
+    "icon": "build/icon.icns",
     "target": ["dmg", "zip"],
     "category": "public.app-category.productivity"
   },
   "linux": {
+    "icon": "build/icons",
     "target": ["AppImage"],
     "category": "Utility"
   }

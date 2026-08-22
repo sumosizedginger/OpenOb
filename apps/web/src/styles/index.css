@@ -186,7 +186,12 @@ html {
 }
 
 .app-logo .logo-icon {
-  color: var(--accent-primary);
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  display: block;
+  flex-shrink: 0;
 }
 
 .vault-badge {

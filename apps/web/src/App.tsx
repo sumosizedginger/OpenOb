@@ -46,7 +46,6 @@ import {
   Search,
   RefreshCw,
   FolderOpen,
-  ShieldCheck,
   ListTree,
   PanelLeftClose,
   PanelLeft,
@@ -334,7 +333,13 @@ export const App: React.FC = () => {
             {showSidebar ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
           </button>
           <div className="app-logo">
-            <ShieldCheck size={16} className="logo-icon" />
+            <img
+              src="/brand/openob-mark.png"
+              alt="OpenOb logo — jackass skull within a broken gold sigil"
+              className="logo-icon"
+              width={22}
+              height={22}
+            />
             <span className="logo-text">OpenOb</span>
           </div>
           <span className="vault-badge" title={`Vault: ${vaultName}`}>

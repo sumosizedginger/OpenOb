@@ -32,6 +32,41 @@ async function build() {
     sourcemap: true,
   });
 
+  // Copy icon assets into dist for window runtime icon resolution
+  const buildDir = path.resolve(__dirname, 'build');
+  const iconIco = path.join(buildDir, 'icon.ico');
+  const iconPng = path.join(buildDir, 'icon.png');
+  const iconsDir = path.join(buildDir, 'icons');
+
+  try {
+    if (
+      await fs
+        .stat(iconIco)
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await fs.copyFile(iconIco, path.join(outdir, 'icon.ico'));
+    }
+    if (
+      await fs
+        .stat(iconPng)
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await fs.copyFile(iconPng, path.join(outdir, 'icon.png'));
+    }
+    if (
+      await fs
+        .stat(iconsDir)
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await fs.cp(iconsDir, path.join(outdir, 'icons'), { recursive: true });
+    }
+  } catch (err) {
+    process.stderr.write(`[OpenOb Desktop] Warning copying icons: ${err?.message}\n`);
+  }
+
   process.stdout.write(`[OpenOb Desktop] Build complete -> ${outdir}\n`);
 }
 

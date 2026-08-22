@@ -253,12 +253,31 @@ async function stopCurrentSession(): Promise<void> {
   }
 }
 
+function getWindowIconPath(): string | undefined {
+  const candidates = [
+    path.join(__dirname, 'icon.png'),
+    path.join(__dirname, 'icon.ico'),
+    path.join(__dirname, 'icons/256x256.png'),
+    path.join(__dirname, '../build/icon.png'),
+    path.join(__dirname, '../build/icon.ico'),
+    path.join(__dirname, '../../apps/desktop/build/icon.png'),
+    path.join(__dirname, '../../apps/desktop/build/icon.ico'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // 4. Main Window Creation & Hardened Browser Settings (Sections 4, 29, 30)
 // ---------------------------------------------------------------------------
 async function createMainWindow(): Promise<BrowserWindow> {
   const config = loadDesktopConfig();
   const bounds = config.windowBounds;
+  const iconPath = getWindowIconPath();
 
   const win = new BrowserWindow({
     width: bounds?.width ?? 1200,
@@ -268,6 +287,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
     minWidth: 800,
     minHeight: 600,
     title: 'OpenOb',
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -405,6 +425,11 @@ function registerIpcHandlers(): void {
 // 6. Application Startup & Shutdown (Sections 35, 36)
 // ---------------------------------------------------------------------------
 void app.whenReady().then(async () => {
+  // Set explicit Windows Application User Model ID for taskbar grouping & icon
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.openob.app');
+  }
+
   registerIpcHandlers();
 
   // 1. Determine initial vault directory
