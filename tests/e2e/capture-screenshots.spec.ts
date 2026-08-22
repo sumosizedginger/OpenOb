@@ -93,10 +93,24 @@ interface VaultSnapshot {
     await page.keyboard.press('Control+S');
     await page.waitForTimeout(600);
 
+    const conflictModal = page.locator('.modal-overlay.conflict-modal');
+    if (await conflictModal.isVisible()) {
+      const resolveBtn = conflictModal.locator('button').first();
+      if (await resolveBtn.isVisible()) {
+        await resolveBtn.click();
+      }
+    }
+
     // 1. Capture Flagship Screen: Active Note in Split View
     await page.screenshot({ path: path.join(screenshotsDir, '01-flagship-editor-split.png') });
 
     // 2. Capture Single Editor View
+    if (await conflictModal.isVisible()) {
+      const resolveBtn = conflictModal.locator('button').first();
+      if (await resolveBtn.isVisible()) {
+        await resolveBtn.click();
+      }
+    }
     await page.locator('[data-testid="view-mode-menu-trigger"]').click();
     await page.locator('[data-testid="view-mode-editor"]').click();
     await page.waitForTimeout(300);

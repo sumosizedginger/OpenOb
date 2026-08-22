@@ -9,9 +9,15 @@
     "dist/**/*",
     "package.json",
     "node_modules/**/*",
-    "../../apps/web/dist/**/*",
     "../../apps/gateway/dist/**/*",
     "../../packages/*/dist/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "../web/dist",
+      "to": "web",
+      "filter": ["**/*"]
+    }
   ],
   "win": {
     "icon": "build/icon.ico",

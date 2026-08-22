@@ -97,16 +97,33 @@ function getSecretsPath(): string {
 }
 
 function getWebDistPath(): string {
-  // Try relative monorepo path first, then app packaged path
-  const localDist = path.resolve(__dirname, '../../../apps/web/dist');
-  if (fs.existsSync(localDist)) {
-    return localDist;
+  if (app.isPackaged) {
+    const packagedWeb = path.join(process.resourcesPath, 'web');
+    if (!fs.existsSync(path.join(packagedWeb, 'index.html'))) {
+      throw new Error(
+        `OpenOb web application assets are missing from the desktop package (checked "${packagedWeb}").`
+      );
+    }
+    return packagedWeb;
   }
-  const appWebDist = path.resolve(__dirname, '../web');
-  if (fs.existsSync(appWebDist)) {
-    return appWebDist;
+
+  // Development mode: resolve monorepo apps/web/dist
+  const devPaths = [
+    path.resolve(__dirname, '../../../apps/web/dist'),
+    path.resolve(__dirname, '../../apps/web/dist'),
+    path.resolve(process.cwd(), 'apps/web/dist'),
+    path.join(process.resourcesPath || '', 'web'),
+  ];
+
+  for (const devPath of devPaths) {
+    if (fs.existsSync(path.join(devPath, 'index.html'))) {
+      return devPath;
+    }
   }
-  return path.resolve(process.cwd(), 'apps/web/dist');
+
+  throw new Error(
+    `OpenOb web application assets not found in development paths. Please run 'npm run build:web'.`
+  );
 }
 
 /**

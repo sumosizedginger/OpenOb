@@ -265,7 +265,19 @@ export function createGatewayServer(options: GatewayOptions): http.Server {
           }
           return;
         }
+
+        // Static file requested but not found in webDistDir
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('404 Not Found');
+        return;
       }
+
+      // Boundary traversal attempt
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('403 Forbidden');
+      return;
     }
 
     // 3. Authentication check for /api/v1/* routes
