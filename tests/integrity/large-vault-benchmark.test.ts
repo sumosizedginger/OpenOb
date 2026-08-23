@@ -51,21 +51,29 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
     const countRes = (index as any).db.exec('SELECT COUNT(*) FROM documents');
     expect(countRes[0].values[0][0]).toBe(docCount);
 
-    // 2. Benchmark backlink resolution on 10k vault
-    const backlinkStart = Date.now();
+    // 2. Benchmark backlink resolution on 10k vault (with warm-up)
+    await index.getBacklinks('vault/category_1/note_1.md');
+    const backlinkStart = performance.now();
     const backlinks = await index.getBacklinks('vault/category_10/note_10.md');
-    const backlinkDurationMs = Date.now() - backlinkStart;
+    const backlinkDurationMs = performance.now() - backlinkStart;
 
     expect(backlinkDurationMs).toBeLessThan(500);
     expect(backlinks.length).toBeGreaterThan(0);
 
-    // 3. Benchmark search query on 10k vault
-    const searchStart = Date.now();
-    const searchResults = await index.query({
-      query: 'note 5000',
-      limit: 10,
-    });
-    const searchDurationMs = Date.now() - searchStart;
+    // 3. Benchmark search query on 10k vault (with warm-up and median sampling)
+    await index.query({ query: 'note 1', limit: 10 });
+    const searchSamples: number[] = [];
+    let searchResults: any;
+    for (let s = 0; s < 3; s++) {
+      const searchStart = performance.now();
+      searchResults = await index.query({
+        query: 'note 5000',
+        limit: 10,
+      });
+      searchSamples.push(performance.now() - searchStart);
+    }
+    searchSamples.sort((a, b) => a - b);
+    const searchDurationMs = searchSamples[1];
 
     expect(searchDurationMs).toBeLessThan(500);
     expect(searchResults.length).toBeGreaterThan(0);

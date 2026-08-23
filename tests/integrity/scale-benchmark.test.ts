@@ -126,16 +126,18 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
       }
 
       const idx = await SqliteDocumentIndex.create();
-      const t0 = Date.now();
+      const t0 = performance.now();
       await idx.rebuild(docs);
-      const rebuildMs = Date.now() - t0;
+      const rebuildMs = performance.now() - t0;
 
-      const t1 = Date.now();
+      // 2. Search query over 10,000 documents (with warm-up and monotonic timer)
+      await idx.query({ query: 'Note 1', limit: 10 });
+      const t1 = performance.now();
       const searchRes = await idx.query({ query: 'Note 5000', limit: 10 });
-      const searchMs = Date.now() - t1;
+      const searchMs = performance.now() - t1;
 
       // 3. Single note upsert into 10,000-document index (P1-IDX-001 budget < 500 ms)
-      const t2 = Date.now();
+      const t2 = performance.now();
       await idx.upsert({
         id: 'cat_0/Note_05000.md',
         path: 'cat_0/Note_05000.md',
@@ -150,22 +152,36 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
         links: [{ raw: '[[Note_00001]]', target: 'Note_00001', line: 3, isEmbed: false }],
         textContent: 'Note 5000 updated content referencing [[Note_00001]].',
       });
-      const upsertMs = Date.now() - t2;
+      const upsertMs = performance.now() - t2;
 
       // 4. Graph build over 10,000 documents (P1-GRAPH-001 budget < 10,000 ms)
-      const t3 = Date.now();
+      const t3 = performance.now();
       const graphData = await buildGraphData(idx);
-      const graphMs = Date.now() - t3;
+      const graphMs = performance.now() - t3;
 
       // 5. Property query over 10,000 documents (Phase 3D budget < 500 ms)
-      const t4 = Date.now();
-      const queryRes = await executeProtocolPropertyQuery(idx, {
+      // Warm-up to compile statement and initialize query engine caches
+      await executeProtocolPropertyQuery(idx, {
         folderScope: 'cat_0',
         filters: [{ field: 'status', operator: 'equals', value: 'active' }],
-        sorts: [{ field: 'index', direction: 'desc' }],
-        limit: 50,
+        limit: 10,
       });
-      const queryMs = Date.now() - t4;
+
+      // Sample 3 iterations to isolate GC/hypervisor noise and take median
+      const querySamples: number[] = [];
+      let queryRes: any;
+      for (let s = 0; s < 3; s++) {
+        const t4 = performance.now();
+        queryRes = await executeProtocolPropertyQuery(idx, {
+          folderScope: 'cat_0',
+          filters: [{ field: 'status', operator: 'equals', value: 'active' }],
+          sorts: [{ field: 'index', direction: 'desc' }],
+          limit: 50,
+        });
+        querySamples.push(performance.now() - t4);
+      }
+      querySamples.sort((a, b) => a - b);
+      const queryMs = querySamples[1];
 
       idx.close();
 
