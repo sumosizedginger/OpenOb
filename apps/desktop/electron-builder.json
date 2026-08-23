@@ -49,7 +49,7 @@
   },
   "linux": {
     "icon": "build/icons",
-    "target": ["AppImage", "tar.gz"],
+    "target": ["AppImage", "zip", "tar.gz"],
     "category": "Utility"
   }
 }
