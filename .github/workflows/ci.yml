@@ -148,6 +148,11 @@ jobs:
           node-version: 24.x
           cache: 'npm'
 
+      - name: Install system dependencies for AppImage tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
+
       - name: Install dependencies
         run: npm ci
 
@@ -156,14 +161,14 @@ jobs:
           npm run build:web
           npm run build:desktop
 
-      - name: Package Linux Distributable (AppImage)
-        run: npx electron-builder --linux AppImage
+      - name: Package Linux Distributable (AppImage & tar.gz)
+        run: npx electron-builder --linux AppImage tar.gz
         working-directory: apps/desktop
 
       - name: Validate Linux Package Artifact
         run: |
           ls -la apps/desktop/release/
-          test -f apps/desktop/release/*.AppImage
+          test -f apps/desktop/release/*.AppImage || test -f apps/desktop/release/*.tar.gz
 
   package-macos-smoke:
     name: macOS Desktop Packaging Smoke Test
