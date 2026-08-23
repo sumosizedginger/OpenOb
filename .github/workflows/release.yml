@@ -39,7 +39,7 @@ jobs:
           Get-Content SHA256SUMS.txt
 
       - name: Upload Release Staging Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openob-release-windows
           path: |
