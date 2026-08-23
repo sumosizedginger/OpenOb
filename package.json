@@ -29,6 +29,8 @@
     "mcp": "node apps/gateway/dist/bin/mcp.js",
     "typecheck": "tsc --build",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude=\"tests/integrity/*benchmark*.test.ts\"",
+    "test:perf": "vitest run tests/integrity/scale-benchmark.test.ts tests/integrity/large-vault-benchmark.test.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test --grep-invert \"@electron|@visual\"",
     "test:e2e:electron": "playwright test --grep \"@electron\" --grep-invert \"@visual\"",

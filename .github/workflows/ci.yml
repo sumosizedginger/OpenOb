@@ -56,8 +56,11 @@ jobs:
           node apps/gateway/dist/bin/cli.js --help
           node apps/gateway/dist/bin/mcp.js --help
 
-      - name: Run Test Suites
-        run: npm test
+      - name: Run Unit & Integrity Test Suites
+        run: npm run test:unit
+
+      - name: Run Scale & Large Vault Performance Benchmarks (Isolated)
+        run: npm run test:perf
 
   windows-gateway-runtime:
     name: Windows Node 24 Gateway Runtime Tests
@@ -148,11 +151,6 @@ jobs:
           node-version: 24.x
           cache: 'npm'
 
-      - name: Install system dependencies for AppImage tool
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
-
       - name: Install dependencies
         run: npm ci
 
@@ -161,11 +159,13 @@ jobs:
           npm run build:web
           npm run build:desktop
 
-      - name: Package Linux Distributable (AppImage & tar.gz)
-        run: npx electron-builder --linux AppImage tar.gz
+      - name: Package Linux Distributables (AppImage & tar.gz)
+        run: npx electron-builder --linux
         working-directory: apps/desktop
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
 
-      - name: Validate Linux Package Artifact
+      - name: Validate Linux Package Artifacts
         run: |
           ls -la apps/desktop/release/
           test -f apps/desktop/release/*.AppImage || test -f apps/desktop/release/*.tar.gz
