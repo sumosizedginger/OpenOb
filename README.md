@@ -41,7 +41,7 @@ Experience OpenOb directly in modern web browsers (Chrome, Edge) using the Origi
 
 - **Windows (x64)**: **Release-Verified**. Full release packaging gate validated (NSIS Setup installer and Portable executable). Pre-release builds are currently unsigned; Windows Defender SmartScreen may display an unknown publisher notification.
 - **macOS**: **CI Build-Verified**. Packaged as DMG and ZIP; unsigned and unnotarized in developer preview.
-- **Linux**: **CI Build-Verified**. Packaged as AppImage; distribution-ready developer build.
+- **Linux**: **CI Build-Verified**. Packaged as tar.gz and ZIP distributables (AppImage target configured); distribution-ready developer build.
 
 ---
 
