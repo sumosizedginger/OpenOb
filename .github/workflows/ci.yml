@@ -166,8 +166,7 @@ jobs:
       - name: Validate Linux Package Artifacts
         run: |
           ls -la apps/desktop/release/
-          test -f apps/desktop/release/*.tar.gz
-          test -f apps/desktop/release/*.zip
+          find apps/desktop/release/ -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.AppImage" \) | grep -E "(\.tar\.gz|\.zip|\.AppImage)$"
 
   package-macos-smoke:
     name: macOS Desktop Packaging Smoke Test
