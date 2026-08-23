@@ -48,7 +48,7 @@ test.describe(
       // Verify Brand Mark in Welcome Modal
       const brandMark = page.locator('.welcome-brand-mark');
       await expect(brandMark).toBeVisible();
-      expect(await brandMark.getAttribute('src')).toBe('/brand/openob-mark.png');
+      expect(await brandMark.getAttribute('src')).toMatch(/brand\/openob-mark\.png$/);
 
       // Verify Title and Description
       const welcomeTitle = page.locator('.welcome-title');

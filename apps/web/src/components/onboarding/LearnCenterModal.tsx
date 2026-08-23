@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { TourChapter } from '../../onboarding/types.js';
 import { LEARN_CHAPTERS, QUICK_TOUR_CHAPTER } from '../../onboarding/chapters.js';
 import { CheckCircle, Clock, RotateCcw, Sparkles, X, Play, ArrowRight } from 'lucide-react';
+import { getPublicAssetUrl } from '../../utils/assets.js';
 
 interface LearnCenterModalProps {
   isOpen: boolean;
@@ -63,7 +64,7 @@ export const LearnCenterModal: React.FC<LearnCenterModalProps> = ({
         <div className="learn-center-header">
           <div className="learn-center-brand">
             <img
-              src="/brand/openob-mark.png"
+              src={getPublicAssetUrl('brand/openob-mark.png')}
               alt="OpenOb Brand Mark"
               className="learn-center-logo"
               width={36}

@@ -95,7 +95,7 @@ describe('OpenOb Canonical Brand Mark Integration (Section 21)', () => {
 
   it('5. verifies App.tsx uses canonical OpenOb brand mark image instead of ShieldCheck', () => {
     const appTsx = fs.readFileSync(path.join(rootDir, 'apps/web/src/App.tsx'), 'utf8');
-    expect(appTsx).toContain('/brand/openob-mark.png');
+    expect(appTsx).toContain('brand/openob-mark.png');
     expect(appTsx).toContain('alt="OpenOb logo — jackass skull within a broken gold sigil"');
     expect(appTsx).not.toContain('<ShieldCheck');
   });

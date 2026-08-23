@@ -38,6 +38,7 @@ import {
 import { PluginManagerModal } from './components/plugins/PluginManagerModal.js';
 import { GatewayConnectModal } from './components/GatewayConnectModal.js';
 import { WelcomeModal } from './components/onboarding/WelcomeModal.js';
+import { getPublicAssetUrl } from './utils/assets.js';
 import { TourOverlay } from './components/onboarding/TourOverlay.js';
 import { LearnCenterModal } from './components/onboarding/LearnCenterModal.js';
 import { KeyboardShortcutsModal } from './components/onboarding/KeyboardShortcutsModal.js';
@@ -444,7 +445,7 @@ export const App: React.FC = () => {
           </button>
           <div className="app-logo" data-tour="app-logo">
             <img
-              src="/brand/openob-mark.png"
+              src={getPublicAssetUrl('brand/openob-mark.png')}
               alt="OpenOb logo — jackass skull within a broken gold sigil"
               className="logo-icon"
               width={22}

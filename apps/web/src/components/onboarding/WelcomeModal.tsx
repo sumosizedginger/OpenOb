@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { ArrowRight, X } from 'lucide-react';
+import { getPublicAssetUrl } from '../../utils/assets.js';
 
 interface WelcomeModalProps {
   isOpen: boolean;
@@ -47,7 +48,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onStartTour,
         <div className="welcome-modal-content">
           <div className="welcome-brand-header">
             <img
-              src="/brand/openob-mark.png"
+              src={getPublicAssetUrl('brand/openob-mark.png')}
               alt="OpenOb logo — jackass skull within a broken gold sigil"
               className="welcome-brand-mark"
               width={56}
