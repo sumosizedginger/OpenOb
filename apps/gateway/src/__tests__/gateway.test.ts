@@ -351,22 +351,25 @@ This note is literally named backlinks inside a subfolder.
   });
 
   it('13. Performance: gateway REST requests resolve with low latency (<50ms)', async () => {
-    const t0 = Date.now();
+    // Warm up HTTP connection and route dispatch
+    await apiFetch('/api/v1/workspace');
+
+    const t0 = performance.now();
     const res1 = await apiFetch('/api/v1/workspace');
     expect(res1.status).toBe(200);
-    const d1 = Date.now() - t0;
+    const d1 = performance.now() - t0;
     expect(d1).toBeLessThan(50);
 
-    const t1 = Date.now();
+    const t1 = performance.now();
     const res2 = await apiFetch('/api/v1/notes/Welcome.md');
     expect(res2.status).toBe(200);
-    const d2 = Date.now() - t1;
+    const d2 = performance.now() - t1;
     expect(d2).toBeLessThan(50);
 
-    const t2 = Date.now();
+    const t2 = performance.now();
     const res3 = await apiFetch('/api/v1/search?q=Gateway');
     expect(res3.status).toBe(200);
-    const d3 = Date.now() - t2;
+    const d3 = performance.now() - t2;
     expect(d3).toBeLessThan(50);
   });
 

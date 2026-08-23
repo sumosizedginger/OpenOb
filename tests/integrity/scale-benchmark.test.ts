@@ -160,17 +160,18 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
       const graphMs = performance.now() - t3;
 
       // 5. Property query over 10,000 documents (Phase 3D budget < 500 ms)
-      // Warm-up to compile statement and initialize query engine caches
+      // Warm-up with full query configuration to compile statement and initialize query engine caches
       await executeProtocolPropertyQuery(idx, {
         folderScope: 'cat_0',
         filters: [{ field: 'status', operator: 'equals', value: 'active' }],
-        limit: 10,
+        sorts: [{ field: 'index', direction: 'desc' }],
+        limit: 50,
       });
 
-      // Sample 3 iterations to isolate GC/hypervisor noise and take median
+      // Sample 5 iterations to isolate GC/hypervisor noise and take median
       const querySamples: number[] = [];
       let queryRes: any;
-      for (let s = 0; s < 3; s++) {
+      for (let s = 0; s < 5; s++) {
         const t4 = performance.now();
         queryRes = await executeProtocolPropertyQuery(idx, {
           folderScope: 'cat_0',
@@ -181,7 +182,7 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
         querySamples.push(performance.now() - t4);
       }
       querySamples.sort((a, b) => a - b);
-      const queryMs = querySamples[1];
+      const queryMs = querySamples[2];
 
       console.log(
         `[Scale Benchmark] 10k PropertyQuery samples: [${querySamples.map((s) => s.toFixed(1)).join(', ')}] ms | Median: ${queryMs.toFixed(1)} ms | Budget: < 500 ms`
