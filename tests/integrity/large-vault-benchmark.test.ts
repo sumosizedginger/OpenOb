@@ -75,6 +75,10 @@ describe('Phase 3 Performance Gate: 10,000-Note Vault Benchmark (F-025)', () => 
     searchSamples.sort((a, b) => a - b);
     const searchDurationMs = searchSamples[1];
 
+    console.log(
+      `[Large Vault Benchmark] 10k Search samples: [${searchSamples.map((s) => s.toFixed(1)).join(', ')}] ms | Median: ${searchDurationMs.toFixed(1)} ms | Budget: < 500 ms`
+    );
+
     expect(searchDurationMs).toBeLessThan(500);
     expect(searchResults.length).toBeGreaterThan(0);
     expect(searchResults[0].title).toContain('5000');

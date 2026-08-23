@@ -183,6 +183,10 @@ describe('Promoted Scale Benchmark (W0-BASELINE-001 / P1-SCALE-001)', () => {
       querySamples.sort((a, b) => a - b);
       const queryMs = querySamples[1];
 
+      console.log(
+        `[Scale Benchmark] 10k PropertyQuery samples: [${querySamples.map((s) => s.toFixed(1)).join(', ')}] ms | Median: ${queryMs.toFixed(1)} ms | Budget: < 500 ms`
+      );
+
       idx.close();
 
       expect(rebuildMs).toBeLessThan(5000);
