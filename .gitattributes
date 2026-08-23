@@ -1,0 +1,18 @@
+# OpenOb Git Attributes Configuration
+# Enforce deterministic LF line endings across all platforms (Windows, macOS, Linux)
+# Prevents format-check failures on clean Windows clones with core.autocrlf=true
+
+* text=auto eol=lf
+
+# Explicit binary assets (prevent any line-ending transformations or corruption)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.zip binary
+*.tar.gz binary
+*.exe binary
+*.pdf binary
+*.wasm binary
