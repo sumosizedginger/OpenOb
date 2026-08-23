@@ -11,7 +11,7 @@
     "apps/*"
   ],
   "engines": {
-    "node": ">=20 <23"
+    "node": ">=22 <=24"
   },
   "scripts": {
     "build": "npm run build --workspace=apps/gateway && npm run build --workspace=apps/web && npm run build --workspace=apps/desktop",

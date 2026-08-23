@@ -29,7 +29,7 @@
 
 ### Prerequisites
 
-- **Node.js**: `>= 20.x < 23.x`
+- **Node.js**: `>= 22.x <= 24.x` (Node 24 LTS recommended)
 - **npm**: `>= 10.x`
 - **Python**: `>= 3.10` (for brand asset generation)
 
