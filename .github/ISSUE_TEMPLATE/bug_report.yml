@@ -1,0 +1,65 @@
+name: Bug Report
+description: Report a defect or unexpected behavior in OpenOb
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please ensure you are not submitting security vulnerabilities here; report vulnerabilities privately via the [Security tab](https://github.com/sumosizedginger/OpenOb/security).
+  - type: input
+    id: version
+    attributes:
+      label: OpenOb Version / Commit SHA
+      description: What version or commit of OpenOb are you running?
+      placeholder: 'e.g. main @ bbfcd69'
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What platform are you running OpenOb on?
+      options:
+        - Windows 11 / 10
+        - macOS
+        - Linux
+        - Web Browser (GitHub Pages / Local)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Open vault '...'
+        2. Create note '...'
+        3. Perform action '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? (Include error messages or stack traces if available)
+    validations:
+      required: true
+  - type: dropdown
+    id: data_loss
+    attributes:
+      label: Data Safety Impact
+      description: Did this issue cause data corruption, stale state, or loss of notes?
+      options:
+        - None / UI glitch only
+        - Temporary state discrepancy (recovers on restart)
+        - Potential or observed note data loss / corruption
+    validations:
+      required: true

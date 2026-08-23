@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build & Verify Windows Release Artifacts
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Desktop Release Verification Gate
+        run: npm run verify:desktop:release
+
+      - name: Generate SHA-256 Checksums
+        shell: pwsh
+        run: |
+          cd apps/desktop/release
+          Get-FileHash *.exe | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: Upload Release Staging Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openob-release-windows
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/release-manifest.json
+            apps/desktop/release/SHA256SUMS.txt
+          retention-days: 7
+
+  publish:
+    name: Publish Official GitHub Release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    # STRICT SAFETY: Only execute publication when triggered by a real pushed git tag v*
+    # Manual workflow_dispatch executions terminate safely after build-windows validation (dry run).
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: openob-release-windows
+          path: release-artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release-artifacts/*.exe \
+            release-artifacts/release-manifest.json \
+            release-artifacts/SHA256SUMS.txt \
+            --title "OpenOb ${{ github.ref_name }}" \
+            --generate-notes \
+            --draft=false \
+            --prerelease=true
