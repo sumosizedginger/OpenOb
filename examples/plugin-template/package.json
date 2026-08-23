@@ -1,6 +1,7 @@
 {
   "name": "example-openob-plugin",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Example developer template for OpenOb plugins (Phase 3H SDK)",
   "type": "module",
   "main": "dist/index.js",

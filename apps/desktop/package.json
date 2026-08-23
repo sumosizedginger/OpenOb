@@ -2,6 +2,7 @@
   "name": "@okw/desktop-app",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "OpenOb Electron Desktop Application",
   "type": "module",
   "main": "dist/main.cjs",
