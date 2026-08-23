@@ -54,7 +54,8 @@ async function main() {
 
   if (help) {
     process.stdout.write(MCP_HELP_TEXT);
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // Diagnostic logs strictly go to stderr so stdout remains 100% pure JSON-RPC

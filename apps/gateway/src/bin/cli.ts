@@ -38,10 +38,10 @@ export async function runCliProcess(argv: string[] = process.argv.slice(2)): Pro
 
   if (result.exitCode !== 0) {
     process.stderr.write(`${result.output}\n`);
-    process.exit(result.exitCode);
+    process.exitCode = result.exitCode;
   } else {
     process.stdout.write(`${result.output}\n`);
-    process.exit(0);
+    process.exitCode = 0;
   }
 }
 
@@ -51,6 +51,6 @@ if (
 ) {
   runCliProcess().catch((err) => {
     process.stderr.write(`Fatal error: ${err?.message || String(err)}\n`);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }

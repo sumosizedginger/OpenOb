@@ -113,7 +113,8 @@ export async function runGatewayProcess(argv: string[] = process.argv.slice(2)):
 
   if (options.showHelp) {
     process.stdout.write(GATEWAY_HELP_TEXT);
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   // Validate host loopback binding
